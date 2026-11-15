@@ -1,0 +1,10 @@
+[
+  { "fn": "link", "args": [3, 4] },
+  { "fn": "walkPeers", "args": [5] },
+  { "fn": "makeRing", "args": [7] },
+  { "fn": "ringSum", "args": [10] },
+  { "fn": "selfLoop", "args": [9] },
+  { "fn": "walkPeers", "args": [3] },
+  { "fn": "ringSum", "args": [3] },
+  { "fn": "pair", "args": [] }
+]

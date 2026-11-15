@@ -1,0 +1,19 @@
+[
+  { "fn": "keep", "args": [10] },
+  { "fn": "readKept", "args": [] },
+  { "fn": "churn", "args": [4000, 16] },
+  { "fn": "readKept", "args": [] },
+  { "fn": "keepHandler", "args": [21] },
+  { "fn": "chains", "args": [3000, 20] },
+  { "fn": "callHandler", "args": [] },
+  { "fn": "keep", "args": [5] },
+  { "fn": "grow", "args": [20000] },
+  { "fn": "readKept", "args": [] },
+  { "fn": "makeList", "args": [5] },
+  { "fn": "churn", "args": [3000, 12] },
+  { "fn": "fill", "args": [{ "items": [], "total": 0 }, 6] },
+  { "fn": "outer", "args": [500] },
+  { "fn": "readKept", "args": [] },
+  { "fn": "callHandler", "args": [] },
+  { "fn": "logged", "args": [] }
+]

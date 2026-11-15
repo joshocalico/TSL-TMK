@@ -1,0 +1,20 @@
+[
+  { "fn": "areaOf", "args": [0] },
+  { "fn": "areaOf", "args": [1] },
+  { "fn": "areaOf", "args": [2] },
+  { "fn": "areaOf", "args": [3] },
+  { "fn": "weightOf", "args": [0] },
+  { "fn": "weightOf", "args": [2] },
+  { "fn": "weightOf", "args": [3] },
+  { "fn": "listOf", "args": [0] },
+  { "fn": "listOf", "args": [9] },
+  { "fn": "listOf", "args": [400] },
+  { "fn": "madeSoFar", "args": [0] },
+  { "fn": "madeSoFar", "args": [5] },
+  { "fn": "pairs", "args": [1] },
+  { "fn": "pairs", "args": [10] },
+  { "fn": "pairs", "args": [1000] },
+  { "fn": "walkDown", "args": [0] },
+  { "fn": "walkDown", "args": [7] },
+  { "fn": "walkDown", "args": [300] }
+]

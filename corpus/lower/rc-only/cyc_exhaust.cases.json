@@ -1,0 +1,5 @@
+[
+  { "fn": "largeRings", "args": [40, 6000], "value": 820 },
+  { "fn": "forgotten", "args": [40], "value": 176740 },
+  { "fn": "tooMuchLive", "args": [1000000], "trap": 14 }
+]

@@ -1,0 +1,5 @@
+{
+  "memory": "leak",
+  "noStd": true,
+  "unsafeModules": ["pool.ts", "leak_pages.ts"]
+}

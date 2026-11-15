@@ -1,0 +1,22 @@
+[
+  { "fn": "twoCounters", "args": [5] },
+  { "fn": "curried", "args": [2, 3.5] },
+  { "fn": "composed", "args": [4] },
+  { "fn": "sharedState", "args": [3] },
+  { "fn": "perIteration", "args": [4] },
+  { "fn": "loopVarMutatedInBody", "args": [] },
+  { "fn": "closureMutatesLoopVar", "args": [] },
+  { "fn": "kept", "args": [3] },
+  { "fn": "kept", "args": [1] },
+  { "fn": "recursiveWithCallback", "args": [6] },
+  { "fn": "recursiveReturned", "args": [6] },
+  { "fn": "viaClassField", "args": [2, 5] },
+  { "fn": "namedAsValue", "args": [5] },
+  { "fn": "dynamicCallback", "args": [[1, 2], true] },
+  { "fn": "dynamicCallback", "args": [[1, 2], false] },
+  { "fn": "returnsClosureToCaller", "args": [1] },
+  { "fn": "optionalCallback", "args": [true] },
+  { "fn": "optionalCallback", "args": [false] },
+  { "fn": "optionalCalls", "args": [true] },
+  { "fn": "optionalCalls", "args": [false] }
+]

@@ -1,0 +1,9 @@
+[
+  { "fn": "recall", "args": [] },
+  { "fn": "remember", "args": [5] },
+  { "fn": "recall", "args": [] },
+  { "fn": "grow", "args": [1] },
+  { "fn": "grow", "args": [2] },
+  { "fn": "scalarState", "args": [] },
+  { "fn": "scalarState", "args": [] }
+]

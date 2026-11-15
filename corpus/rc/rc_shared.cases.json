@@ -1,0 +1,6 @@
+[
+  { "fn": "swap", "args": [3000], "expect": 90030000 },
+  { "fn": "swaps", "args": [20, 3000], "expect": 90030000 },
+  { "fn": "mixed", "args": [100], "expect": "54550n" },
+  { "fn": "mixed", "args": [1500], "expect": "12368250n" }
+]

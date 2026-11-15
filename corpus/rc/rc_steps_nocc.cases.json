@@ -1,0 +1,5 @@
+[
+  { "fn": "bigVector", "args": [1000000], "rcOnly": true, "expect": 320999970 },
+  { "fn": "leavesDrop", "args": [1000], "rcOnly": true, "expect": 163201970 },
+  { "fn": "budgets", "args": [100], "rcOnly": true, "expect": 51015 }
+]

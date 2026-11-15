@@ -1,0 +1,4 @@
+[
+  { "fn": "build", "args": [10], "expect": 451 },
+  { "fn": "build", "args": [1000], "expect": 4995001 }
+]

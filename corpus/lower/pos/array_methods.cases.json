@@ -1,0 +1,27 @@
+[
+  { "fn": "mapFilter", "args": [[1, 2, 3]] },
+  { "fn": "reduced", "args": [[1, 2, 3]] },
+  { "fn": "reducedNoInit", "args": [[2, 3, 4]] },
+  { "fn": "typedReduce", "args": [{ "u8s": [200, 200] }] },
+  {
+    "fn": "finder",
+    "args": [
+      [
+        { "n": 1, "w": 5 },
+        { "n": 2, "w": 6 }
+      ],
+      2
+    ]
+  },
+  { "fn": "finder", "args": [[{ "n": 1, "w": 5 }], 3] },
+  { "fn": "forEachIdx", "args": [{ "i16s": [1, 2, 3] }] },
+  { "fn": "fromLength", "args": [4] },
+  { "fn": "fromLength", "args": [0] },
+  { "fn": "fromCapture", "args": [2] },
+  { "fn": "ofArray", "args": [[1.5, 2]] },
+  { "fn": "ofTyped", "args": [{ "u8s": [1, 0, 2, 9, 4] }] },
+  { "fn": "someEvery", "args": [[1, 2, 3]] },
+  { "fn": "typedMap", "args": [{ "u8s": [1, 10] }] },
+  { "fn": "nanIncludes", "args": [{ "f64s": ["NaN"] }, { "f64": "NaN" }] },
+  { "fn": "sliced", "args": [[1, 2, 3, 4], 1, -1] }
+]

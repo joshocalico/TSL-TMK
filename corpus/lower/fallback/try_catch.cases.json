@@ -1,0 +1,5 @@
+[
+  { "fn": "guarded", "args": [1] },
+  { "fn": "guarded", "args": [0] },
+  { "fn": "thrower", "args": [1] }
+]

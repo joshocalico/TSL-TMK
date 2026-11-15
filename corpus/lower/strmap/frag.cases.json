@@ -1,0 +1,8 @@
+[
+  { "fn": "churn", "args": [100000, 0, 64] },
+  { "fn": "churn", "args": [20000, 1, 64] },
+  { "fn": "churn", "args": [8000, 2, 32] },
+  { "fn": "churn", "args": [2000, 3, 8] },
+  { "fn": "shifting", "args": [8000] },
+  { "fn": "concatWindow", "args": [20000] }
+]

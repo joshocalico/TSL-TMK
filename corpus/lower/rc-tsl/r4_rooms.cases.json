@@ -1,0 +1,6 @@
+[
+  { "fn": "holesAfterReuse", "args": [2000], "value": 130035000 },
+  { "fn": "leavesAndPairs", "args": [3000], "value": 248418000 },
+  { "fn": "numbersGrown", "args": [2000], "value": -134740432 },
+  { "fn": "smallObjects", "args": [3000], "value": 132188064 }
+]

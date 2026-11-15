@@ -1,0 +1,3 @@
+{
+  "unsafeModules": ["alloc.ts"]
+}

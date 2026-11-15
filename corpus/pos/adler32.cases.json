@@ -1,0 +1,4 @@
+[
+  { "fn": "adler32", "args": [{ "bytes": "" }], "expect": 1 },
+  { "fn": "adler32", "args": [{ "bytes": "57696b697065646961" }], "expect": 300286872 }
+]

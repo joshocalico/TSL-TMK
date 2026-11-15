@@ -1,0 +1,29 @@
+[
+  {
+    "fn": "anagrams",
+    "args": [["listen", "silent", "enlist", "google", "gogole", "cat", "act", "tac", "dog"]]
+  },
+  { "fn": "levenshtein", "args": ["kitten", "sitting"] },
+  { "fn": "levenshtein", "args": ["", "日本語"] },
+  { "fn": "roman", "args": [1994] },
+  { "fn": "roman", "args": [3888] },
+  { "fn": "base64", "args": ["Hello, World!"] },
+  { "fn": "base64", "args": ["ab"] },
+  { "fn": "csv", "args": ["name,age\n\"Smith, J\",42\nanna,7\n\n"] },
+  { "fn": "capitalize", "args": ["hello wORLD  éa ßx"] },
+  { "fn": "histogram", "args": ["hello 😀😀"] },
+  { "fn": "inventory", "args": [] },
+  { "fn": "memoFib", "args": [70] },
+  {
+    "fn": "topoSort",
+    "args": [
+      [
+        ["a", "b"],
+        ["b", "c"],
+        ["a", "c"],
+        ["d", "a"]
+      ]
+    ]
+  },
+  { "fn": "trie", "args": [["tea", "ten", "to", "t", "日本", "日"]] }
+]

@@ -1,0 +1,6 @@
+[
+  { "fn": "lengths", "args": [4000], "value": 162301625 },
+  { "fn": "literals", "args": [30000], "value": 450315000 },
+  { "fn": "grownAndCut", "args": [3000], "value": 18357000 },
+  { "fn": "pushedLiterals", "args": [20000], "value": -677647303 }
+]

@@ -1,0 +1,9 @@
+[
+  { "fn": "aHelperOverALocal", "args": [100], "expect": 200 },
+  { "fn": "givenByTheCaller", "args": [100], "expect": 100 },
+  { "fn": "assignedByHand", "args": [], "expect": 2 },
+  { "fn": "attachedLater", "args": [], "expect": 7 },
+  { "fn": "aLocalHeapAndALocalVec", "args": [], "expect": false },
+  { "fn": "aViewHeld", "args": [], "expect": 3 },
+  { "fn": "aHolderCanAlsoHoldReferences", "args": [], "expect": 1 }
+]

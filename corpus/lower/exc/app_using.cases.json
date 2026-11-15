@@ -1,0 +1,74 @@
+[
+  {
+    "fn": "run",
+    "args": [5, false, false]
+  },
+  {
+    "fn": "run",
+    "args": [5, false, true]
+  },
+  {
+    "fn": "run",
+    "args": [5, true, false]
+  },
+  {
+    "fn": "run",
+    "args": [5, true, true]
+  },
+  {
+    "fn": "run",
+    "args": [1, false, false]
+  },
+  {
+    "fn": "run",
+    "args": [1, false, true]
+  },
+  {
+    "fn": "run",
+    "args": [1, true, false]
+  },
+  {
+    "fn": "run",
+    "args": [1, true, true]
+  },
+  {
+    "fn": "run",
+    "args": [-1, false, false]
+  },
+  {
+    "fn": "run",
+    "args": [-1, false, true]
+  },
+  {
+    "fn": "run",
+    "args": [-1, true, false]
+  },
+  {
+    "fn": "run",
+    "args": [-1, true, true]
+  },
+  {
+    "fn": "loop",
+    "args": [3]
+  },
+  {
+    "fn": "loop",
+    "args": [7]
+  },
+  {
+    "fn": "nullable",
+    "args": [0]
+  },
+  {
+    "fn": "nullable",
+    "args": [3]
+  },
+  {
+    "fn": "uncaught",
+    "args": [5]
+  },
+  {
+    "fn": "uncaught",
+    "args": [-2]
+  }
+]

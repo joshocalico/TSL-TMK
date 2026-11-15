@@ -1,0 +1,10 @@
+{
+  "unsafeModules": [
+    "pages.ts",
+    "alloc_heap.ts",
+    "gen_adversarial.ts",
+    "pagesrc_heap.ts",
+    "pagesrc_pool.ts",
+    "fnval_mem.ts"
+  ]
+}

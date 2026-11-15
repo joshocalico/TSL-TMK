@@ -1,0 +1,8 @@
+[
+  { "fn": "honest", "args": [] },
+  {
+    "fn": "forged",
+    "args": [],
+    "diverge": { "native": { "trap": 18 }, "v8": { "throw": "TypeError" } }
+  }
+]

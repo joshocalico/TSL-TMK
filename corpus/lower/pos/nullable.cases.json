@@ -1,0 +1,22 @@
+[
+  { "fn": "list", "args": [5] },
+  { "fn": "list", "args": [0] },
+  { "fn": "scalar", "args": [4] },
+  { "fn": "scalar", "args": [-1] },
+  { "fn": "coalesce", "args": [1] },
+  { "fn": "coalesce", "args": [6] },
+  { "fn": "coalesce", "args": [-3] },
+  { "fn": "byteOr", "args": [{ "u8s": [9, 0] }, 1] },
+  { "fn": "byteOr", "args": [{ "u8s": [9, 0] }, 2] },
+  { "fn": "byteOr", "args": [{ "u8s": [9, 0] }, -1] },
+  { "fn": "byteIs", "args": [{ "u8s": [9, 0] }, 1] },
+  { "fn": "byteIs", "args": [{ "u8s": [9, 0] }, 5] },
+  { "fn": "optional", "args": [{ "c": null }] },
+  { "fn": "optional", "args": [{ "a": 1, "b": { "u8s": [1, 2] }, "c": 3 }] },
+  { "fn": "truthiness", "args": [1] },
+  { "fn": "truthiness", "args": [-1] },
+  { "fn": "chain", "args": [1] },
+  { "fn": "chain", "args": [0] },
+  { "fn": "bang", "args": [1] },
+  { "fn": "bang", "args": [0], "lowered_trap": 6 }
+]

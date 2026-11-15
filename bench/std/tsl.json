@@ -1,0 +1,1 @@
+{ "unsafeModules": ["alloc_side.ts"] }

@@ -1,0 +1,31 @@
+[
+  { "fn": "boundaryWork", "args": [3000] },
+  { "fn": "makeBodies", "args": [3] },
+  {
+    "fn": "step",
+    "args": [
+      {
+        "pos": { "x": 1, "y": 0.001, "z": 0, "live": true, "hits": 0 },
+        "vel": { "x": 1, "y": -1, "z": 0.5, "live": true, "hits": 65 },
+        "mass": 2,
+        "asleep": false,
+        "bounced": false
+      },
+      0.01
+    ]
+  },
+  {
+    "fn": "energy",
+    "args": [
+      [
+        {
+          "pos": { "x": 0, "y": 0, "z": 0, "live": false, "hits": 0 },
+          "vel": { "x": 1, "y": 2, "z": 3, "live": false, "hits": 1 },
+          "mass": 2,
+          "asleep": false,
+          "bounced": true
+        }
+      ]
+    ]
+  }
+]

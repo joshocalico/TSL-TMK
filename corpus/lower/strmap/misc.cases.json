@@ -1,0 +1,24 @@
+[
+  { "fn": "lit", "args": [] },
+  { "fn": "disc", "args": ["x"] },
+  { "fn": "disc", "args": ["q"] },
+  { "fn": "words", "args": ["ab c def"] },
+  {
+    "fn": "sumMap",
+    "args": [
+      {
+        "map": [
+          [1, 2],
+          [3, 4.5]
+        ]
+      }
+    ]
+  },
+  { "fn": "nested", "args": ["z"] },
+  { "fn": "opt", "args": [] },
+  { "fn": "cmpNull", "args": [null] },
+  { "fn": "cmpNull", "args": [""] },
+  { "fn": "classTS", "args": [] },
+  { "fn": "objText", "args": [] },
+  { "fn": "mapText", "args": [] }
+]

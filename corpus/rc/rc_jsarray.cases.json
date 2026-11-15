@@ -1,0 +1,6 @@
+[
+  { "fn": "cuts", "args": [3000] },
+  { "fn": "keptLength", "args": [] },
+  { "fn": "holesAndNumbers", "args": [2000] },
+  { "fn": "maps", "args": [2000] }
+]

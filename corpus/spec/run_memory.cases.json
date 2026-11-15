@@ -1,0 +1,10 @@
+[
+  { "fn": "arm", "args": [], "expect": 117 },
+  { "fn": "fields", "args": [], "expect": true },
+  { "fn": "expire", "args": [], "expect": "10001n" },
+  { "fn": "stale", "args": [], "diverge5": { "native": "10n" } },
+  { "fn": "record", "args": [305419896], "expect": 31456 },
+  { "fn": "stackObject", "args": [3], "expect": 3 },
+  { "fn": "arena", "args": [{ "zeros": 1024 }, 10], "expect": 45 },
+  { "fn": "arena", "args": [{ "zeros": 8 }, 10], "trap": 2 }
+]

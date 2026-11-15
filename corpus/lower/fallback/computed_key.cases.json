@@ -1,0 +1,4 @@
+[
+  { "fn": "dynamic", "args": [{ "a": 1, "b": 2 }, "b"] },
+  { "fn": "record", "args": [4] }
+]

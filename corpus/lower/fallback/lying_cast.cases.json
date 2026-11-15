@@ -1,0 +1,5 @@
+[
+  { "fn": "lies", "args": [true] },
+  { "fn": "nullDropped", "args": [{ "a": 1 }] },
+  { "fn": "honest", "args": [true] }
+]

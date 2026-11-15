@@ -1,0 +1,17 @@
+[
+  { "fn": "buildMap", "args": [200000] },
+  { "fn": "dropMap", "args": [] },
+  { "fn": "allocAfter", "args": [1500000] },
+  { "fn": "buildMap", "args": [100000] },
+  { "fn": "clearMap", "args": [] },
+  { "fn": "allocAfter", "args": [800000] },
+  { "fn": "buildSet", "args": [300000] },
+  { "fn": "dropSet", "args": [] },
+  { "fn": "allocAfter", "args": [100000] },
+  { "fn": "buildStrs", "args": [200000] },
+  { "fn": "dropStrs", "args": [] },
+  { "fn": "allocAfter", "args": [800000] },
+  { "fn": "buildNested", "args": [20000] },
+  { "fn": "dropNested", "args": [] },
+  { "fn": "allocAfter", "args": [900000] }
+]

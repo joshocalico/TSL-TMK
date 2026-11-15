@@ -1,0 +1,13 @@
+[
+  { "fn": "messageLength", "args": [1], "value": 5 },
+  { "fn": "messageLength", "args": [2], "value": 3 },
+  { "fn": "messageLength", "args": [0], "trap": 17 },
+  { "fn": "messageLength", "args": [3], "trap": 17 },
+  { "fn": "messageLength", "args": [4], "trap": 17 },
+  { "fn": "appCode", "args": [2], "value": 3 },
+  { "fn": "appCode", "args": [1], "trap": 17 },
+  { "fn": "appCode", "args": [0], "trap": 17 },
+  { "fn": "plusOne", "args": [3], "value": 13 },
+  { "fn": "plusOne", "args": [1], "trap": 17 },
+  { "fn": "plusOne", "args": [0], "trap": 17 }
+]

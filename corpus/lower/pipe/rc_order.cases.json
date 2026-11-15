@@ -1,0 +1,11 @@
+[
+  { "fn": "compoundReceiver", "args": [3, 4], "value": 7004 },
+  { "fn": "argumentOrder", "args": [3, 4], "value": 306 },
+  { "fn": "chainSwap", "args": [6], "value": 1 },
+  { "fn": "chainSwap", "args": [1], "value": 0 },
+  { "fn": "storeTarget", "args": [3, 4], "value": 40700 },
+  { "fn": "storeTargetScalar", "args": [3, 4], "value": 90400804 },
+  { "fn": "storeElement", "args": [7], "value": 7256 },
+  { "fn": "storeElement", "args": [3], "value": 3256 },
+  { "fn": "storeTargetRead", "args": [3, 4], "value": 7007 }
+]

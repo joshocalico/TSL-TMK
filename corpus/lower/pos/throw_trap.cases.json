@@ -1,0 +1,15 @@
+[
+  { "fn": "plain", "args": [-1] },
+  { "fn": "plain", "args": [11] },
+  { "fn": "plain", "args": [3] },
+  { "fn": "typed", "args": [1] },
+  { "fn": "typed", "args": [2] },
+  { "fn": "typed", "args": [3] },
+  { "fn": "withLit", "args": ["b", true] },
+  { "fn": "withLit", "args": ["a", false] },
+  { "fn": "inClosure", "args": [1] },
+  { "fn": "inClosure", "args": [5] },
+  { "fn": "writesBeforeThrow", "args": [{ "u8s": [1, 2] }] },
+  { "fn": "neverReturns", "args": [1] },
+  { "fn": "neverReturns", "args": [0] }
+]

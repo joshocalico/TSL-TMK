@@ -1,0 +1,8 @@
+[
+  { "fn": "irq", "args": [{ "zeros": 64 }], "expect": 27 },
+  { "fn": "block", "args": [{ "zeros": 64 }], "expect": "903n" },
+  { "fn": "status", "args": [{ "zeros": 64 }], "expect": 200 },
+  { "fn": "badTag", "args": [{ "zeros": 64 }], "expect": 4294967295 },
+  { "fn": "enumField", "args": [{ "zeros": 16 }], "expect": 1604 },
+  { "fn": "enumUnknown", "args": [{ "bytes": "63000000000000000000000000000000" }], "trap": 4 }
+]

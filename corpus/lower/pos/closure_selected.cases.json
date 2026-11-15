@@ -1,0 +1,7 @@
+[
+  { "fn": "select", "args": [0, 4] },
+  { "fn": "select", "args": [1, 4] },
+  { "fn": "select", "args": [2, 4] },
+  { "fn": "reassign", "args": [true] },
+  { "fn": "reassign", "args": [false] }
+]

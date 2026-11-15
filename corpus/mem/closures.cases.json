@@ -1,0 +1,8 @@
+[
+  { "fn": "topLevelAsValue", "args": [21], "expect": 42 },
+  { "fn": "capturesConst", "args": [2, 40], "expect": 42 },
+  { "fn": "mutatesCaptured", "args": [5], "expect": 15 },
+  { "fn": "nested", "args": [4], "expect": 10 },
+  { "fn": "capturesThis", "args": [5], "expect": 15 },
+  { "fn": "inNoAlloc", "args": [5], "expect": 10 }
+]

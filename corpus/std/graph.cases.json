@@ -1,0 +1,7 @@
+[
+  { "fn": "gridReach", "args": [12], "expect": 144 },
+  { "fn": "gridTopo", "args": [12] },
+  { "fn": "gridDistance", "args": [10] },
+  { "fn": "cycleHasNoOrder", "args": [], "expect": 4294967295 },
+  { "fn": "unreachable", "args": [], "expect": 4294967295 }
+]

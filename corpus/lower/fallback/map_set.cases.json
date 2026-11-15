@@ -1,0 +1,4 @@
+[
+  { "fn": "withMap", "args": [2] },
+  { "fn": "withSet", "args": [2] }
+]

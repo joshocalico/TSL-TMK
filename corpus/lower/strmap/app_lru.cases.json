@@ -1,0 +1,7 @@
+[
+  { "fn": "numbers", "args": [4, 50] },
+  { "fn": "numbers", "args": [64, 5000] },
+  { "fn": "numbers", "args": [1, 20] },
+  { "fn": "strings", "args": [3, 40] },
+  { "fn": "strings", "args": [100, 3000] }
+]

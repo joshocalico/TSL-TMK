@@ -1,0 +1,15 @@
+[
+  { "fn": "squares", "args": [3, 4], "expect": null },
+  { "fn": "squares", "args": [-300, 400], "expect": null },
+  { "fn": "bumped", "args": [41], "expect": null },
+  { "fn": "parity", "args": [0], "expect": null },
+  { "fn": "parity", "args": [7], "expect": null },
+  { "fn": "parity", "args": [1000], "expect": null },
+  { "fn": "deep", "args": [0], "expect": null },
+  { "fn": "deep", "args": [500], "expect": null },
+  { "fn": "width", "args": [9, -3], "expect": null },
+  { "fn": "width", "args": [-5, 5], "expect": null },
+  { "fn": "sumTo", "args": [0], "expect": null },
+  { "fn": "sumTo", "args": [1000], "expect": null },
+  { "fn": "pick", "args": [{ "bytes": "0102030405" }, 0, 4], "expect": null }
+]

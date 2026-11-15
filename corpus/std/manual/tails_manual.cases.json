@@ -1,0 +1,7 @@
+[
+  { "fn": "churn", "args": [1500, 1000], "expect": 1501000 },
+  { "fn": "churn", "args": [100, 50], "expect": 5050 },
+  { "fn": "churn", "args": [0, 10], "expect": 10 },
+  { "fn": "mixed", "args": [200], "expect": 0 },
+  { "fn": "emptyTails", "args": [500], "expect": 500 }
+]

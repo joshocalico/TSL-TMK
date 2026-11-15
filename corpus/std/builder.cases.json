@@ -1,0 +1,13 @@
+[
+  { "fn": "numbers", "args": [500] },
+  { "fn": "edgeNumbers", "args": [], "expect": 1 },
+  { "fn": "builderGoesOn", "args": [], "expect": 24 },
+  { "fn": "emptyBuilder", "args": [], "expect": 0 },
+  { "fn": "methods", "args": [], "expect": 8191 },
+  { "fn": "sliceTooFar", "args": [], "trap": 2 },
+  { "fn": "sliceBackwards", "args": [], "trap": 2 },
+  { "fn": "atTooFar", "args": [], "trap": 2 },
+  { "fn": "splitEmptyRuns", "args": [], "expect": 501010 },
+  { "fn": "bigBuilder", "args": [20000] },
+  { "fn": "equalHashes", "args": [], "expect": true }
+]

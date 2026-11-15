@@ -1,0 +1,8 @@
+[
+  { "fn": "wide", "args": [true] },
+  { "fn": "wide", "args": [false] },
+  { "fn": "optionalIsFine", "args": [true] },
+  { "fn": "optionalIsFine", "args": [false] },
+  { "fn": "taggedIsFine", "args": [true] },
+  { "fn": "taggedIsFine", "args": [false] }
+]

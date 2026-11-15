@@ -1,0 +1,25 @@
+{
+  "name": "ts-microkernel",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=25"
+  },
+  "scripts": {
+    "tmk": "node tools/tmk.ts"
+  },
+  "devDependencies": {
+    "@tsl/alloc": "workspace:*",
+    "@tsl/arch-aarch64": "workspace:*",
+    "@tsl/core": "workspace:*",
+    "@tsl/gc": "workspace:*",
+    "@tsl/jsrt": "workspace:*",
+    "@tsl/lowered": "workspace:*",
+    "@tsl/std": "workspace:*",
+    "@tsl/unsafe": "workspace:*",
+    "@types/node": "25.9.9",
+    "oxfmt": "0.65.0",
+    "oxlint": "1.80.0",
+    "typescript": "5.9.3"
+  }
+}

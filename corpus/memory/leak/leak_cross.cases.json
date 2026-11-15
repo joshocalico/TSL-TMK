@@ -1,0 +1,5 @@
+[
+  { "fn": "holdInStrict", "args": [3] },
+  { "fn": "directNewToStrict", "args": [4] },
+  { "fn": "holdInStrict", "args": [5] }
+]

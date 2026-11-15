@@ -1,0 +1,14 @@
+[
+  { "fn": "idivU32", "args": [1, 0], "trap": 3 },
+  { "fn": "idivI32", "args": [1, 0], "trap": 3 },
+  { "fn": "idivI32", "args": [-2147483648, -1], "trap": 3 },
+  { "fn": "idivI8", "args": [-128, -1], "trap": 3 },
+  { "fn": "idivI16", "args": [-32768, -1], "trap": 3 },
+  { "fn": "idivUsize", "args": [1, 0], "trap": 3 },
+  { "fn": "remU32", "args": [1, 0], "trap": 3 },
+  { "fn": "remI32", "args": [1, 0], "trap": 3 },
+  { "fn": "divU64", "args": ["1n", "0n"], "trap": 3 },
+  { "fn": "remU64", "args": ["1n", "0n"], "trap": 3 },
+  { "fn": "divI64", "args": ["1n", "0n"], "trap": 3 },
+  { "fn": "divI64", "args": ["-9223372036854775808n", "-1n"], "trap": 3 }
+]

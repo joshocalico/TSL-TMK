@@ -1,0 +1,13 @@
+[
+  { "fn": "isqrt", "args": [0], "expect": 0 },
+  { "fn": "isqrt", "args": [99], "expect": 9 },
+  { "fn": "isqrt", "args": [100], "expect": 10 },
+  { "fn": "isqrt", "args": [4294967295], "expect": 65535 },
+  { "fn": "newton", "args": [2], "expect": null },
+  { "fn": "newton", "args": [1e300], "expect": null },
+  { "fn": "hypot", "args": [3, 4], "expect": 5 },
+  { "fn": "hypot", "args": [{ "f64": "NaN" }, 1], "expect": null },
+  { "fn": "rounding", "args": [-2.5], "expect": null },
+  { "fn": "rounding", "args": [{ "f64": "-0" }], "expect": null },
+  { "fn": "rounding", "args": [0.25], "expect": null }
+]

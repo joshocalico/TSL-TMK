@@ -1,0 +1,1 @@
+{ "memory": "manual", "unsafeModules": ["std_manual.ts", "tails_manual.ts"] }

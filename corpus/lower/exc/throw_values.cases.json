@@ -1,0 +1,290 @@
+[
+  {
+    "fn": "describe",
+    "args": [0]
+  },
+  {
+    "fn": "describe",
+    "args": [1]
+  },
+  {
+    "fn": "describe",
+    "args": [2]
+  },
+  {
+    "fn": "describe",
+    "args": [3]
+  },
+  {
+    "fn": "describe",
+    "args": [4]
+  },
+  {
+    "fn": "describe",
+    "args": [5]
+  },
+  {
+    "fn": "describe",
+    "args": [6]
+  },
+  {
+    "fn": "describe",
+    "args": [7]
+  },
+  {
+    "fn": "describe",
+    "args": [8]
+  },
+  {
+    "fn": "describe",
+    "args": [9]
+  },
+  {
+    "fn": "describe",
+    "args": [10]
+  },
+  {
+    "fn": "describe",
+    "args": [11]
+  },
+  {
+    "fn": "text",
+    "args": [0]
+  },
+  {
+    "fn": "text",
+    "args": [1]
+  },
+  {
+    "fn": "text",
+    "args": [2]
+  },
+  {
+    "fn": "text",
+    "args": [3]
+  },
+  {
+    "fn": "text",
+    "args": [4]
+  },
+  {
+    "fn": "text",
+    "args": [5]
+  },
+  {
+    "fn": "text",
+    "args": [6]
+  },
+  {
+    "fn": "text",
+    "args": [7]
+  },
+  {
+    "fn": "text",
+    "args": [8]
+  },
+  {
+    "fn": "text",
+    "args": [9]
+  },
+  {
+    "fn": "text",
+    "args": [10]
+  },
+  {
+    "fn": "text",
+    "args": [11]
+  },
+  {
+    "fn": "noBinding",
+    "args": [0]
+  },
+  {
+    "fn": "noBinding",
+    "args": [1]
+  },
+  {
+    "fn": "noBinding",
+    "args": [2]
+  },
+  {
+    "fn": "noBinding",
+    "args": [3]
+  },
+  {
+    "fn": "noBinding",
+    "args": [4]
+  },
+  {
+    "fn": "noBinding",
+    "args": [5]
+  },
+  {
+    "fn": "noBinding",
+    "args": [6]
+  },
+  {
+    "fn": "noBinding",
+    "args": [7]
+  },
+  {
+    "fn": "noBinding",
+    "args": [8]
+  },
+  {
+    "fn": "noBinding",
+    "args": [9]
+  },
+  {
+    "fn": "noBinding",
+    "args": [10]
+  },
+  {
+    "fn": "noBinding",
+    "args": [11]
+  },
+  {
+    "fn": "loose",
+    "args": [0]
+  },
+  {
+    "fn": "loose",
+    "args": [1]
+  },
+  {
+    "fn": "loose",
+    "args": [2]
+  },
+  {
+    "fn": "loose",
+    "args": [3]
+  },
+  {
+    "fn": "loose",
+    "args": [4]
+  },
+  {
+    "fn": "loose",
+    "args": [5]
+  },
+  {
+    "fn": "loose",
+    "args": [6]
+  },
+  {
+    "fn": "loose",
+    "args": [7]
+  },
+  {
+    "fn": "loose",
+    "args": [8]
+  },
+  {
+    "fn": "loose",
+    "args": [9]
+  },
+  {
+    "fn": "loose",
+    "args": [10]
+  },
+  {
+    "fn": "loose",
+    "args": [11]
+  },
+  {
+    "fn": "uncaught",
+    "args": [0]
+  },
+  {
+    "fn": "uncaught",
+    "args": [1]
+  },
+  {
+    "fn": "uncaught",
+    "args": [2]
+  },
+  {
+    "fn": "uncaught",
+    "args": [3]
+  },
+  {
+    "fn": "uncaught",
+    "args": [4]
+  },
+  {
+    "fn": "uncaught",
+    "args": [5]
+  },
+  {
+    "fn": "uncaught",
+    "args": [6]
+  },
+  {
+    "fn": "uncaught",
+    "args": [7]
+  },
+  {
+    "fn": "uncaught",
+    "args": [8]
+  },
+  {
+    "fn": "uncaught",
+    "args": [9]
+  },
+  {
+    "fn": "uncaught",
+    "args": [10]
+  },
+  {
+    "fn": "uncaught",
+    "args": [11]
+  },
+  {
+    "fn": "rethrowTwice",
+    "args": [0]
+  },
+  {
+    "fn": "rethrowTwice",
+    "args": [1]
+  },
+  {
+    "fn": "rethrowTwice",
+    "args": [2]
+  },
+  {
+    "fn": "rethrowTwice",
+    "args": [3]
+  },
+  {
+    "fn": "rethrowTwice",
+    "args": [4]
+  },
+  {
+    "fn": "rethrowTwice",
+    "args": [5]
+  },
+  {
+    "fn": "rethrowTwice",
+    "args": [6]
+  },
+  {
+    "fn": "rethrowTwice",
+    "args": [7]
+  },
+  {
+    "fn": "rethrowTwice",
+    "args": [8]
+  },
+  {
+    "fn": "rethrowTwice",
+    "args": [9]
+  },
+  {
+    "fn": "rethrowTwice",
+    "args": [10]
+  },
+  {
+    "fn": "rethrowTwice",
+    "args": [11]
+  }
+]

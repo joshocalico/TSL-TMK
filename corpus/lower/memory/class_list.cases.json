@@ -1,0 +1,15 @@
+[
+  { "fn": "buildList", "args": [100] },
+  { "fn": "sumList", "args": [] },
+  { "fn": "pushFront", "args": [1000.5] },
+  { "fn": "sumList", "args": [] },
+  { "fn": "lengthList", "args": [] },
+  { "fn": "insertTree", "args": [50] },
+  { "fn": "insertTree", "args": [25] },
+  { "fn": "insertTree", "args": [75] },
+  { "fn": "insertTree", "args": [60] },
+  { "fn": "insertTree", "args": [61.5] },
+  { "fn": "sumTree", "args": [] },
+  { "fn": "localList", "args": [20] },
+  { "fn": "sumList", "args": [] }
+]

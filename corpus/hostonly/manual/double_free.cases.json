@@ -1,0 +1,5 @@
+[
+  { "fn": "freeOnce", "args": [5] },
+  { "fn": "freeTwice", "args": [6], "trap": 5 },
+  { "fn": "freeOnce", "args": [7] }
+]

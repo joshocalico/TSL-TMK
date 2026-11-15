@@ -1,0 +1,6 @@
+[
+  { "fn": "escape", "args": [0, 0, 100], "expect": 100 },
+  { "fn": "escape", "args": [2, 2, 100], "expect": 1 },
+  { "fn": "escape", "args": [-0.75, 0.1, 500], "expect": null },
+  { "fn": "checksum", "args": [64, 48, 200], "expect": null }
+]

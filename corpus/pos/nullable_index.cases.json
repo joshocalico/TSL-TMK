@@ -1,0 +1,12 @@
+[
+  { "fn": "orZero", "args": [{ "u8s": [7, 8] }, 1], "expect": 8 },
+  { "fn": "orZero", "args": [{ "u8s": [7, 8] }, 2], "expect": 0 },
+  { "fn": "present", "args": [{ "i32s": [7] }, 0], "expect": true },
+  { "fn": "present", "args": [{ "i32s": [7] }, 1], "expect": false },
+  { "fn": "sumPair", "args": [{ "u16s": [9] }, 0], "expect": 9 },
+  { "fn": "sumPair", "args": [{ "u16s": [9] }, 3], "expect": 65535 },
+  { "fn": "floatOr", "args": [{ "f64s": [2.5] }, 0], "expect": 2.5 },
+  { "fn": "floatOr", "args": [{ "f64s": [2.5] }, 1], "expect": -1.5 },
+  { "fn": "missing", "args": [{ "i32s": [-4] }, 0], "expect": -4 },
+  { "fn": "missing", "args": [{ "i32s": [-4] }, 5], "expect": -1 }
+]

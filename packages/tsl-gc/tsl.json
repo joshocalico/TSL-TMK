@@ -1,0 +1,3 @@
+{
+  "unsafeModules": ["ex-gc-rc.ts", "ex-gc-roomarray.ts"]
+}

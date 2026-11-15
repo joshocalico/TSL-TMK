@@ -1,0 +1,10 @@
+[
+  { "fn": "guarded", "args": [1] },
+  { "fn": "guarded", "args": [-3] },
+  { "fn": "message", "args": [2] },
+  { "fn": "message", "args": [0] },
+  { "fn": "withFinally", "args": [5] },
+  { "fn": "withFinally", "args": [-5] },
+  { "fn": "uncaught", "args": [7] },
+  { "fn": "uncaught", "args": [-7] }
+]

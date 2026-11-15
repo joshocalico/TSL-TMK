@@ -1,0 +1,13 @@
+[
+  {
+    "fn": "report",
+    "args": ["ann,30,Ann@Example.com;bob,200,b@c;,5,a@b;eve,7.5,e@f;carl,40,carl;x,y"]
+  },
+  { "fn": "tally", "args": [60] },
+  { "fn": "strict", "args": ["  dee ,20,d@e"] },
+  { "fn": "strict", "args": [",20,d@e"] },
+  { "fn": "strict", "args": ["dee,-4,d@e"] },
+  { "fn": "strict", "args": ["dee,4"] },
+  { "fn": "strict", "args": ["dee,4.25,x@y"] },
+  { "fn": "toStrings", "args": [] }
+]

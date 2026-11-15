@@ -1,0 +1,12 @@
+[
+  { "fn": "heldThroughout", "args": [0, 120] },
+  { "fn": "holderMoves", "args": [0, 120] },
+  { "fn": "reachableAgain", "args": [0, 120] },
+  { "fn": "edgeTakenOut", "args": [0, 120] },
+  { "fn": "flickering", "args": [0, 60] },
+  { "fn": "movedWhileScanned", "args": [0, 300] },
+  { "fn": "closureCalled", "args": [0, 60] },
+  { "fn": "subtreeCut", "args": [0, 120] },
+  { "fn": "several", "args": [0, 120] },
+  { "fn": "last", "args": [] }
+]

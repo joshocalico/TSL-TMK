@@ -1,0 +1,9 @@
+[
+  { "fn": "clearedWhileQueued", "args": [5], "value": 11 },
+  { "fn": "staysCleared", "args": [], "value": 1 },
+  { "fn": "neverResurrected", "args": [7], "value": 107 },
+  { "fn": "afterLastLocal", "args": [], "value": 1 },
+  { "fn": "derefKeepsItAlive", "args": [8], "value": 8 },
+  { "fn": "closure", "args": [3], "value": 11 },
+  { "fn": "refOutlivesTarget", "args": [], "value": 1 }
+]

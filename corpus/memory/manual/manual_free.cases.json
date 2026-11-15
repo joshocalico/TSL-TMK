@@ -1,0 +1,7 @@
+[
+  { "fn": "normalFree", "args": [3] },
+  { "fn": "reuse", "args": [1000000] },
+  { "fn": "useAfterFree", "args": [9], "diverge": { "native": 9, "v8": { "trap": 5 } } },
+  { "fn": "reusedUnderStale", "args": [1, 2], "diverge": { "native": 2, "v8": { "trap": 5 } } },
+  { "fn": "normalFree", "args": [4] }
+]

@@ -1,0 +1,7 @@
+[
+  { "fn": "viaClosure", "args": [14, 5], "expect": null },
+  { "fn": "viaClosure", "args": [-3, 0], "expect": null },
+  { "fn": "viaValue", "args": [9], "expect": null },
+  { "fn": "stackObject", "args": [0], "expect": null },
+  { "fn": "stackObject", "args": [50], "expect": null }
+]

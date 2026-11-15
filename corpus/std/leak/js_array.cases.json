@@ -1,0 +1,14 @@
+[
+  { "fn": "grows", "args": [1000], "expect": 1000 },
+  { "fn": "grows", "args": [5], "expect": 5 },
+  { "fn": "lastAfterGrowth", "args": [], "expect": 0 },
+  { "fn": "popEmpty", "args": [], "expect": -109 },
+  { "fn": "popAll", "args": [4], "expect": 75 },
+  { "fn": "holes", "args": [], "expect": 35 },
+  { "fn": "holesInReusedBuffer", "args": [], "expect": 205 },
+  { "fn": "holesPastTheCopy", "args": [], "expect": 112 },
+  { "fn": "shrinkThenGrow", "args": [], "expect": 1 },
+  { "fn": "shifts", "args": [], "expect": -74990 },
+  { "fn": "sized", "args": [5], "expect": 10 },
+  { "fn": "pastTheEnd", "args": [], "trap": 2 }
+]

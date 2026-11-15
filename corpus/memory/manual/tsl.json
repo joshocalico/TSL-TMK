@@ -1,0 +1,15 @@
+{
+  "memory": "manual",
+  "noStd": true,
+  "unsafeModules": [
+    "manual_list.ts",
+    "manual_free.ts",
+    "manual_slab.ts",
+    "manual_pages.ts",
+    "manual_wrap.ts",
+    "pool.ts",
+    "manual_mix.ts",
+    "manual_make.ts",
+    "manual_zero_reuse.ts"
+  ]
+}

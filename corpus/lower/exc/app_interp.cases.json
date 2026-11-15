@@ -1,0 +1,13 @@
+[
+  { "fn": "call", "args": ["fact", 5, 1] },
+  { "fn": "call", "args": ["fact", 10, 1] },
+  { "fn": "call", "args": ["firstOver", 50, 1] },
+  { "fn": "call", "args": ["firstOver", 0, 1] },
+  { "fn": "call", "args": ["loop", 1, 1] },
+  { "fn": "call", "args": ["bad", 9, 3] },
+  { "fn": "call", "args": ["bad", 9, 0] },
+  { "fn": "call", "args": ["nope", 1, 1] },
+  { "fn": "raw", "args": ["fact", 6] },
+  { "fn": "raw", "args": ["bad", 1] },
+  { "fn": "raw", "args": ["loop", 1] }
+]

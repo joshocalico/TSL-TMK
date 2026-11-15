@@ -1,0 +1,16 @@
+[
+  { "fn": "getThenCalleeDeletes", "args": [] },
+  { "fn": "getThenClear", "args": [] },
+  { "fn": "getThenOverwrite", "args": [] },
+  { "fn": "argFromGet", "args": [] },
+  { "fn": "keyHeldAcrossDelete", "args": [] },
+  { "fn": "deleteOwnKey", "args": [] },
+  { "fn": "selfAssign", "args": [] },
+  { "fn": "valueOfForOfDeleted", "args": [] },
+  { "fn": "forEachDeletes", "args": [] },
+  { "fn": "iteratorKeepsMapAlive", "args": [] },
+  { "fn": "stringFromMapThenCleared", "args": [] },
+  { "fn": "sliceOutlivesParent", "args": [] },
+  { "fn": "viewOfBufferOutlives", "args": [] },
+  { "fn": "removedKeyStillValid", "args": [] }
+]

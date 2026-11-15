@@ -1,0 +1,9 @@
+[
+  { "fn": "runsSplitAndComeBack", "args": [], "expect": 1 },
+  { "fn": "fromThePool", "args": [5000], "expect": true },
+  { "fn": "sameHeapAsVec", "args": [], "expect": true },
+  { "fn": "aRunComesBackZeroed", "args": [], "expect": 0 },
+  { "fn": "exhaustTry", "args": [] },
+  { "fn": "exhaustTrap", "args": [], "trap": 14 },
+  { "fn": "mapTrySet", "args": [] }
+]

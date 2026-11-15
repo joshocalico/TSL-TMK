@@ -1,0 +1,10 @@
+[
+  { "fn": "overwrite", "args": [20000], "value": 199990016 },
+  { "fn": "addDelete", "args": [20000], "value": 20008 },
+  { "fn": "objectKeys", "args": [20000], "value": 200010000 },
+  { "fn": "sets", "args": [20000], "value": 20000 },
+  { "fn": "growClear", "args": [400], "value": 47840000 },
+  { "fn": "fieldMaps", "args": [30], "value": 89970 },
+  { "fn": "midMove", "args": [5000], "value": 12552500 },
+  { "fn": "reallyOut", "args": [200000], "trap": 14 }
+]

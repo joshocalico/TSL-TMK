@@ -1,0 +1,4 @@
+[
+  { "fn": "heapReuse", "args": [50], "expect": 0 },
+  { "fn": "held", "args": [], "expect": 0 }
+]

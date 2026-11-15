@@ -1,0 +1,18 @@
+[
+  { "fn": "inCondition", "args": [0] },
+  { "fn": "inCondition", "args": [3] },
+  { "fn": "inCondition", "args": [10] },
+  { "fn": "shortCircuit", "args": [0] },
+  { "fn": "shortCircuit", "args": [1] },
+  { "fn": "shortCircuit", "args": [3] },
+  { "fn": "shortCircuit", "args": [4] },
+  { "fn": "shortCircuit", "args": [9] },
+  { "fn": "orderOfOperands", "args": [0] },
+  { "fn": "orderOfOperands", "args": [3] },
+  { "fn": "loopWithContinue", "args": [0] },
+  { "fn": "loopWithContinue", "args": [7] },
+  { "fn": "loopWithContinue", "args": [20] },
+  { "fn": "doWhileEffect", "args": [0] },
+  { "fn": "doWhileEffect", "args": [5] },
+  { "fn": "doWhileEffect", "args": [40] }
+]

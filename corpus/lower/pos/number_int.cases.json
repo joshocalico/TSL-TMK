@@ -1,0 +1,12 @@
+[
+  { "fn": "total", "args": [100] },
+  { "fn": "total", "args": [100000] },
+  { "fn": "indexed", "args": [{ "u8s": [1, 2, 3, 4, 5] }] },
+  { "fn": "overflow", "args": [3] },
+  { "fn": "overflow", "args": [-2147483648] },
+  { "fn": "overflow", "args": [0] },
+  { "fn": "negative", "args": [1, 5] },
+  { "fn": "negative", "args": [-2147483648, 2147483647] },
+  { "fn": "zeroProduct", "args": [0] },
+  { "fn": "zeroProduct", "args": [2] }
+]

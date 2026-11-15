@@ -1,0 +1,5 @@
+[
+  { "fn": "scenario", "args": [[1, 0, 11, -3, 5]] },
+  { "fn": "scenario", "args": [[]] },
+  { "fn": "scenario", "args": [[20, 0, 0, 30]] }
+]

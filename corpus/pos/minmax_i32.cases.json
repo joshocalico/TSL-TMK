@@ -1,0 +1,15 @@
+[
+  { "fn": "minI32", "args": [-2147483648, 2147483647], "expect": -2147483648 },
+  { "fn": "maxI32", "args": [-2147483648, 2147483647], "expect": 2147483647 },
+  { "fn": "minU32", "args": [4294967295, 1], "expect": 1 },
+  { "fn": "maxU32", "args": [4294967295, 1], "expect": 4294967295 },
+  { "fn": "abs", "args": [-2147483647], "expect": 2147483647 },
+  { "fn": "abs", "args": [0], "expect": 0 },
+  { "fn": "clamp", "args": [50, 0, 10], "expect": 10 },
+  { "fn": "clamp", "args": [-50, 0, 10], "expect": 0 },
+  { "fn": "ternaryMax", "args": [3, -3], "expect": 3 },
+  { "fn": "minF64", "args": [{ "f64": "-0" }, 0], "expect": null },
+  { "fn": "maxF64", "args": [{ "f64": "-0" }, 0], "expect": null },
+  { "fn": "minF64", "args": [{ "f64": "NaN" }, 1], "expect": null },
+  { "fn": "maxF64", "args": [1.5, { "f64": "Infinity" }], "expect": null }
+]

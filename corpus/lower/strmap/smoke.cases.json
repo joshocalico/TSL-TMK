@@ -1,0 +1,7 @@
+[
+  { "fn": "concat", "args": ["abc"] },
+  { "fn": "concat", "args": ["😀é\ud800"] },
+  { "fn": "len", "args": ["abcd"] },
+  { "fn": "tpl", "args": [1.5, "zz"] },
+  { "fn": "m1", "args": [3] }
+]

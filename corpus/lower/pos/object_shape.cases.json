@@ -1,0 +1,7 @@
+[
+  { "fn": "rectArea", "args": [3, 4] },
+  { "fn": "valueRecord", "args": [5] },
+  { "fn": "inLoop", "args": [100000] },
+  { "fn": "returned", "args": [1.5] },
+  { "fn": "aliased", "args": [3] }
+]

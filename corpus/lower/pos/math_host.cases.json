@@ -1,0 +1,15 @@
+[
+  { "fn": "sines", "args": [0.5] },
+  { "fn": "rounding", "args": [-2.5] },
+  { "fn": "rounding", "args": [2.5] },
+  { "fn": "rounding", "args": [{ "f64": "-0" }] },
+  { "fn": "rounding", "args": [{ "f64": "NaN" }] },
+  { "fn": "rounding", "args": [{ "f64": "Infinity" }] },
+  { "fn": "ints", "args": [-5.7] },
+  { "fn": "ints", "args": [4294967296.5] },
+  { "fn": "constants", "args": [] },
+  { "fn": "predicates", "args": [1] },
+  { "fn": "predicates", "args": [1.5] },
+  { "fn": "predicates", "args": [{ "f64": "NaN" }] },
+  { "fn": "predicates", "args": [{ "f64": "Infinity" }] }
+]

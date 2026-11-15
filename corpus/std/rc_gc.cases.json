@@ -1,0 +1,12 @@
+[
+  { "fn": "chain", "args": [10], "expect": 45000 },
+  { "fn": "chain", "args": [100], "expect": 4950000 },
+  { "fn": "shareThenDrop", "args": [], "expect": 2170 },
+  { "fn": "staleCopy", "args": [], "trap": 5 },
+  { "fn": "droppedTwice", "args": [], "trap": 5 },
+  { "fn": "replaceChild", "args": [], "expect": 102060 },
+  { "fn": "boundedFreeing", "args": [], "expect": 10000 },
+  { "fn": "cycleCollected", "args": [], "expect": 0 },
+  { "fn": "reuse", "args": [100], "expect": true },
+  { "fn": "staleLocal", "args": [], "trap": 5 }
+]

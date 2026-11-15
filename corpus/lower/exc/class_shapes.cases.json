@@ -1,0 +1,7 @@
+[
+  { "fn": "totalArea", "args": [0] },
+  { "fn": "totalArea", "args": [9] },
+  { "fn": "describeAll", "args": [5] },
+  { "fn": "kinds", "args": [8] },
+  { "fn": "widths", "args": [10] }
+]

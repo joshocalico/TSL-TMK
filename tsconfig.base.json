@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["es2023", "esnext.disposable"],
+    "allowImportingTsExtensions": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true
+  }
+}

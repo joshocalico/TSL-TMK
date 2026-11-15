@@ -1,0 +1,12 @@
+[
+  { "fn": "runAll", "args": [1] },
+  { "fn": "runAll", "args": [50] },
+  { "fn": "runAll", "args": [400] },
+  { "fn": "deadlocked", "args": [], "expect": 302 },
+  { "fn": "forgotten", "args": [], "trap": 2 },
+  { "fn": "aStaticQueue", "args": [5], "expect": 1 },
+  { "fn": "aStaticQueue", "args": [9], "expect": 2 },
+  { "fn": "takeFromStaticQueue", "args": [], "expect": 9 },
+  { "fn": "takeFromStaticQueue", "args": [], "expect": 5 },
+  { "fn": "takeFromStaticQueue", "args": [], "expect": 0 }
+]

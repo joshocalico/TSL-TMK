@@ -1,0 +1,11 @@
+[
+  { "fn": "each", "args": [0] },
+  { "fn": "each", "args": [1] },
+  { "fn": "each", "args": [2] },
+  { "fn": "held", "args": [true] },
+  { "fn": "held", "args": [false] },
+  { "fn": "mixed", "args": [0] },
+  { "fn": "mixed", "args": [1] },
+  { "fn": "mixed", "args": [10] },
+  { "fn": "mixed", "args": [100] }
+]

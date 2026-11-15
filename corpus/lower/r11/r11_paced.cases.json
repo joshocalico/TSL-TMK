@@ -1,0 +1,4 @@
+[
+  { "fn": "build", "args": [2000], "value": 2000 },
+  { "fn": "grow", "args": [5000], "value": 5000 }
+]

@@ -1,0 +1,4 @@
+[
+  { "fn": "viaAny", "args": [{ "y": 2 }] },
+  { "fn": "clean", "args": [1] }
+]

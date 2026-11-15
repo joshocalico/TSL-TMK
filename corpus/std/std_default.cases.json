@@ -1,0 +1,9 @@
+[
+  { "fn": "fits", "args": [10000], "expect": 19999 },
+  { "fn": "pastItWithTry", "args": [200000], "diverge": { "native": 1, "v8": 2 } },
+  {
+    "fn": "pastTheTestImagesLimit",
+    "args": [200000],
+    "diverge": { "native": { "trap": 14 }, "v8": 200000 }
+  }
+]

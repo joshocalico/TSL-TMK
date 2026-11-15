@@ -1,0 +1,14 @@
+[
+  { "fn": "areaOf", "args": [0] },
+  { "fn": "areaOf", "args": [1] },
+  { "fn": "areaOf", "args": [2] },
+  { "fn": "shape", "args": [0] },
+  { "fn": "shape", "args": [1] },
+  { "fn": "shape", "args": [2] },
+  { "fn": "cycle", "args": ["red"] },
+  { "fn": "cycle", "args": ["blue"] },
+  { "fn": "level", "args": [5] },
+  { "fn": "level", "args": [0] },
+  { "fn": "isGreen", "args": ["green"] },
+  { "fn": "isGreen", "args": ["red"] }
+]

@@ -1,0 +1,11 @@
+[
+  { "fn": "words", "args": ["The quick  brown\tFOX, the Fox!"] },
+  { "fn": "count", "args": ["a b a c b a"] },
+  { "fn": "top", "args": ["x y y z z z w", 3] },
+  { "fn": "table", "args": [] },
+  { "fn": "bySplit", "args": ["a b a\nc  d \n a"] },
+  { "fn": "repeated", "args": ["a b c d e f g a b", 50] },
+  { "fn": "builtin", "args": [] },
+  { "fn": "words", "args": [""] },
+  { "fn": "top", "args": ["", 3] }
+]

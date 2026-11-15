@@ -1,0 +1,13 @@
+[
+  { "fn": "attempt", "args": ["", 3] },
+  { "fn": "attempt", "args": ["tt", 3] },
+  { "fn": "attempt", "args": ["ttt", 3] },
+  { "fn": "attempt", "args": ["tf", 3] },
+  { "fn": "attempt", "args": ["x", 3] },
+  { "fn": "attempt", "args": ["ttx", 5] },
+  { "fn": "direct", "args": ["t", 3] },
+  { "fn": "direct", "args": ["ttt", 3] },
+  { "fn": "direct", "args": ["f", 3] },
+  { "fn": "direct", "args": ["x", 3] },
+  { "fn": "batch", "args": [40] }
+]

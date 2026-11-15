@@ -1,0 +1,11 @@
+[
+  { "fn": "summary", "args": ["let x = 1.5e3 + foo_1 * (\"a\\nb\" != 2);"] },
+  { "fn": "summary", "args": [""] },
+  { "fn": "summary", "args": ["été ≠ 日本語 .5"] },
+  { "fn": "evaluate", "args": ["1 + 2 * 3"] },
+  { "fn": "evaluate", "args": ["(1 + 2) * 3 / 4 - -pi"] },
+  { "fn": "evaluate", "args": ["été * été"] },
+  { "fn": "show", "args": ["1 / 3"] },
+  { "fn": "show", "args": ["1e21 + 1"] },
+  { "fn": "evaluate", "args": ["1 + )"] }
+]

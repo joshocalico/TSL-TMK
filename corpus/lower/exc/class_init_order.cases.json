@@ -1,0 +1,7 @@
+[
+  { "fn": "order", "args": [0] },
+  { "fn": "order", "args": [1] },
+  { "fn": "order", "args": [2] },
+  { "fn": "order", "args": [3] },
+  { "fn": "statics", "args": [3] }
+]

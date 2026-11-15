@@ -1,0 +1,16 @@
+[
+  { "fn": "labelled", "args": [2] },
+  { "fn": "labelled", "args": [9] },
+  { "fn": "fallthrough", "args": [1] },
+  { "fn": "fallthrough", "args": [2] },
+  { "fn": "fallthrough", "args": [3] },
+  { "fn": "fallthrough", "args": [7] },
+  { "fn": "floatSwitch", "args": [0.5] },
+  { "fn": "floatSwitch", "args": [2] },
+  { "fn": "floatSwitch", "args": [1] },
+  { "fn": "commas", "args": [1] },
+  { "fn": "doWhile", "args": [5] },
+  { "fn": "logical", "args": [0, 3] },
+  { "fn": "logical", "args": [2, 3] },
+  { "fn": "postfix", "args": [{ "i32s": [4, 5, 6] }] }
+]

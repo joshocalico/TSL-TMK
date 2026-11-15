@@ -1,0 +1,19 @@
+[
+  { "fn": "pushPop", "args": [5] },
+  { "fn": "floats", "args": [] },
+  { "fn": "intsStayInts", "args": [1] },
+  { "fn": "holes", "args": [] },
+  { "fn": "holeRead", "args": [3] },
+  { "fn": "holeRead", "args": [1] },
+  { "fn": "holeRead", "args": [9] },
+  { "fn": "holeBang", "args": [1] },
+  { "fn": "holeBang", "args": [0], "lowered_trap": 6 },
+  { "fn": "outOfRange", "args": [[1, 2], 1] },
+  { "fn": "outOfRange", "args": [[1, 2], 5] },
+  { "fn": "assignPast", "args": [3] },
+  { "fn": "assignPast", "args": [9], "lowered_trap": 15 },
+  { "fn": "mutateArg", "args": [[1, 2]] },
+  { "fn": "nestedVec", "args": [] },
+  { "fn": "spreadLit", "args": [[4, 5]] },
+  { "fn": "filled", "args": [3] }
+]

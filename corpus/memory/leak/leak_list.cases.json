@@ -1,0 +1,8 @@
+[
+  { "fn": "push", "args": [1] },
+  { "fn": "push", "args": [2] },
+  { "fn": "sum", "args": [] },
+  { "fn": "build", "args": [1000] },
+  { "fn": "onStack", "args": [5] },
+  { "fn": "cycle", "args": [7, 8] }
+]

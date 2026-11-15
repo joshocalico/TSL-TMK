@@ -1,0 +1,9 @@
+[
+  { "fn": "iterLoop", "args": [20000], "value": 2240000 },
+  { "fn": "iterBreak", "args": [20000], "value": 218750 },
+  { "fn": "iterGrow", "args": [3000], "value": 990000 },
+  { "fn": "iterClear", "args": [5000], "value": 13162500 },
+  { "fn": "shortMaps", "args": [5000], "value": 112877500 },
+  { "fn": "setIter", "args": [10000], "value": 720000 },
+  { "fn": "reallyOut", "args": [200000], "trap": 14 }
+]

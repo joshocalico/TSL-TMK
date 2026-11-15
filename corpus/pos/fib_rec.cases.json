@@ -1,0 +1,7 @@
+[
+  { "fn": "fib", "args": [0], "expect": 0 },
+  { "fn": "fib", "args": [1], "expect": 1 },
+  { "fn": "fib", "args": [20], "expect": 6765 },
+  { "fn": "fib", "args": [27], "expect": 196418 },
+  { "fn": "fibIter", "args": [46], "expect": 1836311903 }
+]

@@ -1,0 +1,21 @@
+[
+  { "fn": "addU8", "args": [200, 55], "expect": 255 },
+  { "fn": "subI8", "args": [-100, 28], "expect": -128 },
+  { "fn": "mulU16", "args": [255, 257], "expect": 65535 },
+  { "fn": "mulI16", "args": [-181, 181], "expect": null },
+  { "fn": "sumMixed", "args": [200, 1000, 4294966095], "expect": 4294967295 },
+  { "fn": "signedJoin", "args": [255, -128], "expect": null },
+  { "fn": "mulI32", "args": [46340, 46340], "expect": null },
+  { "fn": "mulI32", "args": [-65536, 32768], "expect": -2147483648 },
+  { "fn": "mulI32", "args": [0, -5], "expect": null },
+  { "fn": "subUsize", "args": [4294967295, 1], "expect": null },
+  { "fn": "mulU64", "args": ["4294967296n", "4294967295n"], "expect": "18446744069414584320n" },
+  { "fn": "addI64", "args": ["9223372036854775806n", "1n"], "expect": null },
+  { "fn": "addI64", "args": ["-9223372036854775807n", "-1n"], "expect": null },
+  { "fn": "negate", "args": [2147483647], "expect": null },
+  { "fn": "negate", "args": [0], "expect": null },
+  { "fn": "remainders", "args": [-7, 3], "expect": null },
+  { "fn": "remainders", "args": [-6, 3], "expect": null },
+  { "fn": "remainders", "args": [-2147483648, -1], "expect": null },
+  { "fn": "countDown", "args": [1000], "expect": 2000 }
+]

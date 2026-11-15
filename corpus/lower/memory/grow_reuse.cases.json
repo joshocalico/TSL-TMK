@@ -1,0 +1,5 @@
+[
+  { "fn": "small", "args": [] },
+  { "fn": "rounds", "args": [100], "memory_trap": { "leak": 14 } },
+  { "fn": "small", "args": [] }
+]

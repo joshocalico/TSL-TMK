@@ -1,0 +1,6 @@
+[
+  { "fn": "objectCaller", "args": [1] },
+  { "fn": "objectResult", "args": [2] },
+  { "fn": "scalarCaller", "args": [4] },
+  { "fn": "arrayShim", "args": [{ "u8s": [1, 2] }] }
+]

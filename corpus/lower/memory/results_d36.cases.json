@@ -1,0 +1,14 @@
+[
+  { "fn": "make", "args": [1] },
+  { "fn": "makeAndKeep", "args": [2.5] },
+  { "fn": "scratchThenScalar", "args": [100] },
+  { "fn": "readKept", "args": [] },
+  { "fn": "mutateKept", "args": [9] },
+  { "fn": "readKept", "args": [] },
+  { "fn": "keepArgument", "args": [{ "a": 5, "list": [1, 2, 3], "sub": null }] },
+  { "fn": "scratchThenScalar", "args": [100] },
+  { "fn": "readKept", "args": [] },
+  { "fn": "identity", "args": [{ "a": 6, "list": [], "sub": { "b": true } }] },
+  { "fn": "bytesOut", "args": [5] },
+  { "fn": "writeIntoArgument", "args": [{ "child": null }] }
+]

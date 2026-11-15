@@ -1,0 +1,7 @@
+[
+  { "fn": "fits", "args": [100] },
+  { "fn": "keepsWorking", "args": [] },
+  { "fn": "tooLarge", "args": [1000000], "lowered_trap": 14 },
+  { "fn": "keepsWorking", "args": [] },
+  { "fn": "tooMany", "args": [1000000], "lowered_trap": 14 }
+]

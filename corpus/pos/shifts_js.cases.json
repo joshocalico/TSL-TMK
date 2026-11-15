@@ -1,0 +1,23 @@
+[
+  { "fn": "shl", "args": [1, 31], "expect": -2147483648 },
+  { "fn": "shl", "args": [1, 32], "expect": 1 },
+  { "fn": "shl", "args": [3, 33], "expect": 6 },
+  { "fn": "shr", "args": [-8, 1], "expect": -4 },
+  { "fn": "shr", "args": [-8, 33], "expect": -4 },
+  { "fn": "ushr", "args": [-1, 0], "expect": 4294967295 },
+  { "fn": "ushr", "args": [-1, 28], "expect": 15 },
+  { "fn": "top8", "args": [4278190080], "expect": 255 },
+  { "fn": "top16", "args": [4294901760], "expect": 65535 },
+  { "fn": "maskedCount", "args": [4294967295], "expect": 4294967295 },
+  { "fn": "bigShr", "args": ["18446744073709551615n", "63n"], "expect": "1n" },
+  { "fn": "bigShr", "args": ["18446744073709551615n", "64n"], "expect": "0n" },
+  { "fn": "bigShr", "args": ["18446744073709551615n", "200n"], "expect": "0n" },
+  { "fn": "bigAshr", "args": ["-5n", "1n"], "expect": "-3n" },
+  { "fn": "bigAshr", "args": ["-5n", "64n"], "expect": "-1n" },
+  { "fn": "bigAshr", "args": ["5n", "64n"], "expect": "0n" },
+  { "fn": "bigShlChecked", "args": ["1n", "63n"], "expect": "9223372036854775808n" },
+  { "fn": "bigShlChecked", "args": ["0n", "200n"], "expect": "0n" },
+  { "fn": "bigShlWrap", "args": ["3n", "63n"], "expect": "9223372036854775808n" },
+  { "fn": "bigShlWrap", "args": ["3n", "64n"], "expect": "0n" },
+  { "fn": "bigShlI64Count", "args": ["1n", "4n"], "expect": "16n" }
+]

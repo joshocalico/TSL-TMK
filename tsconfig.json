@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": { "types": [] },
+  "include": [
+    "packages/**/*.ts",
+    "corpus/pos/*.ts",
+    "corpus/trap/*.ts",
+    "corpus/mem/*.ts",
+    "corpus/std/**/*.ts",
+    "bench/std/*.ts",
+    "corpus/spec/*.ts",
+    "corpus/lower/**/*.ts",
+    "bench/jpeg/vendor/*.ts"
+  ]
+}

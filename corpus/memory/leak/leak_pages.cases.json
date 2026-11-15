@@ -1,0 +1,5 @@
+[
+  { "fn": "register", "args": [64] },
+  { "fn": "grow", "args": [2000], "diverge": { "native": 8, "v8": 0 } },
+  { "fn": "grow", "args": [1000000], "diverge": { "native": { "trap": 14 }, "v8": 0 } }
+]

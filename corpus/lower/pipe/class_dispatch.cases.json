@@ -1,0 +1,16 @@
+[
+  { "fn": "areaOf", "args": [0] },
+  { "fn": "areaOf", "args": [1] },
+  { "fn": "areaOf", "args": [2] },
+  { "fn": "areaOf", "args": [3] },
+  { "fn": "weightOf", "args": [0] },
+  { "fn": "weightOf", "args": [1] },
+  { "fn": "weightOf", "args": [2] },
+  { "fn": "weightOf", "args": [3] },
+  { "fn": "kinds", "args": [0] },
+  { "fn": "kinds", "args": [9] },
+  { "fn": "kinds", "args": [40] },
+  { "fn": "mixed", "args": [1] },
+  { "fn": "mixed", "args": [4] },
+  { "fn": "mixed", "args": [33] }
+]

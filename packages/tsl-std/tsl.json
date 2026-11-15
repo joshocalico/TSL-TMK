@@ -1,0 +1,3 @@
+{
+  "unsafeModules": ["ex-std-global.ts"]
+}

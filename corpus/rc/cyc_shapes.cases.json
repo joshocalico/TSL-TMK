@@ -1,0 +1,17 @@
+[
+  { "fn": "resultInCycle", "args": [3] },
+  { "fn": "argumentJoinsCycle", "args": [5] },
+  { "fn": "hubWithClosure", "args": [4] },
+  { "fn": "hangsFromLive", "args": [2] },
+  { "fn": "liveAfter", "args": [] },
+  { "fn": "tailInCycle", "args": [5] },
+  { "fn": "partly", "args": [9] },
+  { "fn": "selfMoved", "args": [4] },
+  { "fn": "readKept", "args": [] },
+  { "fn": "dropKept", "args": [] },
+  { "fn": "readKept", "args": [] },
+  { "fn": "repeated", "args": [3000] },
+  { "fn": "readKept", "args": [] },
+  { "fn": "dropKept", "args": [] },
+  { "fn": "liveAfter", "args": [] }
+]

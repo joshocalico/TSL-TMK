@@ -1,0 +1,8 @@
+[
+  {
+    "fn": "queuedTables",
+    "args": [60],
+    "value": 38400,
+    "memory_trap": { "leak": 14, "manual": 14 }
+  }
+]

@@ -1,0 +1,9 @@
+[
+  { "fn": "onStack", "args": [5] },
+  { "fn": "recursion", "args": [50] },
+  { "fn": "escapes", "args": [6] },
+  { "fn": "escapes", "args": [0] },
+  { "fn": "nested", "args": [3] },
+  { "fn": "twoCalls", "args": [4] },
+  { "fn": "escapes", "args": [6] }
+]

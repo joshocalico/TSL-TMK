@@ -1,0 +1,4 @@
+{
+  "memory": "leak",
+  "unsafeModules": ["dispatch_forged.ts"]
+}

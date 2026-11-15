@@ -1,0 +1,30 @@
+[
+  { "fn": "linkedList", "args": [10], "expect": 55 },
+  { "fn": "staleInListWalk", "args": [], "trap": 5 },
+  { "fn": "coalesce", "args": [true], "expect": 5 },
+  { "fn": "coalesce", "args": [false], "expect": 0 },
+  {
+    "fn": "nullBang",
+    "args": [],
+    "diverge": { "native": { "trap": 6 }, "v8": { "throw": "TypeError" } }
+  },
+  { "fn": "optionalCall", "args": [], "expect": 6 },
+  { "fn": "functionFields", "args": [3, 4], "expect": 712 },
+  { "fn": "dispatchTable", "args": [0, 3, 4], "expect": 7 },
+  { "fn": "dispatchTable", "args": [1, 3, 4], "expect": 12 },
+  { "fn": "genericClass", "args": [1], "expect": 110 },
+  { "fn": "narrowFields", "args": [], "expect": 1256 },
+  { "fn": "globals", "args": [5], "expect": 5 },
+  { "fn": "globals", "args": [6], "expect": 11 },
+  { "fn": "staleGlobal", "args": [], "trap": 5 },
+  { "fn": "unionHoldsReference", "args": [9], "expect": 9 },
+  { "fn": "unionHoldsReference", "args": [0], "expect": 1000 },
+  { "fn": "makeInLoop", "args": [4], "expect": 12 },
+  { "fn": "arithmeticOnFields", "args": [], "expect": 4 },
+  { "fn": "vecOfStaticHeap", "args": [10], "expect": 10 },
+  {
+    "fn": "overflowInField",
+    "args": [],
+    "diverge": { "native": { "trap": 1 }, "v8": "not u8: 256" }
+  }
+]

@@ -1,0 +1,55 @@
+[
+  { "fn": "flags", "args": [0] },
+  { "fn": "flags", "args": [3] },
+  { "fn": "readFlags", "args": [{ "a": true, "b": false, "n": 5, "c": true, "x": 0.25 }] },
+  { "fn": "readFlags", "args": [{ "a": false, "b": true, "n": -2, "c": false, "x": 1e9 }] },
+  { "fn": "flip", "args": [{ "a": true, "b": true, "n": 7, "c": false, "x": -1.5 }] },
+  { "fn": "chain", "args": [0] },
+  { "fn": "chain", "args": [4] },
+  { "fn": "sumChain", "args": [null] },
+  {
+    "fn": "sumChain",
+    "args": [
+      {
+        "v": 1,
+        "next": { "v": 2, "next": { "v": 3, "next": null, "hit": true }, "hit": false },
+        "hit": true
+      }
+    ]
+  },
+  {
+    "fn": "markAll",
+    "args": [{ "v": 1, "next": { "v": 2, "next": null, "hit": false }, "hit": false }]
+  },
+  {
+    "fn": "keep",
+    "args": [{ "v": 42, "next": { "v": 43, "next": null, "hit": true }, "hit": false }]
+  },
+  { "fn": "readKept", "args": [] },
+  { "fn": "bag", "args": [0] },
+  { "fn": "bag", "args": [5] },
+  {
+    "fn": "bagTotal",
+    "args": [
+      {
+        "items": [
+          { "v": 1, "next": null, "hit": true },
+          { "v": 2, "next": null, "hit": false }
+        ],
+        "total": 10,
+        "nums": [0.5, 1.5]
+      }
+    ]
+  },
+  { "fn": "bagTotal", "args": [{ "items": [], "total": -3, "nums": [] }] },
+  {
+    "fn": "grow",
+    "args": [{ "items": [{ "v": 7, "next": null, "hit": true }], "total": 1, "nums": [2] }, 6]
+  },
+  { "fn": "nodesOf", "args": [[]] },
+  { "fn": "nodesOf", "args": [[1, 2, 3, 4.5]] },
+  { "fn": "counter", "args": [true, 3] },
+  { "fn": "counter", "args": [false, 3] },
+  { "fn": "bumpTwice", "args": [true, 5] },
+  { "fn": "shared", "args": [] }
+]

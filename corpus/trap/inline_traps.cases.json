@@ -1,0 +1,7 @@
+[
+  { "fn": "squareBig", "args": [46341], "trap": 1 },
+  { "fn": "pastEnd", "args": [{ "bytes": "0102" }, 2], "trap": 2 },
+  { "fn": "divide", "args": [7, 0], "trap": 3 },
+  { "fn": "unlucky", "args": [13], "trap": 1013 },
+  { "fn": "ignored", "args": [{ "bytes": "01" }, 5], "trap": 2 }
+]

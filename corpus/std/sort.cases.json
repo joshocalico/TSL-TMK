@@ -1,0 +1,15 @@
+[
+  { "fn": "ascending", "args": [1, 1] },
+  { "fn": "ascending", "args": [2, 2] },
+  { "fn": "ascending", "args": [3, 3] },
+  { "fn": "ascending", "args": [1000, 4] },
+  { "fn": "ascending", "args": [10000, 5] },
+  { "fn": "descendingWithACapture", "args": [1000], "expect": 1 },
+  { "fn": "alreadySorted", "args": [1000], "expect": 1 },
+  { "fn": "allEqualAndEmpty", "args": [], "expect": 105 },
+  { "fn": "signed", "args": [], "expect": "-2995n" },
+  { "fn": "references", "args": [300] },
+  { "fn": "staleInASort", "args": [], "trap": 5 },
+  { "fn": "pushInAComparator", "args": [], "trap": 13 },
+  { "fn": "sortNoAllocation", "args": [100], "expect": 99 }
+]

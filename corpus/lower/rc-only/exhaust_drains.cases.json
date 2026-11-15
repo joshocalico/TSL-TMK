@@ -1,0 +1,8 @@
+[
+  { "fn": "build", "args": [30000], "value": 30000 },
+  { "fn": "dropAndAllocate", "args": [30000], "value": 449985000 },
+  { "fn": "largeRunsAreReused", "args": [200], "value": 200 },
+  { "fn": "smallFromLargeRun", "args": [8000], "value": 8000 },
+  { "fn": "reallyOut", "args": [200000], "trap": 14 },
+  { "fn": "stillAlive", "args": [], "value": 5 }
+]

@@ -1,0 +1,8 @@
+[
+  { "fn": "rootGivenUp", "args": [0, 170] },
+  { "fn": "memberGivenUp", "args": [0, 200] },
+  { "fn": "listGivenUp", "args": [24, 150] },
+  { "fn": "manyGivenUp", "args": [0, 250] },
+  { "fn": "holderGivenUp", "args": [0, 170] },
+  { "fn": "last", "args": [] }
+]

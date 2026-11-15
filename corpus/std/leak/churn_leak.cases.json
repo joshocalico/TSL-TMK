@@ -1,0 +1,1 @@
+[{ "fn": "churn", "args": [2000], "diverge": { "native": { "trap": 14 }, "v8": 9900000 } }]

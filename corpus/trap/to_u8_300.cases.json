@@ -1,0 +1,19 @@
+[
+  { "fn": "literal", "args": [], "trap": 4 },
+  { "fn": "fromU32", "args": [300], "trap": 4 },
+  { "fn": "fromI32", "args": [-1], "trap": 4 },
+  { "fn": "u32ToI32", "args": [2147483648], "trap": 4 },
+  { "fn": "i32ToU32", "args": [-1], "trap": 4 },
+  { "fn": "i32ToI8", "args": [128], "trap": 4 },
+  { "fn": "i32ToUsize", "args": [-1], "trap": 4 },
+  { "fn": "u64ToU32", "args": ["4294967296n"], "trap": 4 },
+  { "fn": "u64ToI64", "args": ["9223372036854775808n"], "trap": 4 },
+  { "fn": "i64ToU64", "args": ["-1n"], "trap": 4 },
+  { "fn": "i32ToU64", "args": [-1], "trap": 4 },
+  { "fn": "floatFraction", "args": [1.5], "trap": 4 },
+  { "fn": "floatFraction", "args": [{ "f64": "NaN" }], "trap": 4 },
+  { "fn": "floatFraction", "args": [2147483648], "trap": 4 },
+  { "fn": "floatToU64", "args": [-1], "trap": 4 },
+  { "fn": "floatToU64", "args": [18446744073709551616], "trap": 4 },
+  { "fn": "floatToUsize", "args": [0.5], "trap": 4 }
+]

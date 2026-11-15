@@ -1,0 +1,8 @@
+[
+  { "fn": "fromGlobal", "args": [] },
+  { "fn": "local", "args": [5] },
+  { "fn": "inField", "args": [6] },
+  { "fn": "twoRefs", "args": [7] },
+  { "fn": "ofArray", "args": [8] },
+  { "fn": "fromGlobal", "args": [] }
+]

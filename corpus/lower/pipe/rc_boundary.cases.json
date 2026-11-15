@@ -1,0 +1,49 @@
+[
+  { "fn": "make", "args": [7] },
+  { "fn": "sum", "args": [null] },
+  { "fn": "sum", "args": [{ "v": 1, "next": { "v": 2, "next": { "v": 3, "next": null } } }] },
+  { "fn": "pairOf", "args": [{ "v": 4, "next": null }, null] },
+  {
+    "fn": "pairOf",
+    "args": [
+      { "v": 4, "next": { "v": 5, "next": null } },
+      { "v": 6, "next": null }
+    ]
+  },
+  {
+    "fn": "pairSum",
+    "args": [
+      {
+        "left": { "v": 1, "next": { "v": 2, "next": null } },
+        "right": { "v": 9, "next": null },
+        "tag": 3
+      }
+    ]
+  },
+  { "fn": "pairSum", "args": [{ "left": null, "right": null, "tag": -1 }] },
+  { "fn": "same", "args": [{ "v": 41, "next": { "v": 1, "next": null } }] },
+  { "fn": "maybe", "args": [0] },
+  { "fn": "maybe", "args": [3] },
+  { "fn": "keep", "args": [{ "v": 10, "next": { "v": 20, "next": null } }] },
+  { "fn": "one", "args": [1] },
+  { "fn": "readKept", "args": [] },
+  { "fn": "takeKept", "args": [] },
+  { "fn": "readKept", "args": [] },
+  { "fn": "takeKept", "args": [] },
+  {
+    "fn": "attach",
+    "args": [{ "left": { "v": 2, "next": null }, "right": { "v": 3, "next": null }, "tag": 0 }, 8]
+  },
+  { "fn": "cycle", "args": [5] },
+  { "fn": "ringSum", "args": [{ "v": 1, "next": { "v": 2, "next": null } }, 5] },
+  { "fn": "keepRing", "args": [6] },
+  { "fn": "one", "args": [2] },
+  { "fn": "dropRing", "args": [] },
+  { "fn": "keep", "args": [{ "v": 30, "next": null }] },
+  { "fn": "keep", "args": [{ "v": 40, "next": null }] },
+  { "fn": "readKept", "args": [] },
+  { "fn": "longList", "args": [400] },
+  { "fn": "one", "args": [3] },
+  { "fn": "one", "args": [4] },
+  { "fn": "takeKept", "args": [] }
+]

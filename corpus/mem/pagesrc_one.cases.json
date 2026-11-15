@@ -1,0 +1,5 @@
+[
+  { "fn": "churn", "args": [] },
+  { "fn": "twin", "args": [], "expect": 1 },
+  { "fn": "exhaust", "args": [], "trap": 14 }
+]

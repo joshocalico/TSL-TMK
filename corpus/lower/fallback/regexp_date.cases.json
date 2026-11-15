@@ -1,0 +1,4 @@
+[
+  { "fn": "matches", "args": [1] },
+  { "fn": "stamp", "args": [] }
+]

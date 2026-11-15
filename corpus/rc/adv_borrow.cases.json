@@ -1,0 +1,13 @@
+[
+  { "fn": "throughGlobal", "args": [7] },
+  { "fn": "throughField", "args": [8] },
+  { "fn": "throughElement", "args": [9] },
+  { "fn": "throughReceiver", "args": [10] },
+  { "fn": "selfAssign", "args": [5] },
+  { "fn": "temporaries", "args": [3] },
+  { "fn": "exits", "args": [9] },
+  { "fn": "exits", "args": [3] },
+  { "fn": "returns", "args": [4] },
+  { "fn": "regionStore", "args": [11] },
+  { "fn": "regionWalk", "args": [12] }
+]

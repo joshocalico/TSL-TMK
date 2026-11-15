@@ -1,0 +1,158 @@
+{
+  "cache": "~/.cache/ts-microkernel/real-corpus",
+  "note": "Untrusted data: parsed and lowered with this repo's own compiler options only. Nothing here is run, installed or built. Sources only: tests, docs, examples, benchmarks and declarations are left out by the patterns below.",
+  "exclude": [
+    "(^|/)(__tests__|__mocks__|tests?|testdata|fixtures|examples?|docs?|bench(marks)?|_tools|_tmp|scripts|playground)(/|$)",
+    "\\.(test|spec|bench|stories)\\.tsx?$",
+    "_test\\.tsx?$",
+    "\\.d\\.ts$"
+  ],
+  "projects": [
+    {
+      "dir": "ReactiveX_rxjs",
+      "url": "https://github.com/ReactiveX/rxjs",
+      "commit": "54796b38a57e6309f9861e174737479bb3f63f61",
+      "license": "Apache-2.0",
+      "sources": ["packages/rxjs/src"]
+    },
+    {
+      "dir": "colinhacks_zod",
+      "url": "https://github.com/colinhacks/zod",
+      "commit": "a6b6263a9e1be184acc35ac44d075234dda8c639",
+      "license": "MIT",
+      "sources": ["packages/zod/src"]
+    },
+    {
+      "dir": "date-fns_date-fns",
+      "url": "https://github.com/date-fns/date-fns",
+      "commit": "a9739fb3e5384a810e90d7376446f6d84ecc5029",
+      "license": "MIT",
+      "sources": ["pkgs/core/src"]
+    },
+    {
+      "dir": "denoland_std",
+      "url": "https://github.com/denoland/std",
+      "commit": "f834d0223364361169314833e3c7a8f62ce11d58",
+      "license": "MIT",
+      "sources": ["."]
+    },
+    {
+      "dir": "excalidraw_excalidraw",
+      "url": "https://github.com/excalidraw/excalidraw",
+      "commit": "701b901a0f1ba3d0b390d9cdf63d112e25abac4b",
+      "license": "MIT",
+      "sources": [
+        "packages/common/src",
+        "packages/element/src",
+        "packages/math/src",
+        "packages/utils/src",
+        "packages/fractional-indexing/src",
+        "packages/laser-pointer/src",
+        "packages/excalidraw"
+      ]
+    },
+    {
+      "dir": "fabian-hiller_valibot",
+      "url": "https://github.com/fabian-hiller/valibot",
+      "commit": "d72f76fcf70ccfa0a5ca341b80da1d440ac60b11",
+      "license": "MIT",
+      "sources": ["library/src"]
+    },
+    {
+      "dir": "gvergnaud_ts-pattern",
+      "url": "https://github.com/gvergnaud/ts-pattern",
+      "commit": "f11be73acb18e1d653d4f252e7d75981d873a2e6",
+      "license": "MIT",
+      "sources": ["src"]
+    },
+    {
+      "dir": "honojs_hono",
+      "url": "https://github.com/honojs/hono",
+      "commit": "eb754bd5ef22c63f1634a4c374a86be086f85710",
+      "license": "MIT",
+      "sources": ["src"]
+    },
+    {
+      "dir": "ianstormtaylor_superstruct",
+      "url": "https://github.com/ianstormtaylor/superstruct",
+      "commit": "e414c8afd3b69f6bc0173b8ee25f71d8e5694f01",
+      "license": "MIT",
+      "sources": ["src"]
+    },
+    {
+      "dir": "immerjs_immer",
+      "url": "https://github.com/immerjs/immer",
+      "commit": "75a290e44ba14bd723c8ef8546b6559c8ef3ae88",
+      "license": "MIT",
+      "sources": ["src"]
+    },
+    {
+      "dir": "mobxjs_mobx",
+      "url": "https://github.com/mobxjs/mobx",
+      "commit": "920f93f2aecc843523f7b598e5f808021b5e2933",
+      "license": "MIT",
+      "sources": ["packages/mobx/src"]
+    },
+    {
+      "dir": "pixijs_pixijs",
+      "url": "https://github.com/pixijs/pixijs",
+      "commit": "50a266e18c49691e85b8854e52c0415986fa93e9",
+      "license": "MIT",
+      "sources": ["src"]
+    },
+    {
+      "dir": "preactjs_signals",
+      "url": "https://github.com/preactjs/signals",
+      "commit": "30a797e962c76cc2e623e84f4194a00b9f0c5c8f",
+      "license": "MIT",
+      "sources": ["packages/core/src", "packages/preact/src"]
+    },
+    {
+      "dir": "reduxjs_redux",
+      "url": "https://github.com/reduxjs/redux",
+      "commit": "61ebf8596654cf3c4b197e426e302fcb3c2bc13e",
+      "license": "MIT",
+      "sources": ["src"]
+    },
+    {
+      "dir": "solidjs_solid",
+      "url": "https://github.com/solidjs/solid",
+      "commit": "bc50fe5649ba4fb1ef33f26643dba56c1c002b56",
+      "license": "MIT",
+      "sources": ["packages/solid/src"]
+    },
+    {
+      "dir": "statelyai_xstate",
+      "url": "https://github.com/statelyai/xstate",
+      "commit": "9b3a88fa43f4be5433797acfba18f27c40494bd2",
+      "license": "MIT",
+      "sources": ["packages/core/src"]
+    },
+    {
+      "dir": "vuejs_core",
+      "url": "https://github.com/vuejs/core",
+      "commit": "8b479a89445868d474f17e2d837765e7c9ece5e4",
+      "license": "MIT",
+      "sources": [
+        "packages/reactivity/src",
+        "packages/runtime-core/src",
+        "packages/runtime-dom/src",
+        "packages/shared/src",
+        "packages/compiler-core/src",
+        "packages/compiler-dom/src",
+        "packages/compiler-sfc/src",
+        "packages/compiler-ssr/src",
+        "packages/server-renderer/src"
+      ]
+    },
+    {
+      "dir": "tc39_test262",
+      "url": "https://github.com/tc39/test262",
+      "commit": "63d939fbac5ab274172d39f150eb61be45b1fe6b",
+      "license": "BSD-3-Clause",
+      "sources": ["test/built-ins", "test/language"],
+      "kind": "js",
+      "note": "untyped JS, for a later phase: counted by file only"
+    }
+  ]
+}

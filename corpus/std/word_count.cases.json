@@ -1,0 +1,9 @@
+[
+  { "fn": "plain", "args": [] },
+  { "fn": "bytesOfPlain", "args": [] },
+  { "fn": "firstWordIsThe", "args": [], "expect": true },
+  { "fn": "accented", "args": [] },
+  { "fn": "distinctWords", "args": [], "expect": 13 },
+  { "fn": "noLeak", "args": [200] },
+  { "fn": "countClassIsUsed", "args": [], "expect": 3 }
+]

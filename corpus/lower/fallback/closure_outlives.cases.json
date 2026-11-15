@@ -1,0 +1,5 @@
+[
+  { "fn": "keptFromLoop", "args": [3] },
+  { "fn": "sameScope", "args": [true] },
+  { "fn": "sameScope", "args": [false] }
+]

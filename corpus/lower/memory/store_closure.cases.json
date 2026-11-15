@@ -1,0 +1,4 @@
+[
+  { "fn": "storeClosure", "args": [10] },
+  { "fn": "storeClosure", "args": [-1.5] }
+]

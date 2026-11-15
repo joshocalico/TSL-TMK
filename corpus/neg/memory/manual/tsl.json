@@ -1,0 +1,13 @@
+{
+  "memory": "manual",
+  "unsafeModules": [
+    "cross_field.ts",
+    "cross_param.ts",
+    "cross_leak.ts",
+    "cross_chain.ts",
+    "cross_global_return.ts",
+    "free_slab.ts",
+    "free_static.ts",
+    "free_nosafety.ts"
+  ]
+}

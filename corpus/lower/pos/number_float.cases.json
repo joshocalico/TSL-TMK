@@ -1,0 +1,20 @@
+[
+  { "fn": "frac", "args": [3] },
+  { "fn": "floorAgain", "args": [7] },
+  { "fn": "floorAgain", "args": [-7] },
+  { "fn": "ceilAgain", "args": [10] },
+  { "fn": "roundAgain", "args": [2.5] },
+  { "fn": "roundAgain", "args": [-2.5] },
+  { "fn": "roundAgain", "args": [0.49999999999999994] },
+  { "fn": "roundAgain", "args": [{ "f64": "-0.2" }] },
+  { "fn": "orZero", "args": [3.5] },
+  { "fn": "orZero", "args": [1e20] },
+  { "fn": "shiftZero", "args": [3] },
+  { "fn": "floatEvidence", "args": [3] },
+  { "fn": "negZeroThroughCeil", "args": [-0.5] },
+  { "fn": "negZeroThroughCeil", "args": [0.5] },
+  { "fn": "floorHuge", "args": [1.5] },
+  { "fn": "floorHuge", "args": [0] },
+  { "fn": "nanFlows", "args": [0] },
+  { "fn": "nanFlows", "args": [2] }
+]

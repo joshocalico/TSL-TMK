@@ -1,0 +1,1 @@
+{ "memory": "strict", "unsafeModules": ["free_in_strict.ts"] }

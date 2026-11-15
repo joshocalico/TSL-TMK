@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": { "types": ["node"], "erasableSyntaxOnly": true },
+  "include": ["compiler/**/*.ts", "tools/**/*.ts", "bench/jpeg/*.ts"]
+}

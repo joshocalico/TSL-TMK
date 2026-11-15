@@ -1,0 +1,12 @@
+[
+  { "fn": "resultInCycle", "args": [3] },
+  { "fn": "hubWithClosure", "args": [4] },
+  { "fn": "hangsFromLive", "args": [2] },
+  { "fn": "liveAfter", "args": [] },
+  { "fn": "typedArrayInCycle", "args": [5] },
+  { "fn": "partly", "args": [9] },
+  { "fn": "holesMoved", "args": [4] },
+  { "fn": "readKept", "args": [] },
+  { "fn": "dropKept", "args": [] },
+  { "fn": "readKept", "args": [] }
+]

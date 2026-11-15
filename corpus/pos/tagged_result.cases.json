@@ -1,0 +1,29 @@
+[
+  { "fn": "probe", "args": [1953655158, 2, 4], "expect": { "ok": true, "value": 4 } },
+  { "fn": "probe", "args": [0, 2, 4], "expect": { "ok": false, "error": "bad-magic" } },
+  { "fn": "probe", "args": [1953655158, 1, 4], "expect": { "ok": false, "error": "bad-version" } },
+  { "fn": "probe", "args": [1953655158, 2, 0], "expect": { "ok": false, "error": "empty-slot" } },
+  { "fn": "idOrZero", "args": [1953655158, 2, 9], "expect": 9 },
+  { "fn": "idOrZero", "args": [1953655158, 2, 0], "expect": 1 },
+  { "fn": "idOrZero", "args": [0, 2, 0], "expect": 0 },
+  { "fn": "decode", "args": [1, 33], "expect": { "kind": "irq", "intid": 33 } },
+  {
+    "fn": "decode",
+    "args": [2, 511],
+    "expect": { "kind": "block", "sector": "77n", "status": 255 }
+  },
+  { "fn": "decode", "args": [3, 0], "expect": null },
+  { "fn": "decode", "args": [9, 0], "expect": { "kind": "bad" } },
+  { "fn": "statusOf", "args": [{ "kind": "irq", "intid": 12 }], "expect": 12 },
+  { "fn": "statusOf", "args": [{ "kind": "block", "sector": "1n", "status": 9 }], "expect": 9 },
+  { "fn": "statusOf", "args": [{ "kind": "bad" }], "expect": 4294967295 },
+  { "fn": "roundTrip", "args": [2, 7], "expect": 7 },
+  { "fn": "roundTrip", "args": [3, 7], "expect": 3 },
+  { "fn": "shapeValue", "args": [1], "expect": 1.5 },
+  { "fn": "shapeValue", "args": [0], "expect": 0 },
+  { "fn": "shapeInt", "args": [0], "expect": 5 },
+  { "fn": "makeOk", "args": [12], "expect": { "ok": true, "value": 12 } },
+  { "fn": "makeErr", "args": [13], "expect": { "ok": false, "error": 13 } },
+  { "fn": "chain", "args": [5], "expect": { "ok": true, "value": 6 } },
+  { "fn": "chain", "args": [0], "expect": { "ok": false, "error": "empty-slot" } }
+]

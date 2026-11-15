@@ -1,0 +1,9 @@
+[
+  { "fn": "userTrap", "args": [1000], "trap": 1000 },
+  { "fn": "constantTrap", "args": [], "trap": 1234 },
+  { "fn": "failedAssert", "args": [1], "trap": 1001 },
+  { "fn": "failedAssertDynamic", "args": [1, 2002], "trap": 2002 },
+  { "fn": "panics", "args": [1], "trap": 10 },
+  { "fn": "negativeShift", "args": ["1n", "-1n"], "trap": 8 },
+  { "fn": "negativeShiftLeft", "args": ["1n", "-1n"], "trap": 8 }
+]

@@ -1,0 +1,8 @@
+[
+  { "fn": "literalFirst", "args": [true] },
+  { "fn": "literalFirst", "args": [false] },
+  { "fn": "nullFirst", "args": [true] },
+  { "fn": "nullFirst", "args": [false] },
+  { "fn": "assignedLater", "args": [] },
+  { "fn": "arrayOfThem", "args": [] }
+]

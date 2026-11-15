@@ -1,0 +1,9 @@
+{
+  "unsafeModules": [
+    "esc_through_ptr.ts",
+    "unsafe_no_safety.ts",
+    "unsafe_ptr_no_safety.ts",
+    "unsafe_addrof_plain.ts",
+    "unsafe_addrof_stack_view.ts"
+  ]
+}

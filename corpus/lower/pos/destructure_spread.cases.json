@@ -1,0 +1,13 @@
+[
+  { "fn": "destructure", "args": [{ "x": 5, "y": 2 }] },
+  { "fn": "defaulted", "args": [{ "b": 3 }] },
+  { "fn": "defaulted", "args": [{ "a": 2, "b": 3 }] },
+  { "fn": "spread", "args": [{ "x": 1, "y": 2 }] },
+  { "fn": "spreadCopies", "args": [{ "x": 1, "y": 2 }] },
+  { "fn": "tuple", "args": [true, 9] },
+  { "fn": "tuple", "args": [false, 9] },
+  { "fn": "fromArray", "args": [[8]] },
+  { "fn": "fromArray", "args": [[8, 9]] },
+  { "fn": "patterns", "args": [5] },
+  { "fn": "nestedPattern", "args": [{ "p": { "x": 3, "y": 1 } }] }
+]

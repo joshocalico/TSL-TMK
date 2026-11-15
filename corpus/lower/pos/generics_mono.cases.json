@@ -1,0 +1,7 @@
+[
+  { "fn": "nums", "args": [3] },
+  { "fn": "flags", "args": [4] },
+  { "fn": "flags", "args": [1] },
+  { "fn": "shapes", "args": [9] },
+  { "fn": "hof", "args": [4] }
+]

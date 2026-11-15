@@ -1,0 +1,8 @@
+[
+  { "fn": "builtAndSummed", "args": [4, 3] },
+  { "fn": "builtAndSummed", "args": [1, 1] },
+  { "fn": "freedComesBack", "args": [300] },
+  { "fn": "aStaleChild", "args": [], "trap": 5 },
+  { "fn": "aStaleChildInForEach", "args": [], "trap": 5 },
+  { "fn": "reparented", "args": [] }
+]

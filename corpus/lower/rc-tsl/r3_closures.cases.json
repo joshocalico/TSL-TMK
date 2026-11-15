@@ -1,0 +1,8 @@
+[
+  { "fn": "kinds", "args": [20000], "value": 199870448 },
+  { "fn": "selfCycles", "args": [40000], "value": 800020000 },
+  { "fn": "sharedCounter", "args": [30000], "value": 450000 },
+  { "fn": "cellCycles", "args": [40000], "value": 10187712 },
+  { "fn": "keptAWhile", "args": [40000], "value": 40938314 },
+  { "fn": "reallyOut", "args": [200000], "trap": 14 }
+]

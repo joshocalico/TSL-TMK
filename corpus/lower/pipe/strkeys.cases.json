@@ -1,0 +1,19 @@
+[
+  { "fn": "wordCounts", "args": [""] },
+  { "fn": "wordCounts", "args": ["a b a  b héllo héllo 😀 \ud800 \ud800 \udc00 😀"] },
+  { "fn": "wordCounts", "args": ["the cat and the hat and the bat sat on the mat with the cat"] },
+  { "fn": "lookups", "args": ["", ""] },
+  { "fn": "lookups", "args": ["h", "é"] },
+  { "fn": "lookups", "args": ["hé", "héllo"] },
+  { "fn": "lookups", "args": ["\ud83d", "\ude00"] },
+  { "fn": "lookups", "args": ["a", "\ud800"] },
+  { "fn": "lookups", "args": ["\udc00", "😀"] },
+  { "fn": "views", "args": ["abcdefgh", 20] },
+  { "fn": "views", "args": ["é😀\ud800x", 30] },
+  { "fn": "views", "args": ["", 5] },
+  { "fn": "stringSet", "args": ["a b  c a b \ud800 é", 3] },
+  { "fn": "stringSet", "args": ["", 2] },
+  { "fn": "lastUnit", "args": ["k", 64] },
+  { "fn": "lastUnit", "args": ["", 33] },
+  { "fn": "lastUnit", "args": ["\udbff", 10] }
+]

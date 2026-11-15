@@ -1,0 +1,1 @@
+{ "unsafeModules": ["two_same_module.ts", "two_modules_a.ts", "two_modules_b.ts", "tag_on_function.ts", "tag_on_let.ts", "tag_wrong_call.ts", "untagged.ts", "in_a_function.ts", "tag_in_a_method.ts", "not_a_function.ts", "a_closure.ts", "tag_on_class.ts"] }

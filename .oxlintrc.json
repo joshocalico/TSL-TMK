@@ -1,0 +1,90 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["import", "typescript", "unicorn", "oxc"],
+  "ignorePatterns": ["node_modules/**", "build/**", "bench/jpeg/vendor/**"],
+  "rules": {
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          {
+            "name": "@tsl/unsafe",
+            "message": "Only modules listed in tsl.json unsafeModules."
+          },
+          {
+            "name": "@tsl/arch-aarch64",
+            "message": "Only modules listed in tsl.json unsafeModules."
+          },
+          {
+            "name": "typescript",
+            "message": "The TS API is confined to compiler/host (SPEC 4.2)."
+          }
+        ]
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["compiler/host/**", "tools/ts-hook.mjs", "tools/coverage.ts", "tools/deps.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "@tsl/unsafe",
+                "message": "Only modules listed in tsl.json unsafeModules."
+              },
+              {
+                "name": "@tsl/arch-aarch64",
+                "message": "Only modules listed in tsl.json unsafeModules."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "packages/tsl-alloc/**",
+        "packages/tsl-std/**",
+        "packages/tsl-gc/ex-gc-rc.ts",
+        "packages/tsl-gc/ex-gc-roomarray.ts",
+        "packages/tsl-jsrt/ex-jsrt-array.ts",
+        "packages/tsl-jsrt/ex-jsrt-map.ts",
+        "packages/tsl-jsrt/ex-jsrt-string.ts",
+        "corpus/std/**",
+        "bench/std/**",
+        "corpus/mem/**",
+        "corpus/memory/manual/**",
+        "corpus/hostonly/**",
+        "corpus/memory/leak/pool.ts",
+        "corpus/memory/leak/leak_pages.ts",
+        "bench/memory/manual/**",
+        "corpus/spec/**",
+        "corpus/neg/**",
+        "bench/alloc/**"
+      ],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    },
+    {
+      "files": ["corpus/neg/**", "corpus/lower/**", "corpus/std/**"],
+      "rules": {
+        "no-unused-vars": "off",
+        "no-eval": "off",
+        "no-self-assign": "off",
+        "typescript/no-this-alias": "off",
+        "no-unused-private-class-members": "off",
+        "unicorn/no-new-array": "off"
+      }
+    },
+    {
+      "files": ["corpus/lower/exc/**"],
+      "rules": {
+        "eslint/no-unsafe-finally": "off"
+      }
+    }
+  ]
+}

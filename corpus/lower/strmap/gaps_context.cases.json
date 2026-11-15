@@ -1,0 +1,7 @@
+[
+  { "fn": "field", "args": [], "expect": 7 },
+  { "fn": "assigned", "args": [], "expect": 42 },
+  { "fn": "returned", "args": [], "expect": 6 },
+  { "fn": "argument", "args": [], "expect": 0 },
+  { "fn": "local", "args": [], "expect": 9 }
+]

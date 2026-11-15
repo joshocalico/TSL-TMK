@@ -1,0 +1,7 @@
+[
+  { "fn": "storeNext", "args": [3, 4] },
+  { "fn": "storeNumber", "args": [3, 4] },
+  { "fn": "storeDeep", "args": [5] },
+  { "fn": "storeIndex", "args": [4] },
+  { "fn": "storeIndex", "args": [6] }
+]

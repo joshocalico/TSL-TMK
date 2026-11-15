@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": [
+    "node_modules/**",
+    "build/**",
+    "*.md",
+    "pnpm-lock.yaml",
+    "bench/jpeg/vendor/**",
+    "bench/jpeg/fixtures/**",
+    "compiler/rt/case-tables.ts",
+    "corpus/lower/fallback/generic_cap.ts",
+    "corpus/spec/ex-*.ts",
+    "packages/tsl-alloc/ex-*.ts",
+    "packages/tsl-std/ex-*.ts",
+    "packages/tsl-gc/ex-*.ts",
+    "corpus/neg/esc_*.ts",
+    "corpus/neg/unsafe_*.ts",
+    "corpus/neg/lay_*.ts",
+    "corpus/neg/ban_*.ts",
+    "corpus/neg/noalloc_*.ts",
+    "corpus/neg/rc_use_*.ts",
+    "corpus/neg/std/**"
+  ],
+  "printWidth": 100,
+  "sortPackageJson": false
+}

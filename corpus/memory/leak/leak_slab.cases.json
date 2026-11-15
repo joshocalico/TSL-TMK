@@ -1,0 +1,14 @@
+[
+  { "fn": "holdSlab", "args": [3] },
+  { "fn": "holdLeak", "args": [4] },
+  { "fn": "readHeld", "args": [] },
+  { "fn": "readLeak", "args": [] },
+  { "fn": "mixed", "args": [5, 6] },
+  { "fn": "removeHeld", "args": [] },
+  { "fn": "readHeld", "args": [], "trap": 5 },
+  { "fn": "readLeak", "args": [] },
+  { "fn": "removeThroughChain", "args": [] },
+  { "fn": "staleThroughLeak", "args": [], "trap": 5 },
+  { "fn": "leakStaysGood", "args": [] },
+  { "fn": "removeLeak", "args": [], "trap": 5 }
+]

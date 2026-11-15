@@ -1,0 +1,30 @@
+[
+  { "fn": "split", "args": [305419896], "expect": { "lo": 22136, "hi": 4660 } },
+  { "fn": "join", "args": [{ "lo": 22136, "hi": 4660 }], "expect": 305419896 },
+  { "fn": "roundTrip", "args": [4294967295], "expect": 4294967295 },
+  { "fn": "destructured", "args": [65537], "expect": 2 },
+  {
+    "fn": "add",
+    "args": [
+      { "x": 1.5, "y": 2 },
+      { "x": 0.25, "y": -1 }
+    ],
+    "expect": null
+  },
+  {
+    "fn": "dot",
+    "args": [
+      { "x": 1.5, "y": 2 },
+      { "x": 0.25, "y": -1 }
+    ],
+    "expect": null
+  },
+  { "fn": "mixed", "args": [255, "18446744073709551615n", 0.5, -1], "expect": null },
+  { "fn": "nested", "args": [65537], "expect": null },
+  { "fn": "nestedSum", "args": [{ "p": { "lo": 1, "hi": 2 }, "tag": 3 }], "expect": 6 },
+  { "fn": "reassign", "args": [65538, true], "expect": { "lo": 1, "hi": 2 } },
+  { "fn": "reassign", "args": [65538, false], "expect": { "lo": 2, "hi": 1 } },
+  { "fn": "loopRecord", "args": [20], "expect": 6765 },
+  { "fn": "widened", "args": [{ "lo": 9, "hi": 8 }], "expect": { "lo": 9, "hi": 8 } },
+  { "fn": "callOrder", "args": [10], "expect": null }
+]

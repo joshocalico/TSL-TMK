@@ -1,0 +1,11 @@
+[
+  { "fn": "mapHoldsObjectHoldsMap", "args": [200] },
+  { "fn": "setRing", "args": [200] },
+  { "fn": "selfRegistry", "args": [200] },
+  { "fn": "closureInMap", "args": [200] },
+  { "fn": "liveCycleSurvives", "args": [500] },
+  { "fn": "setGlobalCycle", "args": [] },
+  { "fn": "mapHoldsObjectHoldsMap", "args": [50] },
+  { "fn": "dropGlobalCycle", "args": [] },
+  { "fn": "cycleThroughCompaction", "args": [300] }
+]

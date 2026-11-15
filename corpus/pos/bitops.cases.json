@@ -1,0 +1,16 @@
+[
+  { "fn": "and", "args": [4294967295, 4042322160], "expect": null },
+  { "fn": "or", "args": [2147483648, 1], "expect": null },
+  { "fn": "xor", "args": [-1, 255], "expect": null },
+  { "fn": "not", "args": [0], "expect": -1 },
+  { "fn": "not", "args": [4294967295], "expect": 0 },
+  { "fn": "andU32", "args": [4294967295, 4042322160], "expect": 4042322160 },
+  { "fn": "lowByte", "args": [305419896], "expect": 120 },
+  { "fn": "highBitMask", "args": [4294967295], "expect": -2147483648 },
+  { "fn": "fullMask", "args": [4294967295], "expect": -1 },
+  { "fn": "and64", "args": ["18446744073709551615n", "1311768467463790320n"], "expect": null },
+  { "fn": "or64", "args": ["9223372036854775808n", "1n"], "expect": null },
+  { "fn": "xor64", "args": ["18446744073709551615n", "1n"], "expect": null },
+  { "fn": "not64", "args": ["0n"], "expect": "18446744073709551615n" },
+  { "fn": "compound", "args": [-1, 240], "expect": null }
+]

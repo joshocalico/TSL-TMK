@@ -1,0 +1,9 @@
+[
+  { "fn": "chain", "args": [0], "expect": 0 },
+  { "fn": "chain", "args": [1], "expect": 0 },
+  { "fn": "chain", "args": [40], "expect": 7906600 },
+  { "fn": "shared", "args": [5], "expect": 20000151 },
+  { "fn": "shared", "args": [0], "expect": 20000001 },
+  { "fn": "churn", "args": [3000, 7], "expect": 0 },
+  { "fn": "churn", "args": [50, 1], "expect": 0 }
+]

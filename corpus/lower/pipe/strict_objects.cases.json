@@ -1,0 +1,11 @@
+[
+  { "fn": "walk", "args": [0] },
+  { "fn": "walk", "args": [5] },
+  { "fn": "counters", "args": [3] },
+  { "fn": "walk", "args": [40] },
+  { "fn": "counters", "args": [17] },
+  { "fn": "local", "args": [3, 4] },
+  { "fn": "local", "args": [-2.5, 1e9] },
+  { "fn": "counters", "args": [0] },
+  { "fn": "walk", "args": [2] }
+]

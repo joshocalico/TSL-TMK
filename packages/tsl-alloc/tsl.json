@@ -1,0 +1,3 @@
+{
+  "unsafeModules": ["ex-heap.ts", "ex-vec.ts", "ex-slab.ts", "index.ts"]
+}

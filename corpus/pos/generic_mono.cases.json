@@ -1,0 +1,19 @@
+[
+  { "fn": "maxU8", "args": [200, 100], "expect": 200 },
+  { "fn": "maxI8", "args": [-128, 127], "expect": 127 },
+  { "fn": "maxU16", "args": [65535, 1], "expect": 65535 },
+  { "fn": "maxI32", "args": [-5, -6], "expect": -5 },
+  { "fn": "maxU32", "args": [4294967295, 2147483648], "expect": 4294967295 },
+  { "fn": "maxF64", "args": [1.5, -2], "expect": 1.5 },
+  { "fn": "maxWiden", "args": [5, 4294967295], "expect": 4294967295 },
+  { "fn": "maxLiteral", "args": [20], "expect": 300 },
+  { "fn": "maxU64", "args": ["18446744073709551615n", "1n"], "expect": "18446744073709551615n" },
+  { "fn": "pickBool", "args": [true, false, true], "expect": false },
+  { "fn": "sum3U8", "args": [255, 255, 255], "expect": 765 },
+  { "fn": "sum3I32", "args": [1, 2, 3], "expect": 6 },
+  { "fn": "mixedParams", "args": [3, 0.5], "expect": 3.5 },
+  { "fn": "wrapped", "args": [200], "expect": 200 },
+  { "fn": "genericResult", "args": [0], "expect": { "ok": false, "error": 1 } },
+  { "fn": "genericResult", "args": [9], "expect": { "ok": true, "value": 9 } },
+  { "fn": "big", "args": [4294967295], "expect": "4294967295n" }
+]

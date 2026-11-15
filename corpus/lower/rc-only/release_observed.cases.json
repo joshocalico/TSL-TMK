@@ -1,0 +1,11 @@
+[
+  { "fn": "pop", "args": [], "value": 1 },
+  { "fn": "shift", "args": [], "value": 1 },
+  { "fn": "spliceDiscarded", "args": [], "value": 1 },
+  { "fn": "spliceKept", "args": [], "value": 1 },
+  { "fn": "lengthZero", "args": [], "value": 1 },
+  { "fn": "overwrite", "args": [], "value": 1 },
+  { "fn": "stillHeldElsewhere", "args": [], "value": 1 },
+  { "fn": "scopeEnd", "args": [], "value": 1 },
+  { "fn": "loopIteration", "args": [], "value": 1 }
+]

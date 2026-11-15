@@ -1,0 +1,4 @@
+[
+  { "fn": "hold", "args": [3] },
+  { "fn": "stale", "args": [], "trap": 5 }
+]

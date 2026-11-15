@@ -1,0 +1,5 @@
+[
+  { "fn": "buildMoving", "args": [131072] },
+  { "fn": "buildMovingSet", "args": [65536] },
+  { "fn": "dropAndChurn", "args": [400000] }
+]

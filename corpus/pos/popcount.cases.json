@@ -1,0 +1,11 @@
+[
+  { "fn": "popcount", "args": [0], "expect": 0 },
+  { "fn": "popcount", "args": [4294967295], "expect": 32 },
+  { "fn": "popcount", "args": [2863311530], "expect": 16 },
+  { "fn": "swar", "args": [4294967295], "expect": 32 },
+  { "fn": "swar", "args": [305419896], "expect": 13 },
+  { "fn": "popcount64", "args": ["18446744073709551615n"], "expect": 64 },
+  { "fn": "leadingZeros", "args": [0], "expect": 32 },
+  { "fn": "leadingZeros", "args": [4294967295], "expect": 0 },
+  { "fn": "leadingZeros", "args": [65536], "expect": 15 }
+]

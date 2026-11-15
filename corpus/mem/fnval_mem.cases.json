@@ -1,0 +1,6 @@
+[
+  { "fn": "one", "args": [0, 7], "expect": 14 },
+  { "fn": "one", "args": [1, 7], "expect": 21 },
+  { "fn": "table", "args": [5], "expect": 12 },
+  { "fn": "between", "args": [4], "expect": "17488n" }
+]

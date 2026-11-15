@@ -1,0 +1,170 @@
+[
+  {
+    "fn": "f_catch_finally_continue_try_normal",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_try_normal",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_try_return",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_try_return",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_try_break",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_try_break",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_try_continue",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_try_continue",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_try_throw",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_try_throw",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_try_breakOuter",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_try_breakOuter",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_try_continueOuter",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_try_continueOuter",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_catch_normal",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_catch_normal",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_catch_return",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_catch_return",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_catch_break",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_catch_break",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_catch_continue",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_catch_continue",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_catch_throw",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_catch_throw",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_catch_breakOuter",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_catch_breakOuter",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_catch_continueOuter",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_catch_continueOuter",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_finally_normal",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_finally_normal",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_finally_return",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_finally_return",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_finally_break",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_finally_break",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_finally_continue",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_finally_continue",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_finally_throw",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_finally_throw",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_finally_breakOuter",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_finally_breakOuter",
+    "args": [false]
+  },
+  {
+    "fn": "f_catch_finally_continue_finally_continueOuter",
+    "args": [true]
+  },
+  {
+    "fn": "f_catch_finally_continue_finally_continueOuter",
+    "args": [false]
+  }
+]

@@ -1,0 +1,6 @@
+[
+  { "fn": "stored", "args": [1] },
+  { "fn": "returned", "args": [1] },
+  { "fn": "viaField", "args": [2] },
+  { "fn": "captureMutated", "args": [3] }
+]

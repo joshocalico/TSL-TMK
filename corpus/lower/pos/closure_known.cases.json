@@ -1,0 +1,9 @@
+[
+  { "fn": "local", "args": [3] },
+  { "fn": "mutatedCapture", "args": [3] },
+  { "fn": "callback", "args": [4] },
+  { "fn": "earlyReturn", "args": [1] },
+  { "fn": "earlyReturn", "args": [50] },
+  { "fn": "recursive", "args": [5] },
+  { "fn": "namedFunction", "args": [5] }
+]

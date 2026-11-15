@@ -1,0 +1,17 @@
+[
+  {
+    "fn": "insertion",
+    "args": [{ "i32s": [5, -1, 3, 2147483647, -2147483648, 0, 3] }],
+    "expect": null
+  },
+  { "fn": "insertion", "args": [{ "i32s": [] }], "expect": null },
+  {
+    "fn": "quick",
+    "args": [{ "i32s": [9, 8, 7, 6, 5, 4, 3, 2, 1, 0, -1, -2, -3] }],
+    "expect": null
+  },
+  { "fn": "quick", "args": [{ "i32s": [1, 1, 1, 1, 1] }], "expect": null },
+  { "fn": "quick", "args": [{ "i32s": [42] }], "expect": null },
+  { "fn": "isSorted", "args": [{ "i32s": [1, 2, 3] }], "expect": 1 },
+  { "fn": "isSorted", "args": [{ "i32s": [3, 2, 1] }], "expect": 0 }
+]

@@ -1,0 +1,14 @@
+[
+  { "fn": "ptrReadWrite", "args": [], "expect": 97 },
+  { "fn": "freedBlockReused", "args": [], "expect": true },
+  { "fn": "blockAligned", "args": [], "expect": true },
+  { "fn": "classesDontMix", "args": [], "expect": true },
+  { "fn": "largeRun", "args": [], "expect": true },
+  { "fn": "copies", "args": [] },
+  { "fn": "elemSizes", "args": [], "expect": 841 },
+  { "fn": "casts", "args": [], "expect": "84281096n" },
+  { "fn": "viewsAndSlices", "args": [], "expect": 1009 },
+  { "fn": "inlineElements", "args": [], "expect": "9n" },
+  { "fn": "nullDeref", "args": [], "trap": 6 },
+  { "fn": "outOfMemoryIsANormalResult", "args": [], "expect": true }
+]

@@ -1,0 +1,14 @@
+[
+  { "fn": "returned", "args": [100], "expect": 199 },
+  { "fn": "aTreeOfLeakObjects", "args": [4] },
+  { "fn": "keptInAGlobal", "args": [1], "expect": 1 },
+  { "fn": "keptInAGlobal", "args": [2], "expect": 2 },
+  { "fn": "leakObjectsInAMap", "args": [3], "expect": 3 },
+  { "fn": "slabStaysChecked", "args": [], "trap": 5 },
+  { "fn": "leakObjectIsAlwaysLive", "args": [], "expect": 9 },
+  { "fn": "loansStillTrap", "args": [], "trap": 13 },
+  { "fn": "strsAndBuilders", "args": [], "expect": 10 },
+  { "fn": "setOfObjects", "args": [], "expect": 2 },
+  { "fn": "vecBuffersComeBack", "args": [2000], "expect": 999 },
+  { "fn": "memoryRunsOut", "args": [400000], "diverge": { "native": { "trap": 14 }, "v8": 400000 } }
+]

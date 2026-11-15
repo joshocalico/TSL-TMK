@@ -1,0 +1,10 @@
+[
+  { "fn": "isJfif", "args": [{ "u8s": [0, 74, 70, 73, 70] }, 1] },
+  { "fn": "isJfif", "args": [{ "u8s": [0, 74, 70, 73, 71] }, 1] },
+  { "fn": "isJfif", "args": [{ "u8s": [74, 70] }, 0] },
+  { "fn": "notAdobe", "args": [{ "u8s": [65, 100, 111, 98, 101] }] },
+  { "fn": "notAdobe", "args": [{ "u8s": [65] }] },
+  { "fn": "reversed", "args": [{ "u8s": [111, 107] }] },
+  { "fn": "reversed", "args": [{ "u8s": [111, 108] }] },
+  { "fn": "emptyLit", "args": [{ "u8s": [1] }] }
+]

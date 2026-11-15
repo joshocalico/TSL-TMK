@@ -1,0 +1,5 @@
+[
+  { "fn": "grow", "args": [10] },
+  { "fn": "last", "args": [] },
+  { "fn": "grow", "args": [100000], "diverge": { "native": { "trap": 14 }, "v8": 100000 } }
+]

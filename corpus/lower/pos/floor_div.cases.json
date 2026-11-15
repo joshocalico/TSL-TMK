@@ -1,0 +1,8 @@
+[
+  { "fn": "proved", "args": [{ "u8s": [255, 16, 15] }] },
+  { "fn": "signed", "args": [7, 2] },
+  { "fn": "signed", "args": [-7, 2] },
+  { "fn": "signed", "args": [7, -2] },
+  { "fn": "divZero", "args": [{ "u8s": [1] }], "lowered_trap": 3 },
+  { "fn": "flooredByField", "args": [{ "u8s": [1, 2, 3, 4, 5, 6, 7] }] }
+]

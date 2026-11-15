@@ -1,0 +1,31 @@
+[
+  { "fn": "growScalars", "args": [1001], "expect": 1002001 },
+  { "fn": "growScalars", "args": [5000] },
+  { "fn": "growBytes", "args": [1500] },
+  { "fn": "bigElements", "args": [], "expect": "9223372036854775808n" },
+  { "fn": "growRefs", "args": [1200] },
+  { "fn": "refsIdentityAcrossGrowth", "args": [], "expect": true },
+  { "fn": "bound", "args": [0], "expect": 1 },
+  { "fn": "bound", "args": [1], "trap": 2 },
+  { "fn": "setBound", "args": [1], "trap": 2 },
+  { "fn": "popAndEmpty", "args": [], "trap": 2 },
+  { "fn": "sliceWrites", "args": [], "expect": 345 },
+  { "fn": "pushDuringLoan", "args": [], "trap": 13 },
+  { "fn": "popDuringLoan", "args": [], "trap": 13 },
+  { "fn": "freeDuringLoan", "args": [], "trap": 13 },
+  { "fn": "nestedLoan", "args": [], "expect": 16 },
+  { "fn": "useAfterFree", "args": [], "trap": 5 },
+  { "fn": "doubleFree", "args": [], "trap": 5 },
+  { "fn": "usingFreesAtScopeEnd", "args": [], "expect": true },
+  { "fn": "usingOnReturn", "args": [], "expect": 105 },
+  { "fn": "usingOnBreak", "args": [], "expect": 4 },
+  { "fn": "usingOrder", "args": [], "expect": 21 },
+  { "fn": "vecInASlab", "args": [], "expect": 7 },
+  { "fn": "outOfMemory", "args": [], "expect": 0 },
+  { "fn": "outOfMemoryLeavesItEmpty", "args": [], "trap": 2 },
+  {
+    "fn": "trapInLoanUnderUsing",
+    "args": [],
+    "diverge": { "native": { "trap": 13 }, "v8": { "throw": "SuppressedError" } }
+  }
+]

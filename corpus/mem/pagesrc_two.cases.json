@@ -1,0 +1,7 @@
+[
+  { "fn": "quotaHeap", "args": [] },
+  { "fn": "rangeHeap", "args": [] },
+  { "fn": "bothHeaps", "args": [] },
+  { "fn": "exhaustQuota", "args": [], "trap": 14 },
+  { "fn": "exhaustRange", "args": [], "trap": 14 }
+]

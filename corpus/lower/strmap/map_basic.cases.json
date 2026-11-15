@@ -1,0 +1,69 @@
+[
+  { "fn": "basics", "args": [] },
+  { "fn": "sameValueZero", "args": [] },
+  { "fn": "setSameValueZero", "args": [] },
+  { "fn": "strKeys", "args": [] },
+  { "fn": "boolKeys", "args": [] },
+  { "fn": "objKeys", "args": [] },
+  { "fn": "arrKeys", "args": [] },
+  { "fn": "nullKeys", "args": [] },
+  { "fn": "undefKeys", "args": [] },
+  { "fn": "iterAll", "args": [] },
+  { "fn": "setAll", "args": [] },
+  { "fn": "spreads", "args": [] },
+  { "fn": "spreadPairs", "args": [] },
+  { "fn": "arrayFromMap", "args": [] },
+  { "fn": "fromMap", "args": [] },
+  { "fn": "explicitIter", "args": [] },
+  { "fn": "firstKey", "args": [] },
+  { "fn": "firstOfEmpty", "args": [] },
+  { "fn": "narrowDone", "args": [] },
+  { "fn": "entriesIter", "args": [] },
+  { "fn": "clearAndReuse", "args": [] },
+  { "fn": "holdsMaps", "args": [] },
+  { "fn": "tuples", "args": [] },
+  { "fn": "sortPairs", "args": [] },
+  { "fn": "sortDefault", "args": [] },
+  { "fn": "sortNums", "args": [] },
+  { "fn": "revConcat", "args": [] },
+  { "fn": "growAndDelete", "args": [0] },
+  { "fn": "growAndDelete", "args": [1] },
+  { "fn": "growAndDelete", "args": [4] },
+  { "fn": "growAndDelete", "args": [5] },
+  { "fn": "growAndDelete", "args": [16] },
+  { "fn": "growAndDelete", "args": [100] },
+  { "fn": "growAndDelete", "args": [1000] },
+  {
+    "fn": "arg",
+    "args": [
+      {
+        "map": [
+          ["a", 1],
+          ["\u00e9", 2]
+        ]
+      },
+      "\u00e9"
+    ]
+  },
+  { "fn": "arg", "args": [{ "map": [] }, "x"] },
+  { "fn": "argSet", "args": [{ "set": [1, 2.5, 3] }, 2.5] },
+  {
+    "fn": "roundTrip",
+    "args": [
+      {
+        "map": [
+          ["gone", 1],
+          ["kept\ud800", 2]
+        ]
+      }
+    ]
+  },
+  { "fn": "makeSet", "args": [["b", "a", "b"]] },
+  { "fn": "makeMap", "args": [["b", "a", "b"]] },
+  { "fn": "addressFree", "args": [0, 40] },
+  { "fn": "addressFree", "args": [1, 40] },
+  { "fn": "addressFree", "args": [7, 40] },
+  { "fn": "addressFree", "args": [1000, 40] },
+  { "fn": "addressFree", "args": [3, 300] },
+  { "fn": "addressFree", "args": [5000, 300] }
+]

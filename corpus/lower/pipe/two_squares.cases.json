@@ -1,0 +1,5 @@
+[
+  { "fn": "twoSquares", "args": [0] },
+  { "fn": "twoSquares", "args": [3] },
+  { "fn": "twoSquares", "args": [10] }
+]

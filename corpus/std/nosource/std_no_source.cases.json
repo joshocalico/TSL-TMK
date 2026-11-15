@@ -1,0 +1,4 @@
+[
+  { "fn": "viaTry", "args": [], "diverge": { "native": 0, "v8": 1 } },
+  { "fn": "viaTrap", "args": [], "diverge": { "native": { "trap": 14 }, "v8": 1 } }
+]

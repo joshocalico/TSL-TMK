@@ -1,0 +1,4 @@
+[
+  { "fn": "fill", "args": [1000000], "memory_trap": { "leak": 14, "manual": 14, "rc": 14 } },
+  { "fn": "intact", "args": [0], "value": 1 }
+]

@@ -1,0 +1,15 @@
+[
+  { "fn": "fround", "args": [0.1], "expect": null },
+  { "fn": "fround", "args": [1e40], "expect": null },
+  { "fn": "fround", "args": [{ "f64": "NaN" }], "expect": null },
+  { "fn": "fround", "args": [{ "f64": "-0" }], "expect": null },
+  { "fn": "sumThenRound", "args": [16777216, 1], "expect": null },
+  { "fn": "sumDouble", "args": [16777216, 1], "expect": 16777217 },
+  { "fn": "widen", "args": [0.5], "expect": 0.5 },
+  { "fn": "exactLiteral", "args": [], "expect": 0.5 },
+  { "fn": "roundedLiteral", "args": [], "expect": null },
+  { "fn": "storeRounds", "args": [{ "f32s": [0, 0] }, 1, 0.1], "expect": null },
+  { "fn": "sumArray", "args": [{ "f32s": [0.5, 0.25, 1] }], "expect": 1.75 },
+  { "fn": "assignedValue", "args": [{ "f32s": [0] }, 0.1], "expect": 0.1 },
+  { "fn": "compareF32", "args": [0.5, 0.25], "expect": false }
+]

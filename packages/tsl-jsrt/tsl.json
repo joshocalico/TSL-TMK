@@ -1,0 +1,4 @@
+{
+  "memory": "leak",
+  "unsafeModules": ["ex-jsrt-array.ts", "ex-jsrt-map.ts", "ex-jsrt-string.ts"]
+}

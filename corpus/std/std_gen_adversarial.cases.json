@@ -1,0 +1,17 @@
+[
+  { "fn": "staleLocalRead", "args": [], "diverge5": { "native": "22n" } },
+  { "fn": "staleLocalInForEach", "args": [], "diverge5": { "native": "33n" } },
+  { "fn": "staleLocalWriteHitsNewOccupant", "args": [], "diverge5": { "native": "99n" } },
+  { "fn": "staleFirstFieldIsOldDataNotAnAddress", "args": [], "diverge5": { "native": "5n" } },
+  { "fn": "staleFirstFieldReferenceIsChecked", "args": [], "trap": 5 },
+  { "fn": "wrappedGenerationAliases", "args": [], "diverge": { "native": "21n", "v8": "11n" } },
+  {
+    "fn": "bumpedGenerationTraps",
+    "args": [],
+    "diverge": { "native": { "trap": 5 }, "v8": "11n" }
+  },
+  { "fn": "objectAtGivesLiveReference", "args": [], "expect": "1111n" },
+  { "fn": "crossSlabRemoveTraps", "args": [], "trap": 5 },
+  { "fn": "crossSlabRemoveFromEmptyTraps", "args": [], "trap": 5 },
+  { "fn": "removeFromItsOwnSlabWorks", "args": [], "expect": "0n" }
+]

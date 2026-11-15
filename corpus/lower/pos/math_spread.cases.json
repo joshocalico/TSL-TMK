@@ -1,0 +1,8 @@
+[
+  { "fn": "ints", "args": [{ "u8s": [3, 9, 2] }] },
+  { "fn": "emptyInts", "args": [{ "u8s": [1] }], "lowered_trap": 4 },
+  { "fn": "floats", "args": [[1.5, -2, 3]] },
+  { "fn": "floatEmpty", "args": [[]] },
+  { "fn": "plain", "args": [2.5, -1] },
+  { "fn": "plain", "args": [{ "f64": "NaN" }, 1] }
+]

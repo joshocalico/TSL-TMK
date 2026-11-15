@@ -1,0 +1,8 @@
+[
+  { "fn": "push", "args": [1] },
+  { "fn": "push", "args": [2] },
+  { "fn": "sum", "args": [] },
+  { "fn": "tree", "args": [300] },
+  { "fn": "onStack", "args": [4] },
+  { "fn": "sum", "args": [] }
+]

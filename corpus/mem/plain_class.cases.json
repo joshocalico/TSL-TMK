@@ -1,0 +1,8 @@
+[
+  { "fn": "basics", "args": [1], "expect": 57 },
+  { "fn": "loopNew", "args": [5], "expect": 10 },
+  { "fn": "staticNew", "args": [5], "expect": 5 },
+  { "fn": "staticNew", "args": [6], "expect": 11 },
+  { "fn": "parameterPropertyInConstructor", "args": [4], "expect": 5008 },
+  { "fn": "staticConstructorAssigns", "args": [], "expect": 55 }
+]

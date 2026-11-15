@@ -1,0 +1,4 @@
+[
+  { "fn": "report", "args": [], "expect": 3593321454 },
+  { "fn": "nothingToNameOrPass", "args": ["0n"], "expect": true }
+]

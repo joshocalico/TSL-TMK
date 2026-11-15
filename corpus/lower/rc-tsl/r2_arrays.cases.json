@@ -1,0 +1,10 @@
+[
+  { "fn": "overwrite", "args": [20000], "value": 199990000 },
+  { "fn": "cutAndMove", "args": [3000], "value": 9012000 },
+  { "fn": "globalArrays", "args": [2000], "value": 126000 },
+  { "fn": "fieldArrays", "args": [2000], "value": 2137000 },
+  { "fn": "nested", "args": [4000], "value": 24000 },
+  { "fn": "numbers", "args": [2000], "value": 398000 },
+  { "fn": "chains", "args": [3000], "value": 60000 },
+  { "fn": "reallyOut", "args": [200000], "trap": 14 }
+]

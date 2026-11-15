@@ -1,0 +1,8 @@
+[
+  { "fn": "setUp", "args": [3, 4] },
+  { "fn": "readSlab", "args": [] },
+  { "fn": "freeSlabObject", "args": [], "trap": 5 },
+  { "fn": "setUp", "args": [5, 6] },
+  { "fn": "removeSlab", "args": [] },
+  { "fn": "readSlab", "args": [], "trap": 5 }
+]

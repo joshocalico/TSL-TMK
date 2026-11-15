@@ -1,0 +1,21 @@
+[
+  { "fn": "repeat", "args": [3] },
+  { "fn": "repeat", "args": [-1] },
+  { "fn": "repeat", "args": [300000000] },
+  { "fn": "fixed", "args": [2] },
+  { "fn": "fixed", "args": [101] },
+  { "fn": "radix", "args": [16] },
+  { "fn": "radix", "args": [1] },
+  { "fn": "radix", "args": [37] },
+  { "fn": "codePoint", "args": [128512] },
+  { "fn": "codePoint", "args": [-1] },
+  { "fn": "codePoint", "args": [1114112] },
+  { "fn": "arrayLength", "args": [3] },
+  { "fn": "arrayLength", "args": [-1] },
+  { "fn": "arrayLength", "args": [2.5] },
+  { "fn": "deep", "args": [1000] },
+  { "fn": "deep", "args": [10000000] },
+  { "fn": "mutual", "args": [5001] },
+  { "fn": "mutual", "args": [10000000] },
+  { "fn": "deepThenFine", "args": [10000000] }
+]

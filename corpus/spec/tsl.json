@@ -1,0 +1,16 @@
+{
+  "unsafeModules": [
+    "ex-heap.ts",
+    "ex-vec.ts",
+    "ex-slab.ts",
+    "ex-pages.ts",
+    "ex-mmio.ts",
+    "ex-entry.ts",
+    "ex-virtq.ts",
+    "ex-std-global.ts",
+    "ex-gc-rc.ts",
+    "ex-jsrt-array.ts",
+    "ex-jsrt-string.ts",
+    "pages.ts"
+  ]
+}

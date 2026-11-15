@@ -1,0 +1,6 @@
+[
+  { "fn": "churnMaps", "args": [3000], "memory_trap": { "leak": 14, "manual": 14 } },
+  { "fn": "churnSets", "args": [40000], "memory_trap": { "leak": 14, "manual": 14 } },
+  { "fn": "churnStrings", "args": [5000], "memory_trap": { "leak": 14, "manual": 14 } },
+  { "fn": "longMapChurn", "args": [200000], "memory_trap": { "leak": 14, "manual": 14 } }
+]

@@ -1,0 +1,9 @@
+[
+  { "fn": "next", "args": [] },
+  { "fn": "next", "args": [] },
+  { "fn": "bumpTable", "args": [1] },
+  { "fn": "bumpTable", "args": [1] },
+  { "fn": "reads", "args": [1] },
+  { "fn": "setRatio", "args": [0.5] },
+  { "fn": "setRatio", "args": [0.5] }
+]

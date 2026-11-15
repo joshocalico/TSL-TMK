@@ -1,0 +1,11 @@
+[
+  { "fn": "feedAll", "args": [0, 0] },
+  { "fn": "feedAll", "args": [1, 0] },
+  { "fn": "feedAll", "args": [7, 0] },
+  { "fn": "feedAll", "args": [7, 1] },
+  { "fn": "gauge", "args": [0] },
+  { "fn": "gauge", "args": [1] },
+  { "fn": "gauge", "args": [5] },
+  { "fn": "pair", "args": [0] },
+  { "fn": "pair", "args": [6] }
+]

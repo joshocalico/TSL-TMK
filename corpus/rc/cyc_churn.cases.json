@@ -1,0 +1,10 @@
+[
+  { "fn": "selfLoops", "args": [50000] },
+  { "fn": "twoNodes", "args": [50000] },
+  { "fn": "rings", "args": [1000, 100] },
+  { "fn": "doublyLinked", "args": [800, 100] },
+  { "fn": "thisClosures", "args": [25000] },
+  { "fn": "closuresInArrays", "args": [1500, 16] },
+  { "fn": "parentTrees", "args": [800, 5] },
+  { "fn": "viaGlobal", "args": [1000, 100] }
+]

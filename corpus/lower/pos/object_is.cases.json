@@ -1,0 +1,13 @@
+[
+  { "fn": "nums", "args": [1, 1], "expect": true },
+  { "fn": "nums", "args": [1, 2], "expect": false },
+  { "fn": "nums", "args": [0.5, 0.5], "expect": true },
+  { "fn": "ints", "args": [3, 3], "expect": true },
+  { "fn": "ints", "args": [3, 4], "expect": false },
+  { "fn": "mixed", "args": [2], "expect": true },
+  { "fn": "mixed", "args": [2.5], "expect": false },
+  { "fn": "bools", "args": [true, true], "expect": true },
+  { "fn": "bools", "args": [true, false], "expect": false },
+  { "fn": "zeroes", "args": [], "expect": 46 },
+  { "fn": "evaluatedOnce", "args": [1], "expect": 4 }
+]

@@ -1,0 +1,10 @@
+[
+  { "fn": "buildList", "args": [1000000] },
+  { "fn": "sumList", "args": [] },
+  { "fn": "dropList", "args": [] },
+  { "fn": "allocAfter", "args": [100000] },
+  { "fn": "sumList", "args": [] },
+  { "fn": "buildMany", "args": [300000] },
+  { "fn": "dropMany", "args": [] },
+  { "fn": "allocAfter", "args": [100000] }
+]

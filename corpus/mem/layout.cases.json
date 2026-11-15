@@ -1,0 +1,38 @@
+[
+  { "fn": "sizes", "args": [] },
+  { "fn": "offsets", "args": [] },
+  { "fn": "descBytes", "args": [{ "bytes": "00000000000000000000000000000000" }], "expect": 12 },
+  { "fn": "bitsMask", "args": [{ "bytes": "00000000000000000000000000000000" }], "expect": 5 },
+  { "fn": "makeLocal", "args": [], "expect": 15 },
+  { "fn": "nestedWrites", "args": [{ "zeros": 200 }] },
+  { "fn": "arrayOfBound", "args": [{ "zeros": 200 }, 2], "expect": 0 },
+  { "fn": "arrayOfBound", "args": [{ "zeros": 200 }, 3], "trap": 2 },
+  { "fn": "bigEndian", "args": [{ "zeros": 200 }], "expect": 4660 },
+  { "fn": "bigEndianRead", "args": [{ "zeros": 200 }] },
+  {
+    "fn": "enumRead",
+    "args": [
+      {
+        "bytes": "0000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ],
+    "expect": 1
+  },
+  {
+    "fn": "enumRead",
+    "args": [
+      {
+        "bytes": "0000000000000900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ],
+    "trap": 4
+  },
+  { "fn": "enumWrite", "args": [{ "zeros": 200 }] },
+  { "fn": "enumOk", "args": [1], "expect": 1 },
+  { "fn": "enumOk", "args": [2], "expect": 2 },
+  { "fn": "enumOk", "args": [3], "expect": 99 },
+  { "fn": "misaligned", "args": [{ "zeros": 64 }], "trap": 9 },
+  { "fn": "pastEnd", "args": [{ "zeros": 16 }], "trap": 2 },
+  { "fn": "floatFields", "args": [{ "zeros": 64 }] },
+  { "fn": "typedArrayMethods", "args": [{ "zeros": 16 }] }
+]

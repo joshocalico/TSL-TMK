@@ -1,0 +1,5 @@
+[
+  { "fn": "held", "args": [7], "expect": 7 },
+  { "fn": "cleared", "args": [5], "rcOnly": true, "expect": 5000 },
+  { "fn": "derefHolds", "args": [9], "expect": 9 }
+]

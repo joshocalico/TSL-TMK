@@ -1,0 +1,26 @@
+[
+  { "fn": "encode", "args": [{ "bytes": "" }, { "bytes": "00000000" }], "expect": 0 },
+  {
+    "fn": "encode",
+    "args": [{ "bytes": "66" }, { "bytes": "00000000" }],
+    "expect": { "args": [null, { "bytes": "5a673d3d" }] }
+  },
+  {
+    "fn": "encode",
+    "args": [{ "bytes": "666f" }, { "bytes": "00000000" }],
+    "expect": { "args": [null, { "bytes": "5a6d383d" }] }
+  },
+  {
+    "fn": "encode",
+    "args": [{ "bytes": "666f6f" }, { "bytes": "00000000" }],
+    "expect": { "args": [null, { "bytes": "5a6d3976" }] }
+  },
+  {
+    "fn": "encode",
+    "args": [
+      { "bytes": "ffeeddccbbaa99887766" },
+      { "bytes": "000000000000000000000000000000000000000000000000" }
+    ],
+    "expect": null
+  }
+]

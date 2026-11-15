@@ -1,0 +1,6 @@
+[
+  { "fn": "renamed", "args": [1] },
+  { "fn": "plain", "args": [1] },
+  { "fn": "arrow", "args": [1] },
+  { "fn": "default", "args": [1] }
+]

@@ -1,0 +1,6 @@
+[
+  { "fn": "paramProp", "args": [5] },
+  { "fn": "paramPropClosure", "args": [5] },
+  { "fn": "localClass", "args": [5] },
+  { "fn": "localGeneric", "args": [5] }
+]

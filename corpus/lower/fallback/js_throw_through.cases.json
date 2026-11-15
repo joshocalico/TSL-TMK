@@ -1,0 +1,6 @@
+[
+  { "fn": "outer", "args": [3] },
+  { "fn": "outer", "args": [-3] },
+  { "fn": "twice", "args": [10] },
+  { "fn": "twice", "args": [4] }
+]

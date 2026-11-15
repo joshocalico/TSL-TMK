@@ -1,0 +1,31 @@
+[
+  { "fn": "flags", "args": [0] },
+  { "fn": "flags", "args": [5] },
+  { "fn": "flags", "args": [7] },
+  { "fn": "flagBits", "args": [{ "a": true, "b": false, "c": true }] },
+  { "fn": "flagBits", "args": [{ "a": false, "b": true, "c": false }] },
+  { "fn": "flip", "args": [{ "a": true, "b": true, "c": false }] },
+  { "fn": "mixed", "args": [3, 5] },
+  { "fn": "mixed", "args": [-2, 4] },
+  { "fn": "mixedSum", "args": [{ "on": true, "n": 2.5, "off": false, "k": 7, "last": true }] },
+  { "fn": "mixedSum", "args": [{ "on": false, "n": -1, "off": true, "k": 0, "last": false }] },
+  { "fn": "maybe", "args": [0] },
+  { "fn": "maybe", "args": [7] },
+  { "fn": "maybe", "args": [15] },
+  { "fn": "maybe", "args": [6] },
+  { "fn": "maybeSum", "args": [{ "id": 1 }] },
+  { "fn": "maybeSum", "args": [{ "id": 2, "i": 5, "f": 0.5, "b": true }] },
+  { "fn": "maybeSum", "args": [{ "id": 3, "f": 1.25, "b": false }] },
+  { "fn": "smalls", "args": [5] },
+  {
+    "fn": "smallSum",
+    "args": [
+      [
+        { "x": 1, "y": 2, "z": 3 },
+        { "x": 4, "y": 5, "z": 6 }
+      ]
+    ]
+  },
+  { "fn": "bools", "args": [7] },
+  { "fn": "countTrue", "args": [[true, false, true, true, false]] }
+]

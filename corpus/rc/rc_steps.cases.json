@@ -1,0 +1,6 @@
+[
+  { "fn": "listDrop", "args": [1000], "rcOnly": true, "expect": 2001 },
+  { "fn": "budgets", "args": [100], "rcOnly": true, "expect": 51010 },
+  { "fn": "bigVector", "args": [1000000], "rcOnly": true, "expect": 201000000 },
+  { "fn": "replacing", "args": [], "rcOnly": true, "expect": 98 }
+]

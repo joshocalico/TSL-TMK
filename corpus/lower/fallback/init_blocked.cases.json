@@ -1,0 +1,4 @@
+[
+  { "fn": "reader", "args": [] },
+  { "fn": "free", "args": [1] }
+]

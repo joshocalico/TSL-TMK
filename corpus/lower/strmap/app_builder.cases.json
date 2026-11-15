@@ -1,0 +1,13 @@
+[
+  { "fn": "append", "args": [100000] },
+  { "fn": "appendRead", "args": [20000] },
+  { "fn": "prepend", "args": [5000] },
+  { "fn": "viaJoin", "args": [1000] },
+  { "fn": "csv", "args": [20, 5] },
+  { "fn": "reverse", "args": ["a😀b\ud800c"] },
+  { "fn": "isPal", "args": ["abcba"] },
+  { "fn": "caesar", "args": ["hello, world", 3] },
+  { "fn": "branchOff", "args": [100] },
+  { "fn": "subs", "args": ["abcdefg"] },
+  { "fn": "padTable", "args": [] }
+]

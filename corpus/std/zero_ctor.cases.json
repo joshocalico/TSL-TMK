@@ -1,0 +1,6 @@
+[
+  { "fn": "slabReuse", "args": [40], "expect": 0 },
+  { "fn": "stackReuse", "args": [40], "expect": 0 },
+  { "fn": "rcReuse", "args": [40], "expect": 0 },
+  { "fn": "inPlace", "args": [4], "expect": 12 }
+]

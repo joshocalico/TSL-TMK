@@ -1,0 +1,1 @@
+{ "memory": "manual", "unsafeModules": ["raw_in_vec.ts", "raw_in_map.ts"] }

@@ -1,0 +1,13 @@
+[
+  { "fn": "buildRing", "args": [100000] },
+  { "fn": "dropRing", "args": [] },
+  { "fn": "growPlain", "args": [600000] },
+  { "fn": "growPlain", "args": [600000] },
+  { "fn": "dropPlain", "args": [] },
+  { "fn": "buildList", "args": [100000] },
+  { "fn": "dropList", "args": [] },
+  { "fn": "growPlain", "args": [600000] },
+  { "fn": "growPlain", "args": [600000] },
+  { "fn": "dropPlain", "args": [] },
+  { "fn": "ticks", "args": [1000] }
+]

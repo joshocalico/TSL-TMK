@@ -1,0 +1,13 @@
+[
+  { "fn": "addWrapI32", "args": [2147483647, 1], "expect": -2147483648 },
+  { "fn": "addWrapU32", "args": [4294967295, 2], "expect": 1 },
+  { "fn": "subWrapU32", "args": [0, 1], "expect": 4294967295 },
+  { "fn": "chainWrap", "args": [4294967295, 4294967295, 1, 2], "expect": null },
+  { "fn": "maskU8", "args": [255, 255], "expect": 254 },
+  { "fn": "maskSub", "args": [0, 1], "expect": 255 },
+  { "fn": "mul16", "args": [65535, 65535], "expect": null },
+  { "fn": "mul16Mask", "args": [65535, 65535], "expect": 1 },
+  { "fn": "imul", "args": [2147483647, 2147483647], "expect": 1 },
+  { "fn": "imul", "args": [-2147483648, -1], "expect": null },
+  { "fn": "imulU32", "args": [4294967295, 4294967295], "expect": 1 }
+]

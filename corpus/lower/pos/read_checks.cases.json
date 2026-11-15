@@ -1,0 +1,14 @@
+[
+  { "fn": "numAt", "args": [4, 3] },
+  { "fn": "numAt", "args": [4, 4], "lowered_trap": 2 },
+  { "fn": "numAt", "args": [4, 7], "lowered_trap": 2 },
+  { "fn": "objAt", "args": [5, 2] },
+  { "fn": "objAt", "args": [5, 5], "lowered_trap": 2 },
+  { "fn": "objAt", "args": [5, 9], "lowered_trap": 2 },
+  { "fn": "holeAt", "args": [6, 1] },
+  { "fn": "holeAt", "args": [6, 3], "lowered_trap": 6 },
+  { "fn": "holeAt", "args": [6, 4] },
+  { "fn": "holeAt", "args": [6, 8], "lowered_trap": 2 },
+  { "fn": "sumAt", "args": [5, 1, 4] },
+  { "fn": "sumAt", "args": [5, 4, 6], "lowered_trap": 2 }
+]

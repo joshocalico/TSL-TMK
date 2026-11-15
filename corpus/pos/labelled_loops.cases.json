@@ -1,0 +1,13 @@
+[
+  { "fn": "firstPair", "args": [50, 91], "expect": 7013 },
+  { "fn": "firstPair", "args": [5, 97], "expect": 0 },
+  { "fn": "skipRows", "args": [3, 2], "expect": null },
+  { "fn": "skipRows", "args": [0, 2], "expect": 0 },
+  { "fn": "whileLabel", "args": [8], "expect": null },
+  { "fn": "whileLabel", "args": [0], "expect": 0 },
+  { "fn": "blockBreak", "args": [-1], "expect": 0 },
+  { "fn": "blockBreak", "args": [0], "expect": 1 },
+  { "fn": "blockBreak", "args": [3], "expect": 2 },
+  { "fn": "swapInLoop", "args": [3], "expect": 21 },
+  { "fn": "swapInLoop", "args": [4], "expect": 12 }
+]

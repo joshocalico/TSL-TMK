@@ -1,0 +1,8 @@
+{
+  "source": "packages/file-formats/src/image/jpeg.ts",
+  "repo": "moire",
+  "commit": "d126a70",
+  "sha256_original": "215182f153d002e73d414f6a2d5dfc9fa27fc6d6ccd5e4731b4191515cc2ac44",
+  "sha256_vendored": "84d22be06ab380d28c905752a79c9bf1d21eea00a1615fbc611b6c502cb9ce1f",
+  "edit": "the type import from ./raster replaced by a local copy of ImageData (SPEC 4.6)"
+}

@@ -1,0 +1,7 @@
+[
+  { "fn": "concat", "args": ["a"] },
+  { "fn": "compareVar", "args": [{ "u8s": [1] }] },
+  { "fn": "template", "args": [1] },
+  { "fn": "jsonish", "args": [1] },
+  { "fn": "lengthOf", "args": ["abc"] }
+]

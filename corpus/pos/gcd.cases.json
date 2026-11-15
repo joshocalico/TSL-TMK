@@ -1,0 +1,9 @@
+[
+  { "fn": "gcd", "args": [1071, 462], "expect": 21 },
+  { "fn": "gcd", "args": [0, 5], "expect": 5 },
+  { "fn": "gcd", "args": [4294967295, 65535], "expect": 65535 },
+  { "fn": "gcdRec", "args": [1071, 462], "expect": 21 },
+  { "fn": "gcd64", "args": ["18446744073709551557n", "18446744073709551533n"], "expect": null },
+  { "fn": "gcd64", "args": ["1000000000000n", "48n"], "expect": "16n" },
+  { "fn": "lcm", "args": [4, 6], "expect": 12 }
+]

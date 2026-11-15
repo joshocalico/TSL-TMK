@@ -1,0 +1,11 @@
+[
+  { "fn": "objects", "args": [200000], "memory_trap": { "leak": 14, "manual": 14 } },
+  { "fn": "arrays", "args": [100000], "memory_trap": { "leak": 14, "manual": 14 } },
+  { "fn": "arraysOfObjects", "args": [100000], "memory_trap": { "leak": 14, "manual": 14 } },
+  { "fn": "closures", "args": [100000], "memory_trap": { "leak": 14, "manual": 14 } },
+  { "fn": "mutatedCaptures", "args": [100000], "memory_trap": { "leak": 14, "manual": 14 } },
+  { "fn": "arraysGrowing", "args": [2000], "memory_trap": { "leak": 14, "manual": 14 } },
+  { "fn": "typedArrays", "args": [8000], "memory_trap": { "leak": 14, "manual": 14 } },
+  { "fn": "queues", "args": [100000], "memory_trap": { "leak": 14, "manual": 14 } },
+  { "fn": "localsInALoop", "args": [7000000], "memory_trap": { "leak": 14, "manual": 14 } }
+]

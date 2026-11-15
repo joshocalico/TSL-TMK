@@ -1,0 +1,15 @@
+[
+  {
+    "fn": "churnNumMaps",
+    "args": [20000],
+    "value": 2119894,
+    "memory_trap": { "leak": 14, "manual": 14 }
+  },
+  {
+    "fn": "churnObjMaps",
+    "args": [10000],
+    "value": 50675000,
+    "memory_trap": { "leak": 14, "manual": 14 }
+  },
+  { "fn": "iterGrow", "args": [5000], "value": 1440000 }
+]

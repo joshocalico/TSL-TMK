@@ -1,0 +1,12 @@
+[
+  { "fn": "throwAndDrop", "args": [300] },
+  { "fn": "keepThrowing", "args": [50] },
+  { "fn": "stillWorks", "args": [] },
+  {
+    "fn": "keepThrowing",
+    "args": [1000000],
+    "memory_trap": { "rc": 14, "leak": 14, "manual": 14 }
+  },
+  { "fn": "release", "args": [] },
+  { "fn": "throwAndDrop", "args": [20000], "memory_trap": { "leak": 14, "manual": 14 } }
+]

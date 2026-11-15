@@ -1,0 +1,6 @@
+[
+  { "fn": "fewStrings", "args": [0], "expect": 0 },
+  { "fn": "fewStrings", "args": [1], "expect": 1097 },
+  { "fn": "fewStrings", "args": [10], "expect": 19097 },
+  { "fn": "fewStrings", "args": [200], "expect": 399098 }
+]

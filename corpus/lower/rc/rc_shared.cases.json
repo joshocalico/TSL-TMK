@@ -1,0 +1,6 @@
+[
+  { "fn": "swap", "args": [3000] },
+  { "fn": "swaps", "args": [20, 3000] },
+  { "fn": "mixed", "args": [100] },
+  { "fn": "mixed", "args": [700] }
+]

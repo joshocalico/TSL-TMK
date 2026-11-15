@@ -1,0 +1,5 @@
+{
+  "memory": "manual",
+  "noStd": true,
+  "unsafeModules": ["double_free.ts"]
+}

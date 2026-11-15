@@ -1,0 +1,19 @@
+[
+  { "fn": "buildRing", "args": [20000] },
+  { "fn": "readRing", "args": [] },
+  { "fn": "dropRing", "args": [] },
+  { "fn": "growPlain", "args": [50000] },
+  { "fn": "growPlain", "args": [50000] },
+  { "fn": "dropPlain", "args": [] },
+  { "fn": "buildList", "args": [20000] },
+  { "fn": "dropList", "args": [] },
+  { "fn": "growBy", "args": [50000] },
+  { "fn": "dropGrown", "args": [] },
+  { "fn": "buildZigzag", "args": [2000] },
+  { "fn": "readZigzag", "args": [] },
+  { "fn": "ticks", "args": [1000] },
+  { "fn": "readZigzag", "args": [] },
+  { "fn": "dropZigzagHolder", "args": [] },
+  { "fn": "readZigzag", "args": [] },
+  { "fn": "ticks", "args": [1000] }
+]

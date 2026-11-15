@@ -1,0 +1,4 @@
+[
+  { "fn": "fill", "args": [6000], "value": 18000 },
+  { "fn": "refill", "args": [6000], "value": 6000 }
+]

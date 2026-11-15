@@ -1,0 +1,50 @@
+[
+  {
+    "fn": "encode",
+    "args": [
+      {
+        "bytes": "000000010102"
+      },
+      {
+        "bytes": "0000000000000000000000000000000000000000"
+      }
+    ],
+    "expect": 6
+  },
+  {
+    "fn": "encode",
+    "args": [
+      {
+        "bytes": ""
+      },
+      {
+        "bytes": "0000"
+      }
+    ],
+    "expect": 0
+  },
+  {
+    "fn": "encode",
+    "args": [
+      {
+        "bytes": "abababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab"
+      },
+      {
+        "bytes": "0000000000000000"
+      }
+    ],
+    "expect": 4
+  },
+  {
+    "fn": "decode",
+    "args": [
+      {
+        "bytes": "030002010102"
+      },
+      {
+        "bytes": "00000000000000000000"
+      }
+    ],
+    "expect": 6
+  }
+]

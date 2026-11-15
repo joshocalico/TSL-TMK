@@ -1,0 +1,8 @@
+[
+  { "fn": "pairs", "args": [10] },
+  { "fn": "trees", "args": [4] },
+  { "fn": "vectors", "args": [8] },
+  { "fn": "tails", "args": [100] },
+  { "fn": "choose", "args": [5] },
+  { "fn": "shapes", "args": [6] }
+]

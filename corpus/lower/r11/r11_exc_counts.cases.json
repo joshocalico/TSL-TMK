@@ -1,0 +1,17 @@
+[
+  { "fn": "catchOne", "args": [2] },
+  { "fn": "catchOne", "args": [5] },
+  { "fn": "rethrowOne", "args": [2] },
+  { "fn": "rethrowOne", "args": [6] },
+  { "fn": "finallyOne", "args": [1] },
+  { "fn": "finallyOne", "args": [4] },
+  { "fn": "replaceOne", "args": [3] },
+  { "fn": "replaceOne", "args": [5] },
+  { "fn": "swallowOne", "args": [2] },
+  { "fn": "swallowOne", "args": [5] },
+  { "fn": "escapes", "args": [2] },
+  { "fn": "escapes", "args": [6] },
+  { "fn": "keepCaught", "args": [4] },
+  { "fn": "dropKept", "args": [1] },
+  { "fn": "loopy", "args": [12] }
+]

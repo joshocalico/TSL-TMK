@@ -1,0 +1,9 @@
+[
+  { "fn": "readByte", "args": [{ "bytes": "00" }, 1], "trap": 2 },
+  { "fn": "readByte", "args": [{ "bytes": "" }, 0], "trap": 2 },
+  { "fn": "writeByte", "args": [{ "bytes": "00" }, 1, 5], "trap": 2 },
+  { "fn": "readF64", "args": [{ "f64s": [1] }, 8], "trap": 2 },
+  { "fn": "readStatic", "args": [4], "trap": 2 },
+  { "fn": "bumpAt", "args": [{ "i32s": [1] }, 1], "trap": 2 },
+  { "fn": "callTable", "args": [1, 0], "trap": 2 }
+]

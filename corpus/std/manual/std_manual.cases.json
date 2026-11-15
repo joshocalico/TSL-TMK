@@ -1,0 +1,8 @@
+[
+  { "fn": "aBoxWithAVec", "args": [21], "expect": 42 },
+  { "fn": "churn", "args": [3000] },
+  { "fn": "slabReferencesStayChecked", "args": [], "trap": 5 },
+  { "fn": "scalarsInAMap", "args": [], "expect": 3997 },
+  { "fn": "loansStillTrap", "args": [], "trap": 13 },
+  { "fn": "strsToo", "args": [], "expect": 6 }
+]

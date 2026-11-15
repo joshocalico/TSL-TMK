@@ -1,0 +1,21 @@
+[
+  { "fn": "readCfg", "args": [{ "size": 2.5, "name": "x", "buf": { "u8s": [1, 2, 3] } }] },
+  { "fn": "readCfg", "args": [{ "size": 2, "rate": 3, "name": "y", "buf": { "u8s": [] } }] },
+  { "fn": "writeCfg", "args": [{ "size": 1, "rate": 2, "name": "x", "buf": { "u8s": [1] } }] },
+  { "fn": "makeCfg", "args": [] },
+  { "fn": "defaults", "args": [] },
+  { "fn": "defaults", "args": [2] },
+  { "fn": "defaults", "args": [2, 3] },
+  { "fn": "defaultObj", "args": [] },
+  { "fn": "defaultObj", "args": [{ "n": 4 }] },
+  { "fn": "identity", "args": [{ "u8s": [1, 2] }] },
+  { "fn": "sameObject", "args": [] },
+  { "fn": "negZero", "args": [3] },
+  { "fn": "boolOut", "args": [2] },
+  { "fn": "u32Out", "args": [-1] },
+  { "fn": "voidOut", "args": [] },
+  { "fn": "nullOut", "args": [1] },
+  { "fn": "nullOut", "args": [0] },
+  { "fn": "undefOut", "args": [1] },
+  { "fn": "undefOut", "args": [0] }
+]

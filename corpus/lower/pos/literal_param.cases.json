@@ -1,0 +1,5 @@
+[
+  { "fn": "atConstant", "args": [3] },
+  { "fn": "atRunTime", "args": [3, true] },
+  { "fn": "atRunTime", "args": [3, false] }
+]

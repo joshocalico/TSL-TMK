@@ -1,0 +1,8 @@
+[
+  { "fn": "next", "args": ["1n"], "expect": null },
+  { "fn": "next", "args": ["18446744073709551615n"], "expect": null },
+  { "fn": "run", "args": ["88172645463325252n", 1000], "expect": null },
+  { "fn": "step", "args": [], "expect": null },
+  { "fn": "step", "args": [], "expect": null },
+  { "fn": "step", "args": [], "expect": null }
+]

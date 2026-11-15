@@ -1,0 +1,7 @@
+[
+  { "fn": "keys", "args": [{ "a": 1 }] },
+  { "fn": "viaEval", "args": [] },
+  { "fn": "viaProxy", "args": [{ "a": 1 }] },
+  { "fn": "viaTypeof", "args": [1] },
+  { "fn": "viaInstanceof", "args": [{ "u8s": [1] }] }
+]

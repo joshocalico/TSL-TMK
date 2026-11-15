@@ -1,0 +1,230 @@
+{
+  "corpus/lower/pos/alloc_rules.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/array_methods.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/array_vec.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/class_struct.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/closure_known.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/closure_selected.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/control_flow.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/destructure_spread.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/export_glue.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/float_rem.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/floor_div.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/generics_mono.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/literal_param.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/math_host.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/math_spread.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/module_state.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/nullable.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/number_float.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/number_int.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/object_shape.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/relative_import.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/string_bytes.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/throw_trap.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/typed_array.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/unions.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/pos/wrap_forms.ts": {
+    "fallbacks": [],
+    "externs": 0
+  },
+  "corpus/lower/fallback/any_type.ts": {
+    "fallbacks": ["any-type@viaAny"],
+    "externs": 0
+  },
+  "corpus/lower/fallback/async_gen.ts": {
+    "fallbacks": ["generator@gen", "async@later"],
+    "externs": 0
+  },
+  "corpus/lower/fallback/bigint_plain.ts": {
+    "fallbacks": ["bigint@big"],
+    "externs": 0
+  },
+  "corpus/lower/fallback/callee_blocked.ts": {
+    "fallbacks": [
+      "map-set@touch",
+      "map-set@objectTaker",
+      "map-set@objectMaker",
+      "map-set@holdsMap",
+      "callee@objectCaller",
+      "callee@objectResult"
+    ],
+    "externs": 2
+  },
+  "corpus/lower/fallback/closure_escape.ts": {
+    "fallbacks": [
+      "closure-recursive@captureMutated",
+      "closure-escape@returned",
+      "closure-escape@stored",
+      "closure-escape@viaField"
+    ],
+    "externs": 0
+  },
+  "corpus/lower/fallback/closure_outlives.ts": {
+    "fallbacks": ["closure-escape@keptFromLoop"],
+    "externs": 0
+  },
+  "corpus/lower/fallback/computed_key.ts": {
+    "fallbacks": ["computed-key@dynamic", "computed-key@record"],
+    "externs": 0
+  },
+  "corpus/lower/fallback/definite_assignment.ts": {
+    "fallbacks": ["unsupported@early"],
+    "externs": 0
+  },
+  "corpus/lower/fallback/escape_global.ts": {
+    "fallbacks": ["escape-global@grow", "escape-global@remember", "shared-state@recall"],
+    "externs": 0
+  },
+  "corpus/lower/fallback/export_forms.ts": {
+    "fallbacks": ["export-signature@Thing.constructor"],
+    "externs": 0
+  },
+  "corpus/lower/fallback/generic_cap.ts": {
+    "fallbacks": ["instantiation-cap@id", "callee@many"],
+    "externs": 0
+  },
+  "corpus/lower/fallback/inheritance.ts": {
+    "fallbacks": ["inheritance@subclass"],
+    "externs": 0
+  },
+  "corpus/lower/fallback/init_blocked.ts": {
+    "fallbacks": ["map-set@<module init>", "global-init@reader"],
+    "externs": 0
+  },
+  "corpus/lower/fallback/instantiation_cap.ts": {
+    "fallbacks": ["instantiation-cap@grow", "callee@start"],
+    "externs": 0
+  },
+  "corpus/lower/fallback/lying_cast.ts": {
+    "fallbacks": ["unsound-cast@lies", "unsound-cast@nullDropped"],
+    "externs": 0
+  },
+  "corpus/lower/fallback/map_set.ts": {
+    "fallbacks": ["map-set@withMap", "map-set@withSet"],
+    "externs": 0
+  },
+  "corpus/lower/fallback/partial_fill.ts": {
+    "fallbacks": ["unsupported@partial"],
+    "externs": 0
+  },
+  "corpus/lower/fallback/prototype.ts": {
+    "fallbacks": ["prototype-mutation@patch"],
+    "externs": 0
+  },
+  "corpus/lower/fallback/reflection.ts": {
+    "fallbacks": [
+      "reflection@keys",
+      "reflection@viaEval",
+      "reflection@viaInstanceof",
+      "reflection@viaProxy",
+      "reflection@viaTypeof"
+    ],
+    "externs": 0
+  },
+  "corpus/lower/fallback/regexp_date.ts": {
+    "fallbacks": ["regexp@matches", "date@stamp"],
+    "externs": 0
+  },
+  "corpus/lower/fallback/shape_widened.ts": {
+    "fallbacks": ["shape-widened@wide"],
+    "externs": 0
+  },
+  "corpus/lower/fallback/string_use.ts": {
+    "fallbacks": [
+      "string-use@concat",
+      "string-use@jsonish",
+      "string-use@lengthOf",
+      "string-use@template",
+      "string-from-spread@compareVar"
+    ],
+    "externs": 0
+  },
+  "corpus/lower/fallback/throw_value.ts": {
+    "fallbacks": ["throw-non-error@errorValue", "throw-non-error@throwsNumber"],
+    "externs": 0
+  },
+  "corpus/lower/fallback/try_catch.ts": {
+    "fallbacks": ["try-catch@guarded"],
+    "externs": 0
+  },
+  "corpus/native/math_values.ts": {
+    "fallbacks": [],
+    "externs": 0
+  }
+}
