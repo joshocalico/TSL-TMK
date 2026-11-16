@@ -14,7 +14,7 @@ import { benchJpeg, buildJpeg, FIXTURES, makeLarge, PINNED, VENDOR } from "./ben
 import { ROOT } from "./corpus.ts";
 import { guardedRun } from "./guarded-run.ts";
 import { Driver } from "./native-driver.ts";
-import { JPEG_MEMORY, JPEG_RAM, lowerJpeg } from "./native-jpeg.ts";
+import { callJpeg, JPEG_MEMORY, JPEG_RAM, lowerJpeg } from "./native-jpeg.ts";
 import { hvfAvailable, qemuRun } from "./qemu-run.ts";
 import { buildPath } from "./build-dir.ts";
 
@@ -34,14 +34,14 @@ function spread(xs: number[]): { median: number; low: number; high: number } {
 
 // --- JPEG images
 
-interface Fix {
+export interface Fix {
   name: string;
   path: string;
   warm: number;
   iter: number;
 }
 
-function buildJpegBench(fixtures: Fix[]): ImageOutput {
+export function buildJpegBench(fixtures: Fix[]): ImageOutput {
   const { m, meta } = lowerJpeg();
   const drv = new Driver(m);
   const maxIter = Math.max(...fixtures.map((f) => f.iter));
@@ -53,7 +53,7 @@ function buildJpegBench(fixtures: Fix[]): ImageOutput {
     const b = new FuncBuilder(`__bench_${i}`, [], []);
     const decodeOnce = (): void => {
       b.call("__arena_reset", []);
-      b.call("decodeJpeg", [b.global(blob), b.ix(bytes.length), b.iconst("ptr", 0)], ["ptr"]);
+      callJpeg(drv, b, "decodeJpeg", [b.global(blob), b.ix(bytes.length), b.iconst("ptr", 0)]);
     };
     const loop = (n: number, body: (idx: number) => void): void => {
       const head = b.block(["i64"]);
@@ -75,7 +75,7 @@ function buildJpegBench(fixtures: Fix[]): ImageOutput {
     loop(fx.iter, (idx) => {
       b.call("__arena_reset", []);
       const t0 = b.intrinsic("native.counter", [], ["i64"])[0]!;
-      b.call("decodeJpeg", [b.global(blob), b.ix(bytes.length), b.iconst("ptr", 0)], ["ptr"]);
+      callJpeg(drv, b, "decodeJpeg", [b.global(blob), b.ix(bytes.length), b.iconst("ptr", 0)]);
       const t1 = b.intrinsic("native.counter", [], ["i64"])[0]!;
       const at = b.gep(ticks, b.op("bitcast.ix", [idx], "ix"), 8, 0);
       b.store("i64", at, b.op("sub.i64", [t1, t0], "i64"));

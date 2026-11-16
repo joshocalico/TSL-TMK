@@ -39,9 +39,15 @@ export async function serveBudget(size = budgetSize()): Promise<CpuServer> {
   let peak = 0;
   const granted = new Set<Socket>();
   const waiting: Socket[] = [];
+  const prio = new Map<Socket, number>();
   const grant = (): void => {
     while (held < size && waiting.length > 0) {
-      const s = waiting.shift()!;
+      // The waiter of the longest job first (TMK_CPU_PRIO, the gate's estimate of its seconds), and among equals the first
+      // to ask: the jobs that set the gate's floor aren't held back behind short ones.
+      let at = 0;
+      for (let i = 1; i < waiting.length; i++)
+        if ((prio.get(waiting[i]!) ?? 0) > (prio.get(waiting[at]!) ?? 0)) at = i;
+      const s = waiting.splice(at, 1)[0]!;
       if (s.destroyed) continue;
       granted.add(s);
       held++;
@@ -52,6 +58,7 @@ export async function serveBudget(size = budgetSize()): Promise<CpuServer> {
   const server: Server = createServer((s) => {
     s.on("error", () => {});
     s.once("close", () => {
+      prio.delete(s);
       if (granted.delete(s)) held--;
       else {
         const i = waiting.indexOf(s);
@@ -59,8 +66,10 @@ export async function serveBudget(size = budgetSize()): Promise<CpuServer> {
       }
       grant();
     });
-    // Anything a client sends is a request for its one token; the byte itself means nothing.
-    s.once("data", () => {
+    // What a client sends is a request for its one token, and its priority (TMK_CPU_PRIO; none is 0).
+    s.once("data", (d) => {
+      const n = Number(String(d).trim());
+      prio.set(s, Number.isFinite(n) ? n : 0);
       waiting.push(s);
       grant();
     });
@@ -97,6 +106,7 @@ export function takeCpu(): Promise<() => void> {
   if (path === undefined || path === "") return Promise.resolve(() => {});
   return new Promise((resolve) => {
     let done = false;
+    const prio = String(Number(process.env.TMK_CPU_PRIO) || 0);
     const s = createConnection(path);
     const give = (): void => {
       s.destroy();
@@ -113,7 +123,7 @@ export function takeCpu(): Promise<() => void> {
     };
     s.on("error", (e) => fallBack(e.message));
     s.once("close", () => fallBack("its server closed"));
-    s.once("connect", () => s.write("?"));
+    s.once("connect", () => s.write(prio));
     s.once("data", () => {
       if (done) return;
       done = true;

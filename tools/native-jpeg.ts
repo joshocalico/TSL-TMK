@@ -62,6 +62,20 @@ export function lowerJpeg(): Lowered {
   return cached;
 }
 
+/**
+ * R13: a call of one of the decoder's exports by the module's own signature: through the TSL route with classes (forced, or
+ * `auto`'s in `strict`) an object it takes or gives is a TSL reference, an i64 in TIR, where the direct route's is a ptr.
+ * Its arguments and result are ptrs here either way.
+ */
+export function callJpeg(drv: Driver, b: FuncBuilder, name: string, args: number[]): number {
+  const sig = drv.sigOf(name);
+  const typed = args.map((a, i) =>
+    sig.params[i] === "i64" && i >= 2 ? b.op("bitcast.i64", [a], "i64") : a,
+  );
+  const r = b.call(name, typed, [sig.rets[0] === "i64" ? "i64" : "ptr"])[0]!;
+  return sig.rets[0] === "i64" ? b.op("bitcast.ptr", [r], "ptr") : r;
+}
+
 interface RetFields {
   rgbaOff: number;
   widthOff: number;
@@ -133,7 +147,7 @@ export function buildCheckImage(fixtures: Reference[]): {
       const cb = new CaseBuilder(run, drv, meta, i, []);
       const opts =
         d.maxEdge === null ? run.iconst("ptr", 0) : cb.toHeap(optDesc, { maxEdge: d.maxEdge });
-      const r = run.call("decodeJpeg", [run.global(blob), run.ix(bytes.length), opts], ["ptr"])[0]!;
+      const r = callJpeg(drv, run, "decodeJpeg", [run.global(blob), run.ix(bytes.length), opts]);
       const p = run.load("ptr", run.at0(r, ret.rgbaOff));
       const n = run.load("ix", run.at0(r, ret.rgbaOff + 8));
       run.call("__rt_sha256", [p, n]);
@@ -152,7 +166,7 @@ export function buildCheckImage(fixtures: Reference[]): {
     plan.push({ fixture: fi, variant: -1 });
     const run = new FuncBuilder(`__case_${i}`, [], []);
     run.call("__arena_reset", []);
-    const r = run.call("jpegSize", [run.global(blob), run.ix(bytes.length)], ["ptr"])[0]!;
+    const r = callJpeg(drv, run, "jpegSize", [run.global(blob), run.ix(bytes.length)]);
     drv.puts(run, `TMK:S ${i} `);
     const widthF = sizeHeap.fields!.find((f) => f.name === "width")!;
     const heightF = sizeHeap.fields!.find((f) => f.name === "height")!;
@@ -299,11 +313,11 @@ export async function corruptNative(accel: Accel): Promise<CorruptResult> {
     const blob = drv.blob(bytes);
     const run = new FuncBuilder(`__case_${i}`, [], []);
     run.call("__arena_reset", []);
-    const res = run.call(
-      "decodeJpeg",
-      [run.global(blob), run.ix(bytes.length), run.iconst("ptr", 0)],
-      ["ptr"],
-    )[0]!;
+    const res = callJpeg(drv, run, "decodeJpeg", [
+      run.global(blob),
+      run.ix(bytes.length),
+      run.iconst("ptr", 0),
+    ]);
     const p = run.load("ptr", run.at0(res, ret.rgbaOff));
     const n = run.load("ix", run.at0(res, ret.rgbaOff + 8));
     run.call("__rt_sha256", [p, n]);

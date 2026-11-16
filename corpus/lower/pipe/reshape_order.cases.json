@@ -1,0 +1,15 @@
+[
+  { "fn": "operands", "args": [0] },
+  { "fn": "operands", "args": [3] },
+  { "fn": "operands", "args": [9] },
+  { "fn": "logical", "args": [0] },
+  { "fn": "logical", "args": [1] },
+  { "fn": "logical", "args": [3] },
+  { "fn": "logical", "args": [4] },
+  { "fn": "logical", "args": [9] },
+  { "fn": "arms", "args": [0] },
+  { "fn": "arms", "args": [1] },
+  { "fn": "arms", "args": [6] },
+  { "fn": "sequence", "args": [0] },
+  { "fn": "sequence", "args": [7] }
+]

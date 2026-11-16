@@ -53,6 +53,7 @@
         "packages/tsl-jsrt/ex-jsrt-array.ts",
         "packages/tsl-jsrt/ex-jsrt-map.ts",
         "packages/tsl-jsrt/ex-jsrt-string.ts",
+        "packages/tsl-jsrt/ex-jsrt-arena.ts",
         "corpus/std/**",
         "bench/std/**",
         "corpus/mem/**",

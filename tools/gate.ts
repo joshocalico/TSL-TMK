@@ -242,6 +242,8 @@ async function runJob(spec: JobSpec, o: PoolOptions, signal: AbortSignal): Promi
     TMK_LEVEL_TRACE: trace,
     TMK_OPT_VERIFY: process.env.TMK_OPT_VERIFY ?? "1",
     TMK_SWEEP_LOG: join(dir, "sweep.txt"),
+    // R12: its leaves' place in the CPU budget's queue, the longest job's first (tools/cpu-budget.ts)
+    TMK_CPU_PRIO: String(Math.round(spec.est)),
   };
   if (o.sweepKey !== undefined) {
     env.TMK_SWEEP = "subset";

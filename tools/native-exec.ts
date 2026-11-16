@@ -522,6 +522,8 @@ export interface RcHarness {
   noArenaReset?: boolean;
   /** Registers this hash key first, as a caller with entropy would (SPEC 4.5, D42). */
   hashKey?: [number, number];
+  /** R14: a timing image: the cases this many times over, each pass's run time printed (Driver.main, tools/r14-time.ts). */
+  timePasses?: number;
   /** Bytes for the RAM channel (SPEC 8.2). Tests ask for it. A benchmark or `tmk lower --target aarch64` has none, and stays as it was. */
   bulkBytes?: number;
   /** The channel or the guest going wrong on purpose, to show the harness notices (`tools/channel-tests.ts`). */
@@ -1202,31 +1204,36 @@ function buildDownImage0(
   });
   drv.arenaUse();
   if (meta.memory !== undefined) drv.pageRange();
-  drv.main(list, (b) => {
-    // The runtime is the arena provider in this phase (SPEC 4.5).
-    const base = b.load("ptr", b.global("__mem_base"));
-    const limit = b.load("ptr", b.global("__mem_limit"));
-    if (meta.memory === undefined) b.call("__arena_use", [base, limit]);
-    else {
-      // A memory mode has both: the arena for what's bounded, and pages for what isn't.
-      const mid = b.at0(base, ARENA_BYTES);
-      b.call("__arena_use", [base, mid]);
-      drv.usePageRange(b, mid, limit, pages);
-    }
-    if (rcHarness.hashKey !== undefined && m.funcs.some((f) => f.name === "__hash_key_use")) {
-      b.call("__hash_key_use", [b.i32(rcHarness.hashKey[0]), b.i32(rcHarness.hashKey[1])]);
-    }
-    if (meta.exc !== undefined && rcHarness.excTrap !== true) b.call("__exc_catch_use", [b.i32(1)]);
-    if (meta.exc !== undefined) {
-      // Recursion past this throws RangeError, as V8's does past its own (D49): the stack, less a margin to throw in.
-      const stack = stackBytes ?? 8 * 1024 * 1024;
-      const margin = Math.min(256 * 1024, stack >> 2);
-      const sp = b.op("bitcast.i64", [b.intrinsic("native.sp", [], ["ptr"])[0]!], "i64");
-      const lim = b.op("sub.i64", [sp, b.i64(stack - margin - 4096)], "i64");
-      b.call("__exc_stack_use", [b.op("bitcast.ptr", [lim], "ptr")]);
-    }
-    b.call("__init", []);
-  });
+  drv.main(
+    list,
+    (b) => {
+      // The runtime is the arena provider in this phase (SPEC 4.5).
+      const base = b.load("ptr", b.global("__mem_base"));
+      const limit = b.load("ptr", b.global("__mem_limit"));
+      if (meta.memory === undefined) b.call("__arena_use", [base, limit]);
+      else {
+        // A memory mode has both: the arena for what's bounded, and pages for what isn't.
+        const mid = b.at0(base, ARENA_BYTES);
+        b.call("__arena_use", [base, mid]);
+        drv.usePageRange(b, mid, limit, pages);
+      }
+      if (rcHarness.hashKey !== undefined && m.funcs.some((f) => f.name === "__hash_key_use")) {
+        b.call("__hash_key_use", [b.i32(rcHarness.hashKey[0]), b.i32(rcHarness.hashKey[1])]);
+      }
+      if (meta.exc !== undefined && rcHarness.excTrap !== true)
+        b.call("__exc_catch_use", [b.i32(1)]);
+      if (meta.exc !== undefined) {
+        // Recursion past this throws RangeError, as V8's does past its own (D49): the stack, less a margin to throw in.
+        const stack = stackBytes ?? 8 * 1024 * 1024;
+        const margin = Math.min(256 * 1024, stack >> 2);
+        const sp = b.op("bitcast.i64", [b.intrinsic("native.sp", [], ["ptr"])[0]!], "i64");
+        const lim = b.op("sub.i64", [sp, b.i64(stack - margin - 4096)], "i64");
+        b.call("__exc_stack_use", [b.op("bitcast.ptr", [lim], "ptr")]);
+      }
+      b.call("__init", []);
+    },
+    rcHarness.timePasses ?? 0,
+  );
   drv.trapMessages(meta.strings);
   return {
     image: link({

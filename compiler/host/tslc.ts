@@ -22,7 +22,7 @@ import { Elaborator } from "./elab.ts";
 import { emitJsChecked } from "./jschecked.ts";
 import { lowerToTir } from "./lower.ts";
 import { placeRegion } from "./region.ts";
-import { r6Off } from "./down-model.ts";
+import { r13Off, r14Off, r6Off } from "./down-model.ts";
 import {
   isArchFile,
   isCoreFile,
@@ -172,6 +172,7 @@ function packageDiags(program: ts.Program, root: string): Diag[] {
       }
     }
     // @tsl/lowered is a lowered package's alone (SPEC 4.5, D62): nothing a person writes is one, so nothing else reaches it.
+    // R13: so is @tsl/jsrt's arena array, `strict` lowered code's: the kernel's own `strict` TSL can't depend on it.
     if (pkg === null || pkg.lowered === undefined) {
       for (const st of m.statements) {
         if (!ts.isImportDeclaration(st) && !ts.isExportDeclaration(st)) continue;
@@ -181,6 +182,7 @@ function packageDiags(program: ts.Program, root: string): Diag[] {
         const target = file !== null ? findTslJson(file) : null;
         if (
           spec.text === "@tsl/lowered" ||
+          spec.text === "@tsl/jsrt/arena" ||
           (file !== null && isLoweredFile(file)) ||
           (target !== null && target.lowered !== undefined)
         )
@@ -1076,11 +1078,95 @@ export function boundaryIn(auto: boolean): boolean {
  */
 export const AUTO_STRICT_CLASSES = true;
 
+/**
+ * R13 (pile item 7): whether `auto`'s class printing in `strict` prints arrays too, as @tsl/jsrt's arena array (JsArenaArray,
+ * its buffers the call arena's), and typed arrays made in functions as R9's layout classes and tails, tslc placing each in
+ * the call arena; where the printing is exact, as R12's. Only once each benchmark of them is no slower than the direct
+ * route at -O1 and -O2 in two quiet runs (`tmk bench memory --classes --strict-arrays`, M5's R13 record). Closure values
+ * and exports taking or giving objects in `strict` print where the route is forced, and `auto` takes them as it does in
+ * every mode (closuresIn, AUTO_BOUNDARY). TMK_EMIT_STRICT_ARRAYS=0 or 1 says otherwise.
+ */
+export const AUTO_STRICT_ARRAYS = true;
+
+/** Whether `auto`'s class printing in `strict` prints arrays and typed arrays (R13). */
+function strictArraysIn(): boolean {
+  const env = process.env.TMK_EMIT_STRICT_ARRAYS;
+  if (env !== undefined) return env === "1";
+  return AUTO_STRICT_ARRAYS && !r13Off("arrays");
+}
+
 /** Whether `auto` tries class printing in `strict` (R12). */
 function strictClassesIn(): boolean {
   const env = process.env.TMK_EMIT_STRICT;
   if (env !== undefined) return env === "1";
   return AUTO_STRICT_CLASSES && !r12Off("strict");
+}
+
+/**
+ * R14 (pile item 9, D62): the reshapes `auto` trusts, by emit-tsl.ts's `reshape` kind. A printing reshaped only by these
+ * is taken as a printing exactly is; any other kind leaves the program to the reference, as every reshape did before. A
+ * kind is here only once (a) the reshape keeps JS's evaluation order (argued in SPEC D62, R14, and an injected bug that
+ * breaks the order for that kind is caught by the differential: tools/r14-tests.ts), (b) the three-way differential
+ * agrees on every program it touches, and (c) it's no slower at -O1 and -O2 (M5's R14 record: a micro-benchmark per kind,
+ * and every touched program's machine code compared or its cases timed). The four are the lowering's statement-expressions
+ * met inside an expression, whose statements the printer puts before the statement holding them, in the order JS runs
+ * them, with what was evaluated ahead of them held in a temporary.
+ */
+export const R14_TRUST = true;
+/** R14: whether the trust extends to a program with exceptions (the lowering's `excSource`): off, see untrustedReshapes. */
+export const R14_TRUST_EXC = false;
+export const TRUSTED_RESHAPES: readonly string[] = [
+  "a sequence with statements in a part after the first",
+  "statements before an operand",
+  "a conditional's arm with statements",
+  "a logical operator's right side with statements",
+];
+
+/**
+ * R14: the printings, by mode, in which `auto` trusts TRUSTED_RESHAPES: where every program and benchmark they touch met the
+ * speed rule. Phase 1's printing, everywhere it's built: there each program the kinds touch gives the direct route's TIR,
+ * byte for byte, at -O1 and -O2 (tools/r14-tests.ts checks it on every one), so its machine code. Not class printing in any
+ * mode: there a reshaped program's arrays and objects are TSL classes, and the benchmarks the kinds touch measured up to
+ * 1.34x the direct route (`tmk bench memory --classes --reshapes`: a callback's array made each turn as an arena array or
+ * a JsArray, M5's R14 record), the classes' cost, not the reshape's; so `auto` prints such a program as phase 1 does
+ * where it can. `rc` has no phase 1 printing (R2), so nothing reshaped is taken there.
+ */
+export const TRUSTED_IN: Record<string, { phase1: boolean; classes: boolean }> = {
+  strict: { phase1: true, classes: false },
+  leak: { phase1: true, classes: false },
+  manual: { phase1: true, classes: false },
+  rc: { phase1: false, classes: false },
+};
+
+/**
+ * The reshape kinds of a printing `auto` doesn't trust: none means `auto` may take it. TMK_TRUST_RESHAPES=0 trusts none (as
+ * before R14), and a `|`-separated list of kinds trusts those instead (measurement only: tools/r14-tests.ts); TMK_R14_OFF=
+ * trust is R14's switch off, for tools/r14-pins.ts.
+ */
+export function untrustedReshapes(
+  stats: { restructured: number; reshapedWhy?: Record<string, number>; classes?: boolean },
+  r: Pick<DownResult, "excSource">,
+  memory: string,
+): string[] {
+  if (stats.restructured === 0) return [];
+  const where = stats.classes === true ? "classes" : "phase1";
+  if (TRUSTED_IN[memory]?.[where] !== true)
+    return [
+      `a reshape in ${memory}'s ${where === "classes" ? "class printing" : "phase 1 printing"} (TRUSTED_IN)`,
+    ];
+  const why = stats.reshapedWhy ?? {};
+  const kinds = Object.keys(why).filter((k) => (why[k] ?? 0) > 0);
+  // a reshape with no kind said is never trusted
+  if (kinds.length === 0) return ["(a reshape with no kind)"];
+  // Exceptions: every program with them prints reshaped (a call that can throw is a flag check after it), so none was ever
+  // `auto`'s, and their throws measured 1.00 to 1.02x the direct route in `leak` (M5's pipe-h record). Trusting the
+  // reshapes mustn't switch them over by the way: they wait for their own speed rule (R14_TRUST_EXC).
+  if (r.excSource !== undefined && !R14_TRUST_EXC)
+    return ["exceptions, which auto doesn't take reshaped (R14_TRUST_EXC)"];
+  const env = process.env.TMK_TRUST_RESHAPES;
+  const off = !R14_TRUST || r14Off("trust") || env === "0";
+  const trusted = off ? [] : env !== undefined && env !== "" ? env.split("|") : TRUSTED_RESHAPES;
+  return kinds.filter((k) => !trusted.includes(k));
 }
 
 /** tslc's layouts for a file's layout classes, without compiling its functions. */
@@ -1598,8 +1684,9 @@ export function compileViaTsl(
     modules,
   });
   const t1 = performance.now();
-  // `auto` takes only what was printed exactly, so what wasn't needn't be written or checked.
-  if (onlyExact && e.stats.restructured > 0)
+  // `auto` takes only what was printed exactly, or reshaped only as it trusts (R14), so the rest needn't be written or
+  // checked.
+  if (onlyExact && untrustedReshapes(e.stats, r, memory).length > 0)
     return {
       front: null,
       info: {
@@ -1750,6 +1837,7 @@ function lowerFileIn(file: string, opts: LowerOptions): LowerOutput {
   let tsl: TslRouteInfo | undefined;
   let tslSkipped: string | undefined;
   let strictClasses = false; // R12: `auto` took class printing in `strict`
+  let classPrinted = false; // R13: the TSL route printed classes (forced or `auto`'s)
   // `rc` (R2): only class printing, in a lowered `rc` package that tslc's expansion counts (D74); phase 1's printing has no
   // counts to print, and `auto` takes it only where AUTO_RC says the speed rule was met.
   const rcVia =
@@ -1767,7 +1855,8 @@ function lowerFileIn(file: string, opts: LowerOptions): LowerOutput {
   if (route !== "direct" && (memory !== "rc" || rcVia)) {
     try {
       // `auto` switches over only what the printer printed exactly: where it had to reshape a loop or a branch, or move
-      // an operand, the TIR can differ, and that hasn't shown parity yet, so the reference compiles it (D62).
+      // an operand, the TIR can differ, and that hasn't shown parity yet, so the reference compiles it (D62). R14: but for
+      // the reshapes it trusts (TRUSTED_RESHAPES), which keep JS's order and met the speed rule kind by kind.
       const classes = route === "tsl" && (opts.classes ?? process.env.TMK_EMIT_CLASSES === "1");
       // `auto` takes class printing (D64) in `leak` and `manual` wherever it prints the program unreshaped: it met the speed
       // rule on every benchmark it takes (pipe-b box 9). Where it can't, phase 1's printing, then the reference, as before.
@@ -1815,7 +1904,13 @@ function lowerFileIn(file: string, opts: LowerOptions): LowerOutput {
             boundaryIn(true),
             r9In(true),
           );
-          if (via.front === null) via = null;
+          if (via.front === null) {
+            // R14: say which reshapes `auto` didn't trust, for route-blockers
+            const u = untrustedReshapes(via.info.stats, r, memory);
+            if (u.length > 0)
+              tslSkipped = `classes: reshaped as auto doesn't trust: ${u.join(", ")}`;
+            via = null;
+          }
           // R11: exceptions in `rc` print, counted by the expansion, but `auto` doesn't take them (AUTO_RC_EXC)
           else if (memory === "rc" && via.info.stats.rcExc === true && !AUTO_RC_EXC) {
             tslSkipped = "exceptions in rc, which auto doesn't take yet (AUTO_RC_EXC, R11)";
@@ -1836,6 +1931,31 @@ function lowerFileIn(file: string, opts: LowerOptions): LowerOutput {
         strictClassesIn()
       ) {
         try {
+          // First the printing alone, which costs little: only a program it prints exactly, with a class, is checked and
+          // compiled through it (most `strict` programs have no object, or an array, and print as phase 1 did at once).
+          // R13: arrays and typed arrays too where AUTO_STRICT_ARRAYS says, and closure values and the boundary as `auto`
+          // takes them in every mode; a program whose only class is the arena array counts as one with a class.
+          const arrays = strictArraysIn();
+          const clos = closuresIn(memory, true);
+          const bound = boundaryIn(true);
+          const first = emitTsl(r, memory, rel, {
+            classes: true,
+            vectors: arrays,
+            strings: false,
+            maps: false,
+            closures: clos,
+            boundary: bound,
+            r9: arrays,
+            bangs: new Set(),
+            modules: r.sourceFiles.length > 1,
+          });
+          const hasClass = (t: string): boolean =>
+            /^(export )?class /m.test(t) || /\bJsArenaArray\b/.test(t);
+          const firstTexts = first.modules?.map((m) => m.text) ?? [first.text];
+          if (untrustedReshapes(first.stats, r, memory).length > 0 || !firstTexts.some(hasClass))
+            throw new EmitUnsupported(
+              "in strict, nothing to print as a class, or reshaped as auto doesn't trust (R12, R14)",
+            );
           const v = compileViaTsl(
             r,
             memory,
@@ -1843,15 +1963,15 @@ function lowerFileIn(file: string, opts: LowerOptions): LowerOutput {
             opts.tslDir,
             true,
             true,
+            arrays,
             false,
             false,
-            false,
-            false,
-            false,
-            false,
+            clos,
+            bound,
+            arrays,
           );
           const texts = v.info.modules?.map((m) => m.text) ?? [v.info.text];
-          if (v.front !== null && texts.some((t) => /^(export )?class /m.test(t))) {
+          if (v.front !== null && texts.some(hasClass)) {
             via = v;
             strictClasses = true;
           }
@@ -1878,6 +1998,11 @@ function lowerFileIn(file: string, opts: LowerOptions): LowerOutput {
       );
       tsl = via.info;
       front = via.front;
+      classPrinted = classes || strictClasses;
+      if (front === null && route !== "tsl") {
+        const u = untrustedReshapes(via.info.stats, r, memory);
+        if (u.length > 0) tslSkipped = `reshaped as auto doesn't trust: ${u.join(", ")}`;
+      }
     } catch (e) {
       // `auto` never fails a build the reference can make: what the TSL route couldn't take is said, and the reference
       // compiles it. Forced (`tsl`), and in `tmk milestone pipe-a`, a failure is a failure.
@@ -1925,6 +2050,8 @@ function lowerFileIn(file: string, opts: LowerOptions): LowerOutput {
     };
     meta.rcTsl = { collect: "__rc_collect", live: "__rc_live", steps: "__rc_steps" };
   }
+  // R13: a `strict` build's objects as TSL classes: a reference crossing an export is the Wasm backend's i64 (glue-down.ts)
+  if (memory === "strict" && front !== null && classPrinted) meta.refI64 = true;
   if (tsl?.boundary !== undefined && front !== null) {
     // R5: D36's layouts are the same, listed and checked; what the build adds is how each array is placed (the export
     // that makes a JsArray), and for a host caller of the printed TSL (D71), each class's TSL name and fields' names.

@@ -666,6 +666,8 @@ async function cmdBench(): Promise<number> {
       closures: args.includes("--closures"),
       typedArrays: args.includes("--typed-arrays"),
       strict: args.includes("--strict"),
+      strictArrays: args.includes("--strict-arrays"),
+      reshapes: args.includes("--reshapes"),
     });
     out(r, memoryText(r));
     return r.errors.length > 0 ? 1 : 0;

@@ -247,6 +247,29 @@ export function bothTooDeep(a: string, b: string): boolean {
 }
 
 /**
+ * R13: whether both engines threw JS's TypeError for a property read of null or undefined, which they each say in their own
+ * words (V8 "Cannot read properties of null", JSC "null is not an object"): where native traps 6 on a `!` the printing keeps
+ * as TSL's own, each engine throws JS's exception instead (3.10, divergence 1), as the source does on it. Same arguments.
+ */
+export function bothNullRead(a: string, b: string): boolean {
+  const read = (x: string): boolean => {
+    const r = (JSON.parse(x) as { result: { threw?: string; message?: string } }).result;
+    return (
+      r.threw === "TypeError" &&
+      /^(Cannot read properties of (null|undefined)|(null|undefined) is not an object)/.test(
+        r.message ?? "",
+      )
+    );
+  };
+  return (
+    read(a) &&
+    read(b) &&
+    JSON.stringify((JSON.parse(a) as { args: unknown }).args) ===
+      JSON.stringify((JSON.parse(b) as { args: unknown }).args)
+  );
+}
+
+/**
  * Whether two results differ only in a double's last bit, the one place V8 and JSC are allowed to (3.10, divergence 7: their
  * `sin`, `cos`, `exp`, `log` and `atan2` are different functions).
  */
@@ -308,6 +331,7 @@ export async function dualRoute(o: {
   classes?: boolean; // phase 2: objects printed as TSL classes (EmitOptions.classes)
   generated?: boolean; // the generated programs too: the exceptions corpus's every way out through `finally` (exc-gen.ts)
   printed?: boolean; // the third route (D71): on unless false, and off where a fault is put in the printer
+  auto?: boolean; // R14: the TSL side is `auto`'s build, a program taken only where `auto` took the TSL route reshaped
 }): Promise<PipeRun> {
   reapOrphans();
   const files = (o.dirs ?? PIPE_DIRS)
@@ -393,6 +417,11 @@ export async function dualRoute(o: {
                 tally.divergences[k] = (tally.divergences[k] ?? 0) + 1;
                 return;
               }
+              if (bothNullRead(x, v8r.results![i]!)) {
+                const k = "1 (a read of null, V8 against JSC, each in its own words)";
+                tally.divergences[k] = (tally.divergences[k] ?? 0) + 1;
+                return;
+              }
               if (
                 lastBitOnly(x, v8r.results![i]!) ||
                 (usesHostMath && onlyNumbersDiffer(x, v8r.results![i]!))
@@ -456,6 +485,7 @@ export async function dualRoute(o: {
       fault: o.fault,
       classes: o.classes === true,
       bulkBytes: bulkFor(),
+      ...(o.auto === true ? { auto: true } : {}),
     }),
   );
   await pool(

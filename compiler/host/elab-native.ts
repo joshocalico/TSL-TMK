@@ -3864,6 +3864,14 @@ export class NativeElaborator extends Elaborator {
       case "elemSize": {
         const d = this.ptrElemOf(a[0], e);
         if (d === null) return mk(T.usize, { k: "err" });
+        // the injected `arena-elem-size` bug (R13): the arena array's element size taken as half what it is, so its
+        // buffers, and the bytes it copies and clears, are half as many as its elements take
+        if (
+          process.env.TMK_TEST_TSL === "arena-elem-size" &&
+          this.curInst?.owner?.name === "JsArenaArray" &&
+          d.elem.size > 1
+        )
+          return mk(T.usize, { k: "lit", value: d.elem.size / 2 });
         return mk(T.usize, { k: "lit", value: d.elem.size });
       }
       case "ptrAt": {

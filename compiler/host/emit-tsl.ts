@@ -13,6 +13,8 @@ import {
   findNode,
   liveNodes,
   locTy,
+  r13Off,
+  r14Off,
   r6Off,
   r9Off,
   tyOf,
@@ -89,6 +91,7 @@ export interface TslEmit {
     rcStrings?: boolean; // R10: in `rc`, strings printed as the program's own JsStr (emit-rcstr.ts), counted by the expansion
     rcStrAbi?: boolean; // R10: and one crosses an export, so a native caller counts strings by __rc_retain_str and __rc_release_str
     rcExc?: boolean; // R11: in `rc`, exceptions desugared here, a taken one given back by __exc_release
+    classes?: boolean; // R14: class printing (phase 2), not phase 1's
     restructured: number; // loops and branches the printer reshaped to fit them, where -O0's TIR can differ
     reshapedWhy?: Record<string, number>; // R12: why, by kind
   };
@@ -241,13 +244,17 @@ export function emitTsl(r: DownResult, memory: string, from: string, o: EmitOpti
     e.boundary = o.boundary !== false;
     e.r9 = o.r9 !== false;
     if (memory === "strict" && e.classes) {
-      // R12: classes alone in `strict` (STRICT_CLASSES_ONLY)
-      e.vectors = false;
+      // R12: classes alone in `strict` (STRICT_CLASSES_ONLY). R13: and arrays, as @tsl/jsrt's arena array, whose buffers
+      // are the call arena's (JsArenaArray), typed arrays made in functions as R9's layout classes and tails, closure
+      // values as environment classes of the program's own (R3), and exports taking or giving objects in D36's listed
+      // layout (R5), every one of them placed by tslc in the call arena the caller resets (region.ts); TMK_R13_OFF=arrays,
+      // closures or boundary leaves each unprinted, as R12 did. Strings, maps and `Dyn` stay `@tsl/jsrt`'s and `@tsl/std`'s.
+      e.vectors = o.vectors !== false && !r13Off("arrays");
       e.strs = false;
       e.maps = false;
-      e.closures = false;
-      e.boundary = false;
-      e.r9 = false;
+      e.closures = o.closures !== false && !r13Off("closures");
+      e.boundary = o.boundary !== false && !r13Off("boundary");
+      e.r9 = o.r9 !== false && !r13Off("arrays");
     }
     return e;
   };
@@ -642,6 +649,7 @@ class Emitter {
   stdUsed = new Set<string>(); // what the printing takes from @tsl/std
   vectors = true; // EmitOptions.vectors
   descUsed = new Set<string>(); // @tsl/core's scalars named as values, as a JsArray's element descriptor
+  arenaRefUsed = false; // R13: `ref` from @tsl/jsrt/arena, an arena array's descriptor of a reference, in `strict`
   memberText = new Map<HeapNode, string[]>();
 
   // Strings as @tsl/jsrt's JsString (D67, EmitOptions.strings): the lowering's string node, the functions printed (not the
@@ -905,6 +913,8 @@ class Emitter {
         name: this.fault === "bool-elem-size" && this.byteElem(es) === "bool" ? "u16" : "u8",
       });
     if (es.s === "obj" || es.s === "vec") return `${this.clsName(findNode(es.node))} | null`;
+    const ae = this.arrVecElem(es);
+    if (ae !== null) return `${this.arrVecHelpers(ae).holder} | null`;
     return this.fail(`a vector of ${es.s}`);
   }
 
@@ -919,13 +929,22 @@ class Emitter {
       desc = this.vecElemText(es);
       this.descUsed.add(desc);
     } else {
-      this.stdUsed.add("ref");
+      this.useRef();
       desc = `ref<${this.vecElemText(es)}>()`;
     }
     // the injected `void-vec-room` bug (R9): an array of nothing made 2^28 long, room for elements it never has,
     // which only the memory it takes shows
     if (this.fault === "void-vec-room" && this.byteElem(es) === "void") len = "268435456";
     if (this.rc) return `${this.holderOf(es).newFn!}(${len})`;
+    // R13: in `strict`, the arena array, whose buffers are the call arena's, which the caller resets (nothing to give back)
+    // the injected `arena-short` bug (R13): an arena array made one element shorter than asked for
+    if (this.memory === "strict") {
+      const n =
+        this.fault === "arena-short"
+          ? `(${len} > 0 ? ${this.lowered("wrap")}<usize>(${len} - 1) : ${len})`
+          : len;
+      return `new JsArenaArray(${desc}, ${n})`;
+    }
     // In `leak` an outgrown buffer is kept, as the direct route's leak vectors keep theirs (3.5).
     return `new JsArray(${desc}, ${len}, ${this.memory === "leak" ? "false" : "true"})`;
   }
@@ -979,7 +998,13 @@ class Emitter {
       if (n.kind === "vec" && this.vectors) {
         // A vector is @tsl/jsrt's JsArray of its element (D66), whose holes are zero: null for a reference.
         const es = n.elem ?? { s: "void" };
-        if (es.s !== "num" && es.s !== "obj" && es.s !== "vec" && this.byteElem(es) === null)
+        if (
+          es.s !== "num" &&
+          es.s !== "obj" &&
+          es.s !== "vec" &&
+          this.byteElem(es) === null &&
+          this.arrVecElem(es) === null
+        )
           this.fail(`a vector of ${es.s === "bool" ? "booleans" : es.s}`);
         this.vecs.set(n, es);
         if (es.s === "obj" || es.s === "vec") want(findNode(es.node));
@@ -1103,8 +1128,14 @@ class Emitter {
           const v = this.vecData(el);
           if (v === null || !this.isVecLen(c.b)) return;
           const len = c.b as Extract<TE, { k: "fload" }>;
-          // The same index variable, and the same vector, read through one variable or one expression object.
-          if (c.a.k !== "var" || el.idx.k !== "var" || c.a.v !== el.idx.v) return;
+          // The same index variable, and the same vector, read through one variable or one expression object. R13: in
+          // `strict`, or the same constant index (`planes[0]!`, the JPEG decoder's per-pixel reads), where -O1 kept both checks.
+          const sameConst =
+            this.memory === "strict" &&
+            !r13Off("arrays") &&
+            constNum(c.a) !== null &&
+            constNum(c.a) === constNum(el.idx);
+          if (!sameConst && (c.a.k !== "var" || el.idx.k !== "var" || c.a.v !== el.idx.v)) return;
           const same =
             len.base === v || (len.base.k === "var" && v.k === "var" && len.base.v === v.v);
           if (!same) return;
@@ -2389,7 +2420,7 @@ class Emitter {
     if (es !== undefined) {
       if (this.rc) return this.holderOf(es).name;
       this.stdUsed.add("JsArray");
-      return `JsArray<${this.vecElemText(es)}>`;
+      return `${this.arrCls}<${this.vecElemText(es)}>`;
     }
     const p = this.plans.get(m);
     if (p === undefined) this.fail("a reference to a class that wasn't planned");
@@ -2527,6 +2558,65 @@ class Emitter {
   }
 
   /**
+   * R13: an array's element that's a typed array (the JPEG decoder's `Uint16Array[]`), in `strict`: its kind's constructor,
+   * or null where it isn't one. TMK_R13_OFF=arrays leaves it unprinted.
+   */
+  arrVecElem(es: Shape): string | null {
+    if (this.memory !== "strict" || es.s !== "arr" || r13Off("arrays")) return null;
+    return ARRAY_BY_ELEM[es.elem] ?? null;
+  }
+
+  /**
+   * R13: an array of typed arrays holds each in R7's holder of its kind, its pointer and length (`Uint16ArrayField`), made
+   * when it's stored; a hole is null, and reads as a typed array of no storage, as the lowering's hole of one does (its
+   * pointer null, its length 0). Two functions of the program's own do it: `<holder>_of(a)`, a holder made for a, and
+   * `<holder>_get(h)`, the typed array h holds.
+   */
+  arrVecHelpers(ctor: string): { holder: string; of: string; get: string } {
+    if (this.modules) this.fail("an array of typed arrays, in a program of several modules (R13)");
+    const holder = this.arrFieldClass(ctor);
+    const key = `arrvec:${ctor}`;
+    const of = `${holder}_of`;
+    const get = `${holder}_get`;
+    if (!this.holders.has(key)) {
+      for (const n of ["cast", "part", "pack", "nullRef", "Ref"]) this.loweredUsed.add(n);
+      this.coreUsed.add("usize");
+      // the injected `arr-elem-len` bug (R13): a typed array an array holds kept one element shorter than it is
+      if (this.fault === "arr-elem-len") this.loweredUsed.add("wrap");
+      const len =
+        this.fault === "arr-elem-len"
+          ? "(part<usize>(a, 1, 2) > 0 ? wrap<usize>(part<usize>(a, 1, 2) - 1) : 0)"
+          : "part<usize>(a, 1, 2)";
+      this.holders.set(key, {
+        name: of,
+        decl: [
+          `/** A ${ctor} an array holds (R13): a holder of its pointer and length, made for it. */`,
+          `function ${of}(a: ${ctor}): ${holder} {`,
+          `  const h = new ${holder}();`,
+          "  h.ptr = cast<usize>(part<Ref>(a, 0, 1));",
+          `  h.len = ${len};`,
+          "  return h;",
+          "}",
+          "",
+          `/** The ${ctor} a holder holds; a hole's is one of no storage, as the lowering reads a hole of a typed array. */`,
+          `function ${get}(h: ${holder} | null): ${ctor} {`,
+          `  return h !== null ? pack<${ctor}>(cast<Ref>(h.ptr), h.len) : pack<${ctor}>(nullRef(), cast<usize>(0));`,
+          "}",
+        ],
+      });
+    }
+    return { holder, of, get };
+  }
+
+  /** R13: the element of the array `v` is a typed array's kind, or null. */
+  vecArrElem(v: TE): string | null {
+    const sh = v.sh as Shape | undefined;
+    if (sh?.s !== "vec") return null;
+    const es = this.vecs.get(this.canon(findNode(sh.node)));
+    return es === undefined ? null : this.arrVecElem(es);
+  }
+
+  /**
    * R9: a typed array made in a function, as TSL makes one. TSL has no `new Int32Array(n)` in a function (TSL1001): a typed
    * array there is a view of an object's storage. Of a constant length up to 64 KiB it's a layout class's `array(…)` field,
    * `new Int32Array_8().items`, which tslc's escape analysis puts on the stack where the view doesn't outlive the function
@@ -2601,6 +2691,17 @@ class Emitter {
   /** In `rc`, where an array's own operations are, past its holder (R2). */
   get arr(): string {
     return this.rc ? ".v" : "";
+  }
+
+  /** R13: the array class: @tsl/jsrt's JsArray, or in `strict`, which has no heap, its arena array. */
+  get arrCls(): string {
+    return this.memory === "strict" ? "JsArenaArray" : "JsArray";
+  }
+
+  /** `ref<C>()`, an array's element descriptor for a reference: @tsl/std's, or in `strict` (R13) the arena array's module's. */
+  useRef(): void {
+    if (this.memory === "strict") this.arenaRefUsed = true;
+    else this.stdUsed.add("ref");
   }
 
   classDecls(): string[] {
@@ -3139,7 +3240,16 @@ class Emitter {
     if (stdNames.length > 0) header.push(`import { ${stdNames.join(", ")} } from "@tsl/std";`);
     // JsArray is @tsl/jsrt's, beside JsString; JsString is an interface (D70), so a type import: Node's and Bun's type
     // stripping drop it whole (pipe-split).
-    const jsrtNames = [...this.jsrtUsed, ...(this.stdUsed.has("JsArray") ? ["JsArray"] : [])];
+    const strictArr = this.memory === "strict";
+    const jsrtNames = [
+      ...this.jsrtUsed,
+      ...(this.stdUsed.has("JsArray") && !strictArr ? ["JsArray"] : []),
+    ];
+    // R13: `strict`'s arena array is @tsl/jsrt/arena's, which links no heap (no @tsl/std)
+    if (strictArr && (this.stdUsed.has("JsArray") || this.arenaRefUsed))
+      header.push(
+        `import { ${[...(this.stdUsed.has("JsArray") ? ["JsArenaArray"] : []), ...(this.arenaRefUsed ? ["ref"] : [])].join(", ")} } from "@tsl/jsrt/arena";`,
+      );
     if (jsrtNames.length > 0)
       header.push(
         `import { ${[...jsrtNames.filter((n) => n !== "JsString").sort(), ...(this.jsrtUsed.has("JsString") ? ["type JsString"] : [])].join(", ")} } from "@tsl/jsrt";`,
@@ -3180,6 +3290,7 @@ class Emitter {
         ...(this.rcStrUsed ? { rcStrings: true } : {}),
         ...(this.rcStrAbi ? { rcStrAbi: true } : {}),
         ...(this.rc && this.excOwn ? { rcExc: true } : {}),
+        ...(this.classes ? { classes: true } : {}),
       },
       ...(this.boundaryInfo() !== undefined ? { boundary: this.boundaryInfo()! } : {}),
     };
@@ -3410,7 +3521,7 @@ class Emitter {
       ];
       // A scalar named as a JsArray's descriptor is imported as a value, which names the type too.
       const asVal = (n: string): boolean =>
-        this.descUsed.has(n) && new RegExp(`new JsArray\\(${n},`).test(text0);
+        this.descUsed.has(n) && new RegExp(`new ${this.arrCls}\\(${n},`).test(text0);
       const coreTypes = [...this.coreUsed, ...this.descUsed]
         .filter((n, i, a) => a.indexOf(n) === i && CORE_TYPES.includes(n) && used(n) && !asVal(n))
         .sort();
@@ -3424,7 +3535,13 @@ class Emitter {
       const stdHere = [...this.stdUsed].filter((n) => n !== "JsArray" && used(n)).sort();
       if (stdHere.length > 0) header.push(`import { ${stdHere.join(", ")} } from "@tsl/std";`);
       // JsArray is @tsl/jsrt's (D66); strings aren't printed in a program of several modules.
-      if (this.stdUsed.has("JsArray") && used("JsArray"))
+      if (this.memory === "strict") {
+        // R13: `strict`'s arena array, @tsl/jsrt/arena's
+        const names = ["JsArenaArray", "ref"].filter(
+          (n) => (n === "ref" ? this.arenaRefUsed : this.stdUsed.has("JsArray")) && used(n),
+        );
+        if (names.length > 0) header.push(`import { ${names.join(", ")} } from "@tsl/jsrt/arena";`);
+      } else if (this.stdUsed.has("JsArray") && used("JsArray"))
         header.push(`import { JsArray } from "@tsl/jsrt";`);
       const lowUsed = [...this.loweredUsed].filter(used);
       const lowTypes = lowUsed.filter((n) => n === "Ref" || n === "Opt").sort();
@@ -4218,7 +4335,10 @@ class Emitter {
       const last = i === outs.length - 1;
       if (i < lastPre) {
         if (o.text !== "")
-          (this.fault === "hoist-late" ? late : this.pre).push(`${this.rcStmt(o.text)};`);
+          // R14's `seq-late`: the sequence's own injected bug, its earlier parts run after a later part's statements
+          (this.fault === "hoist-late" || this.fault === "seq-late" ? late : this.pre).push(
+            `${this.rcStmt(o.text)};`,
+          );
       } else if (!last && /^[A-Za-z_$][\w$]*$/.test(o.text)) {
         // A bare read inside a comma is tsc's error (TS2695), and it reads nothing a load needs.
       } else if (o.text !== "" || last) keep.push(o.text);
@@ -4309,7 +4429,9 @@ class Emitter {
           use = `${t}!`;
         }
         // The injected bug: the earlier operand evaluated after the later one's statements.
-        if (this.fault === "hoist-late") late.push(`${t} = ${text};`);
+        // R14's `operand-late`: the same, for operands alone
+        if (this.fault === "hoist-late" || this.fault === "operand-late")
+          late.push(`${t} = ${text};`);
         else this.pre.push(`${t} = ${text};`);
         texts.push(use);
       } else texts.push(o.text);
@@ -4631,6 +4753,14 @@ class Emitter {
           a = `${this.lowered("part")}<Ref>(${a}, 0, 1)`;
         if (e.b.ty.k === "arr" && e.a.ty.k !== "arr")
           b = `${this.lowered("part")}<Ref>(${b}, 0, 1)`;
+        // R13: with classes, null is a class's; a typed array's pointer, a Ref, is null by @tsl/lowered's `nullRef()`, as
+        // phase 1 prints it (`?? new Uint16Array(n)` on one read from a field, the JPEG decoder's)
+        const nullLit = (x: TE): boolean => x.k === "lit" && x.ty.k === "ref";
+        // R14: in every mode's class printing, not `strict`'s alone (R13's carried TSL1008 in `leak` and `manual`);
+        // TMK_R14_OFF=nullref puts R13's back
+        const strictArr = this.classes && (this.memory === "strict" || !r14Off("nullref"));
+        if (strictArr && e.a.ty.k === "arr" && nullLit(e.b)) b = `${this.lowered("nullRef")}()`;
+        if (strictArr && e.b.ty.k === "arr" && nullLit(e.a)) a = `${this.lowered("nullRef")}()`;
         if (a.includes("part<Ref>") || b.includes("part<Ref>")) this.loweredUsed.add("Ref");
         const sym = { eq: "===", ne: "!==", lt: "<", le: "<=", gt: ">", ge: ">=" }[e.op];
         return `(${a} ${sym} ${b})`;
@@ -4643,6 +4773,16 @@ class Emitter {
         this.hoisted++;
         this.reshape("a logical operator's right side with statements");
         const t = this.tempFor(e);
+        // R14's injected bug `logic-always`: the right side's statements run even where the left side decides
+        if (this.fault === "logic-always") {
+          this.pre.push(`${t} = ${a};`, ...b.pre);
+          this.pre.push(
+            e.op === "and" ? `if (${t}) {` : `if (${t}) {} else {`,
+            `  ${t} = ${b.text};`,
+            "}",
+          );
+          return t;
+        }
         this.pre.push(
           `${t} = ${a};`,
           e.op === "and" ? `if (${t}) {` : `if (${t}) {} else {`,
@@ -4664,6 +4804,12 @@ class Emitter {
         this.hoisted++;
         this.reshape("a conditional's arm with statements");
         const t = this.tempFor(e);
+        // R14's injected bug `cond-arms-first`: each arm's statements run before the test, whichever arm it picks
+        if (this.fault === "cond-arms-first") {
+          this.pre.push(...a.pre, ...b.pre, `if (${c}) {`, `  ${t} = ${a.text};`, "} else {");
+          this.pre.push(`  ${t} = ${b.text};`, "}");
+          return t;
+        }
         this.pre.push(
           `if (${c}) {`,
           ...a.pre.map((p) => `  ${p}`),
@@ -4790,6 +4936,17 @@ class Emitter {
       case "tuple":
         if (e.items.length === 0) this.fail(`an empty ${e.ty.k} as a value`);
         if (this.classes && this.arrAllocs.has(e.items[0]!)) return this.newTypedArray(e);
+        // R13: a null typed array's pointer is @tsl/lowered's `nullRef()`, a Ref, where with classes `null` is a class's
+        // (in `strict`, where R13 prints typed arrays read from fields: the JPEG decoder's `?? new Uint16Array(64)`)
+        // R14: in every mode's class printing (TMK_R14_OFF=nullref, `strict` alone as R13 had it)
+        if (this.classes && (this.memory === "strict" || !r14Off("nullref")) && e.ty.k === "arr") {
+          const parts = this.typedOperands(e.items).map((x, i) =>
+            i === 0 && e.items[0]!.k === "lit" && e.items[0]!.ty.k === "ref"
+              ? `${this.lowered("nullRef")}()`
+              : x,
+          );
+          return `${this.lowered("pack")}<${this.tyText(e.ty)}>(${parts.join(", ")})`;
+        }
         return `${this.lowered("pack")}<${this.tyText(e.ty)}>(${this.typedOperands(e.items).join(", ")})`;
       case "slice":
         return `${this.lowered("part")}<${this.tyText(e.ty)}>(${this.value(e.val)}, ${e.from}, ${e.to})`;
@@ -4819,6 +4976,9 @@ class Emitter {
           if (this.fault === "read-check-wrap" && this.foldedRead.has(e))
             return `${paren(v!)}${this.arr}.get(${paren(i!)} % ${paren(v!)}${this.arr}.length)`;
           const got = `${paren(v!)}${this.arr}.get(${i})`;
+          // R13: a typed array from the holder the array holds
+          const ae = this.vecArrElem(this.vecData(el)!);
+          if (ae !== null) return `${this.arrVecHelpers(ae).get}(${got})`;
           // R9: a boolean from its byte
           const be = this.vecByteElem(this.vecData(el)!);
           if (be === "void") return this.fail("an element read from an array nothing is put in");
@@ -4866,7 +5026,12 @@ class Emitter {
         if (std !== null && e.mem.length > 0 && memText(std) === memText(e.mem)) {
           let off = e.mem[0]!.off;
           if (this.fault === "field-offset" && off === 8 && e.ty.k === "float") off = 0; // the injected bug
-          return `${this.lowered("load", true)}<${this.tyText(e.ty)}>(${base}, ${off})`;
+          // R14: a class id's load, noted invariant (D73) as the direct route notes it, so the TIR is that route's
+          const inv =
+            e.mem.length === 1 && e.mem[0]!.inv === true && !this.classes && !r14Off("inv")
+              ? `, "invariant"`
+              : "";
+          return `${this.lowered("load", true)}<${this.tyText(e.ty)}>(${base}, ${off}${inv})`;
         }
         // Leaves at offsets other than the type's own: nothing the lowering makes (D72 deleted @tsl/lowered's loadAt).
         return this.fail(`a load of ${memText(e.mem)} as ${this.tyText(e.ty)}`);
@@ -4878,6 +5043,12 @@ class Emitter {
         if (this.classes && this.vecElem.has(e.base)) {
           const el = e.base as Extract<TE, { k: "elemaddr" }>;
           const [v, i, x] = this.operands([this.vecData(el)!, el.idx, e.val]);
+          // R13: a typed array in a holder made for it; the store's value, the typed array, from the holder
+          const ae = this.vecArrElem(this.vecData(el)!);
+          if (ae !== null) {
+            const h = this.arrVecHelpers(ae);
+            return `${h.get}(${paren(v!)}${this.arr}.set(${i}, ${h.of}(${x})))`;
+          }
           // R9: a boolean as its byte, and the store's value as the boolean it stored
           const be = this.vecByteElem(this.vecData(el)!);
           if (be === "void")
@@ -4966,6 +5137,10 @@ class Emitter {
           if (be === "void") return this.fail("an element pushed to an array of nothing");
           if (be === "bool")
             return `${paren(v!)}${this.arr}.push(${this.boolByte(x!, e.args[1]!)})`;
+          // R13: a typed array pushed in a holder made for it
+          const ae = this.vecArrElem(e.args[0]!);
+          if (ae !== null)
+            return `${paren(v!)}${this.arr}.push(${this.arrVecHelpers(ae).of}(${x}))`;
           return `${paren(v!)}${this.arr}.push(${x})`;
         }
         const vr = this.classes ? this.vecRt(e) : null;

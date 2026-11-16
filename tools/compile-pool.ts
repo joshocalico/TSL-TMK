@@ -216,6 +216,7 @@ export function bothRoutesOnWorker(req: {
   fault: string | undefined;
   classes: boolean;
   bulkBytes: number;
+  auto?: boolean;
 }): Promise<{ p: PipeProgram; built: BuiltImages | null }> {
   const done = new Promise<Built & { routes?: { p: PipeProgram; built: BuiltImages | null } }>(
     (resolve, reject) => {
@@ -230,6 +231,7 @@ export function bothRoutesOnWorker(req: {
         ...(req.fault !== undefined ? { fault: req.fault } : {}),
         classes: req.classes,
         bulkBytes: req.bulkBytes,
+        ...(req.auto === true ? { auto: true } : {}),
         env,
       };
       queue.push({ job, resolve, reject });

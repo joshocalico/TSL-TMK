@@ -721,7 +721,13 @@ function builtin(fl: FnLower, te: Extract<TE, { k: "builtin" }>): number[] {
         fl.trapIf(fl.iconst("i32", 1), "memory", 14, loc);
         return [fl.iconst("i64", 0)];
       }
-      return [fl.ptrToI64(fl.op1("call", [{ t: "sym", name: "__alloc" }, v(n)], "ptr"))];
+      // the injected `arena-grow-short` bug (R13): a buffer from the call arena given half the bytes it asked for, so an
+      // array's elements past half its room overlap whatever the arena gives next
+      const asked =
+        process.env.TMK_TEST_TSL === "arena-grow-short"
+          ? fl.op1("lshr.ix", [v(n), v(fl.iconst("ix", 1))], "ix")
+          : n;
+      return [fl.ptrToI64(fl.op1("call", [{ t: "sym", name: "__alloc" }, v(asked)], "ptr"))];
     }
     case "unsafe.sourcePages":
       return [

@@ -28,7 +28,7 @@
 // @tsl/unsafe), so an array's elements go where its header does, as the direct route's call-bounded vectors' do.
 import type { ClassInst, FuncInst, TE, Ty, TypedModule, Var } from "./types.ts";
 import { stmtBodies, stmtExprs } from "./walk.ts";
-import { r6Off, r9Off } from "./down-model.ts";
+import { r13Off, r6Off, r9Off } from "./down-model.ts";
 
 /** What placing gave: how many `new` sites are in the region, and the long classes, for tests and the report. */
 export interface RegionPlan {
@@ -36,6 +36,8 @@ export interface RegionPlan {
   heapSites: number;
   long: Set<string>;
   why: Map<string, string>;
+  // R13: `strict`'s call arena, where something takes bytes from it beside an object (`callRegionBytes`: the arena array)
+  arenaBytes?: boolean;
 }
 
 const FLOW = new Set([
@@ -177,8 +179,25 @@ function viewUsed(te: TE, child: TE): boolean {
  * value's call, an integer made of its pointer, anything not listed) it may, and its class is long. Its pointer
  * taken by @tsl/lowered's `part` to read or write an element at is a use.
  */
-function viewsEscaping(typed: TypedModule, mark: (c: ClassInst, why: string) => void): void {
+function viewsEscaping(
+  typed: TypedModule,
+  mark: (c: ClassInst, why: string) => void,
+  arena: boolean,
+): Map<string, Set<ClassInst>> {
   const holds = new Map<Var | FuncInst, Set<ClassInst>>();
+  // R13: in `strict`'s call arena, a view's pointer and length kept in a holder (R7's typed-array field, held in place,
+  // `o.f.ptr = cast<usize>(part<Ref>(v, 0, 1))` then `o.f.len`, or one an array holds) is followed through it, by the
+  // holder's class, not given up on as an integer: a view made again from a holder of that class
+  // (`pack<T>(cast<Ref>(h.ptr), h.len)`) is any of the views kept in one, and the storage is long where that class is
+  // (placeRegion). By the class, not the object: one holder of a class that's long makes every view kept in one long.
+  const laundered = new Map<string, Set<ClassInst>>();
+  const heldIn = (holderObj: TE): string | null =>
+    holderObj.ty.k === "cls" ? holderObj.ty.c.key : null;
+  const viewOfInt = (te: TE): TE | null => {
+    let cur = te;
+    for (let g = 0; g < 4 && (cur.k === "conv" || cur.k === "nonnull"); g++) cur = cur.val;
+    return cur.k === "slice" || cur.k === "elemaddr" ? cur : null;
+  };
   const origins = (te: TE): Set<ClassInst> => {
     switch (te.k) {
       case "ofield":
@@ -195,7 +214,8 @@ function viewsEscaping(typed: TypedModule, mark: (c: ClassInst, why: string) => 
       case "blockexpr":
         return origins(te.result);
       case "slice":
-        return origins(te.val);
+        // R13: in `strict`'s call arena, a view's length (its second leaf) is a number, which keeps nothing
+        return arena && te.from >= 1 ? new Set() : origins(te.val);
       case "elemaddr":
         return origins(te.base);
       case "cond":
@@ -204,6 +224,15 @@ function viewsEscaping(typed: TypedModule, mark: (c: ClassInst, why: string) => 
         return (te.name === "arr.subarray" || te.name === "arr.fill") && te.args[0] !== undefined
           ? origins(te.args[0])
           : new Set();
+      case "tuple": {
+        // R13: a view made again from a holder's pointer
+        if (!arena || te.ty.k !== "arr" || te.items[0] === undefined) return new Set();
+        let p = te.items[0];
+        for (let g = 0; g < 4 && (p.k === "conv" || p.k === "nonnull"); g++) p = p.val;
+        if (p.k !== "ofield") return new Set();
+        const at = heldIn(p.obj);
+        return at === null ? new Set() : new Set(laundered.get(at) ?? []);
+      }
       default:
         return new Set();
     }
@@ -231,7 +260,8 @@ function viewsEscaping(typed: TypedModule, mark: (c: ClassInst, why: string) => 
       if (s.k === "return" && s.val !== null) {
         const o = origins(s.val);
         add(f, o);
-        if (f.exported && f.isClosure !== true)
+        // R13: in `strict`'s call arena an export's result is the caller's until it resets the arena (D36)
+        if (f.exported && f.isClosure !== true && !arena)
           escape(o, `a view of its storage given back by the export ${f.jsName}`);
       }
       for (const b of stmtBodies(s)) stmts(f, b);
@@ -241,16 +271,42 @@ function viewsEscaping(typed: TypedModule, mark: (c: ClassInst, why: string) => 
     changed = false;
     for (const f of typed.funcs) {
       stmts(f, f.body);
-      eachTE(f, (te) => {
+      eachTE(f, (te, parent) => {
         if (te.k === "setvar") add(te.v, origins(te.val));
         if (te.k === "call")
           te.args.forEach((a, i) => {
             const p = te.inst.params[i];
             if (p !== undefined) add(p, origins(a));
           });
+        // R13: a view's pointer stored in a holder held in place in a field of a class (the printing's typed-array field)
+        if (
+          arena &&
+          te.k === "conv" &&
+          parent !== null &&
+          parent.k === "osetfield" &&
+          parent.val === te &&
+          viewOfInt(te) !== null
+        ) {
+          const o = origins(viewOfInt(te)!);
+          const at = heldIn(parent.obj);
+          if (at !== null) {
+            const h = laundered.get(at) ?? new Set<ClassInst>();
+            for (const c of o)
+              if (!h.has(c)) {
+                h.add(c);
+                changed = true;
+              }
+            laundered.set(at, h);
+            return;
+          }
+        }
         for (const c of children(te)) {
           const o = origins(c);
           if (o.size === 0 || viewThrough(te, c) || viewUsed(te, c) || te.k === "call") continue;
+          // R13: in `strict`'s call arena, an element copy or fill at a view's pointer (`set`, `slice`, `fill` of a
+          // typed array) reads and writes its elements and keeps nothing of it
+          if (arena && te.k === "intrinsic" && (te.name === "mem.copy" || te.name === "mem.fill"))
+            continue;
           escape(
             o,
             `a view of its storage given to ${te.k}${te.k === "builtin" || te.k === "intrinsic" || te.k === "rtcall" ? ` ${(te as { name: string }).name}` : ""}`,
@@ -272,6 +328,146 @@ function viewsEscaping(typed: TypedModule, mark: (c: ClassInst, why: string) => 
     visit(f.body);
   }
   for (const [c, why] of escaped) mark(c, why);
+  return laundered;
+}
+
+/** A type that holds memory: a reference, or a typed array (a view of an object's storage). */
+function holdsMemory(t: Ty): boolean {
+  return t.k === "cls" || t.k === "arr" || t.k === "ptr" || t.k === "opt";
+}
+
+/**
+ * R13: in a lowered `strict` package, whose region is the caller's call arena (D36), the module's `__init` makes module
+ * state before it commits the arena (`__arena_commit`), so what it makes stays below every reset; what anything makes after
+ * is gone at the caller's next reset. So module state can hold what's in the arena only where nothing made after `__init`
+ * is put where module state reaches: outside `__init`, no module state is set to anything but null or what module state
+ * already held; no field of an object module state reaches is; no typed-array view is kept in one (R7's holder); and no
+ * method of a library class is called on an object module state reaches with such a reference, or one that can grow it
+ * (reaches `callRegionBytes`: an arena array's `push`). A value module state reaches is followed through locals,
+ * parameters, results and fields, to a fixed point. Gives the first place that isn't so, or null. Not finer than this: a
+ * function `__init` calls is checked as any other is.
+ */
+export function stateHazard(typed: TypedModule): string | null {
+  const init = typed.funcs.find((f) => f.exported && f.jsName === "__init");
+  // what can reach `callRegionBytes`, through calls and constructors
+  const grows = new Set<FuncInst>();
+  const callees = new Map<FuncInst, Set<FuncInst>>();
+  for (const f of typed.funcs) {
+    const out = new Set<FuncInst>();
+    eachTE(f, (te) => {
+      if (te.k === "builtin" && te.name === "unsafe.callRegionBytes") grows.add(f);
+      if (te.k === "call") out.add(te.inst);
+      if (te.k === "new" && te.ctor !== null) out.add(te.ctor);
+    });
+    callees.set(f, out);
+  }
+  for (let changed = true, round = 0; changed && round < 256; round++) {
+    changed = false;
+    for (const [f, out] of callees)
+      if (!grows.has(f) && [...out].some((g) => grows.has(g))) {
+        grows.add(f);
+        changed = true;
+      }
+  }
+  const st = new Set<Var | FuncInst>();
+  const fs = (te: TE): boolean => {
+    switch (te.k) {
+      case "global":
+        return holdsMemory(te.ty);
+      case "var":
+        return st.has(te.v);
+      case "call":
+        return (
+          st.has(te.inst) ||
+          (te.inst.owner !== undefined &&
+            te.args[0] !== undefined &&
+            holdsMemory(te.ty) &&
+            fs(te.args[0]))
+        );
+      case "ofield":
+        return fs(te.obj);
+      case "setvar":
+      case "nonnull":
+      case "chkref":
+      case "conv":
+        return fs(te.val);
+      case "seq":
+      case "blockexpr":
+        return fs(te.result);
+      case "cond":
+        return fs(te.a) || fs(te.b);
+      case "slice":
+        return fs(te.val);
+      case "elemaddr":
+        return fs(te.base);
+      case "tuple":
+        return te.items[0] !== undefined && fs(te.items[0]);
+      default:
+        return false;
+    }
+  };
+  let changed = true;
+  const add = (k: Var | FuncInst, te: TE): void => {
+    if (st.has(k) || !fs(te)) return;
+    st.add(k);
+    changed = true;
+  };
+  const stmts = (f: FuncInst, list: FuncInst["body"]): void => {
+    for (const s of list) {
+      if (s.k === "let" && s.init !== null) add(s.v, s.init);
+      if (s.k === "return" && s.val !== null) add(f, s.val);
+      for (const b of stmtBodies(s)) stmts(f, b);
+    }
+  };
+  for (let round = 0; changed && round < 256; round++) {
+    changed = false;
+    for (const f of typed.funcs) {
+      stmts(f, f.body);
+      eachTE(f, (te) => {
+        if (te.k === "setvar") add(te.v, te.val);
+        if (te.k === "call")
+          te.args.forEach((a, i) => {
+            const p = te.inst.params[i];
+            if (p !== undefined) add(p, a);
+          });
+      });
+    }
+  }
+  const nullLit = (te: TE): boolean => te.k === "lit" && Number(te.value) === 0;
+  const fresh = (te: TE): boolean => holdsMemory(te.ty) && !nullLit(te) && !fs(te);
+  const viewIn = (te: TE): TE | null => {
+    let cur = te;
+    for (let g = 0; g < 4 && (cur.k === "conv" || cur.k === "nonnull"); g++) cur = cur.val;
+    return cur.k === "slice" || cur.k === "elemaddr" ? cur : null;
+  };
+  // the injected `arena-state-unchecked` bug (R13): module state set after `__init` not looked for
+  if (process.env.TMK_TEST_TSL === "arena-state-unchecked") return null;
+  for (const f of typed.funcs) {
+    if (f === init) continue;
+    let found: string | null = null;
+    eachTE(f, (te) => {
+      if (found !== null) return;
+      if (te.k === "setglobal" && fresh(te.val))
+        found = `module state ${te.g.jsName || te.g.name} set in ${f.jsName}, after __init`;
+      else if (te.k === "osetfield" && fs(te.obj)) {
+        const v = viewIn(te.val);
+        if (fresh(te.val) || (v !== null && !fs(v)))
+          found = `a field of ${te.c.name}, which module state reaches, set in ${f.jsName}, after __init`;
+      } else if (
+        te.k === "call" &&
+        te.inst.owner !== undefined &&
+        te.args[0] !== undefined &&
+        fs(te.args[0])
+      ) {
+        if (grows.has(te.inst))
+          found = `${te.inst.owner.name}, which module state reaches, grown in ${f.jsName}, after __init`;
+        else if (te.args.slice(1).some(fresh))
+          found = `${te.inst.owner.name}, which module state reaches, given something new in ${f.jsName}, after __init`;
+      }
+    });
+    if (found !== null) return found;
+  }
+  return null;
 }
 
 /**
@@ -281,6 +477,10 @@ function viewsEscaping(typed: TypedModule, mark: (c: ClassInst, why: string) => 
 export function placeRegion(typed: TypedModule, giveBack = true): RegionPlan {
   const plan: RegionPlan = { sites: 0, heapSites: 0, long: new Set(), why: new Map() };
   if (r6Off("region")) return plan;
+  // R13: `strict`'s region is the caller's call arena (no export gives it back), which only the caller resets (D36): what an
+  // export gives back, and what it's given and keeps in it, live until then, as the direct route's results do. So there,
+  // only module state outlives it, and a class is long only where module state reaches it.
+  const arena = !giveBack && !r13Off("arena");
   const work: ClassInst[] = [];
   const mark = (c: ClassInst, why: string): void => {
     if (plan.long.has(c.key)) return;
@@ -313,12 +513,17 @@ export function placeRegion(typed: TypedModule, giveBack = true): RegionPlan {
     }
   };
   // Module state, and what an export gives or is given.
+  // R13: in `strict`'s call arena, module state is long only where something new can reach it after `__init` (stateHazard):
+  // what `__init` makes is below the point it commits the arena to, which no reset passes.
+  const hazard = arena ? stateHazard(typed) : null;
   for (const g of typed.globals) {
-    ty(g.ty, `module state ${g.jsName || g.name}`);
-    if (g.object !== undefined) mark(g.object.c, `a static object ${g.name}`);
+    if (arena && hazard === null) continue;
+    const and = hazard !== null ? ` (${hazard})` : "";
+    ty(g.ty, `module state ${g.jsName || g.name}${and}`);
+    if (g.object !== undefined) mark(g.object.c, `a static object ${g.name}${and}`);
   }
   for (const f of typed.funcs) {
-    if (!f.exported || f.isClosure === true) continue;
+    if (!f.exported || f.isClosure === true || arena) continue;
     for (const p of f.params) ty(p.ty, `an argument of the export ${f.jsName}`);
     ty(f.ret, `the result of the export ${f.jsName}`);
   }
@@ -342,12 +547,16 @@ export function placeRegion(typed: TypedModule, giveBack = true): RegionPlan {
   // R9: a typed array that's a view of an object's own storage (a layout class's `array(…)` field, or a tail, D69: how
   // printed TSL makes a typed array in a function) keeps that object's memory in use with no reference to it, so its
   // class is long wherever such a view can outlive the export call.
-  if (!r9Off("regionviews")) viewsEscaping(typed, mark);
-  // Everything a long object can reach.
+  const laundered = r9Off("regionviews")
+    ? new Map<string, Set<ClassInst>>()
+    : viewsEscaping(typed, mark, arena);
+  // Everything a long object can reach; R13: and the storage of each view a long object's typed-array field holds.
   for (let i = 0; i < work.length && i < 100_000; i++) {
     const c = work[i]!;
     for (const fld of c.fields) ty(fld.ty, `a field of ${c.name}, which is long`);
     for (const a of c.tyArgs) ty(a, `a type argument of ${c.name}, which is long`);
+    for (const s of laundered.get(c.key) ?? [])
+      mark(s, `a view of its storage in a field of ${c.name}, which is long`);
   }
   // A class that keeps memory beside its objects where they are (one of its methods asks `inCallRegion(this)`: JsArray's
   // buffers): an object of it escape analysis put on the stack goes in the region instead, which outlives the stack frame,
@@ -390,6 +599,12 @@ export function placeRegion(typed: TypedModule, giveBack = true): RegionPlan {
       plan.sites++;
     });
   }
+  // R13: in `strict`'s call arena, an arena array takes its buffers from it wherever its header is, the stack included
+  if (arena)
+    for (const f of typed.funcs)
+      eachTE(f, (te) => {
+        if (te.k === "builtin" && te.name === "unsafe.callRegionBytes") plan.arenaBytes = true;
+      });
   // R12: in `strict` the region is the call arena as the direct route uses it, which the caller resets (D36): no export
   // gives it back at its return.
   if (plan.sites > 0 && giveBack) {

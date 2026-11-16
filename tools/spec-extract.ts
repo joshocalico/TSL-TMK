@@ -1,5 +1,5 @@
 // The spec's `// file:` blocks are source, and they can't drift (SPEC 3.5, M3): corpus/spec holds each one byte
-// for byte, and @tsl/alloc's three modules, @tsl/std's five, @tsl/gc's one and @tsl/jsrt's three are the same bytes. `--write` regenerates them from the spec.
+// for byte, and @tsl/alloc's three modules, @tsl/std's five, @tsl/gc's two and @tsl/jsrt's four are the same bytes. `--write` regenerates them from the spec.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -24,7 +24,12 @@ export const STD_MODULES = [
 ];
 
 export const GC_MODULES = ["ex-gc-rc.ts", "ex-gc-roomarray.ts"];
-export const JSRT_MODULES = ["ex-jsrt-array.ts", "ex-jsrt-map.ts", "ex-jsrt-string.ts"];
+export const JSRT_MODULES = [
+  "ex-jsrt-array.ts",
+  "ex-jsrt-map.ts",
+  "ex-jsrt-string.ts",
+  "ex-jsrt-arena.ts",
+];
 
 export function checkBlocks(write: boolean): string[] {
   const problems: string[] = [];

@@ -2319,7 +2319,9 @@ export function lowerToTir(tm: TypedModule): Module {
     sigKeys: new Map(),
     tables: new Set(),
     thunks: new Map(),
-    region: (tm.region?.sites ?? 0) > 0,
+    // R13: in a lowered `strict` package the call arena is always there, and an arena array whose header escape analysis
+    // left on the stack still takes its buffers from it (region.ts's `arenaBytes`)
+    region: (tm.region?.sites ?? 0) > 0 || tm.region?.arenaBytes === true,
   };
   if (tm.nativeOnly === true) computeCaptures(tm);
   for (const g of tm.globals) {

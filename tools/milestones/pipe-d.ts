@@ -2190,7 +2190,7 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     for (const p of R12.R12_PROGRAMS)
       if (!w.programs.includes(p)) failures.push(`${p} wasn't run as Wasm`);
     report({
-      box: "43. R12 (D62, pile item 7): objects print as TSL classes in strict, with nothing else of phase 2 (no JsArray, JsString, JsMap, environment class or Dyn, runtimes strict code doesn't have); what escapes its function goes in the call arena, placed by tslc, which the caller resets (D36), what doesn't on the stack, and an object that could outlive the export call refuses the printing; every program it takes agrees with the direct route at -O0 and -O2 through the dual route, runs on V8 as printed, and as Wasm on V8 and JSC agrees with the source (tools/r12-tests.ts)",
+      box: "43. R12 (D62, pile item 7): objects print as TSL classes in strict, and since R13 arrays as @tsl/jsrt's arena array, typed arrays as R9's views, closure values and exports taking or giving objects too (no JsArray, JsString, JsMap or Dyn, runtimes strict code doesn't have); what escapes its function goes in the call arena, placed by tslc, which the caller resets (D36), what doesn't on the stack, and an object that could outlive the arena refuses the printing; every program it takes agrees with the direct route at -O0 and -O2 through the dual route, runs on V8 as printed, and as Wasm on V8 and JSC agrees with the source (tools/r12-tests.ts)",
       ok: failures.length === 0 && hvf.ok,
       detail: `${d.agreed}/${d.cases} cases in ${d.printed.length} programs printed with classes at -O0 and -O2: ${d.printed.join(", ")}; the printed TSL on V8 ${d.printedSame} of ${d.printedCases} the same, the rest D71's divergences; Wasm on V8 and JSC: ${w.cases} cases in ${w.programs.length} programs with a class; refused: ${Object.entries(
         d.refused,
@@ -2213,6 +2213,101 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     }
     report({
       box: `44. R12: each of ${R12.R12_FAULTS.length} bugs put into class printing in strict is caught, with how many cases caught it: an object that escapes its function left on its stack, an object in the call arena given 8 bytes too few, and a reference's pointer taken from the wrong bits in Wasm (tools/r12-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
+  // 45. R13: arrays in `strict`, as @tsl/jsrt's arena array, and the JPEG decoder through the TSL route.
+  M.unit("45", async () => {
+    const R13 = timedModule("r13", await import("../r13-tests.ts"));
+    const failures: string[] = [];
+    const k = await R13.keptRefused();
+    failures.push(...k.failures);
+    const d = await R13.strictArraysDual([accel], jobs, R13.R13_PROGRAMS);
+    failures.push(...d.failures);
+    if (d.agreed !== d.cases)
+      failures.push(`${d.cases - d.agreed} cases differ through the two routes`);
+    for (const p of R13.R13_PROGRAMS)
+      if (!d.printed.includes(p)) failures.push(`${p} isn't printed with arrays in strict`);
+    const w = await R13.jpegWasm();
+    failures.push(...w.failures);
+    if (w.fixtures < 16)
+      failures.push(`the JPEG decoder's Wasm ran ${w.fixtures} fixtures, not 16`);
+    const n = hvf.ok ? await R13.jpegNative(accel) : null;
+    if (n !== null) {
+      failures.push(...n.failures.slice(0, 20));
+      if (n.agreed !== n.cases)
+        failures.push(
+          `the JPEG decoder natively: ${n.cases - n.agreed} of ${n.cases} cases differ from V8`,
+        );
+      if (n.pinned !== 6) failures.push(`the JPEG decoder natively: ${n.pinned} of M2's 6 pins`);
+      if (n.corrupt.crashed > 0 || n.corrupt.mismatched > 0)
+        failures.push(
+          `the JPEG decoder natively, corrupt input: ${n.corrupt.crashed} crashed, ${n.corrupt.mismatched} differ from V8`,
+        );
+    }
+    report({
+      box: "45. R13 (D66, D62, pile item 7): arrays print in strict as @tsl/jsrt's arena array (JsArenaArray), whose buffers come only from the call arena the caller resets (D36), with typed arrays made in functions as R9's views, arrays of typed arrays held in R7's holders, closure values and exports taking or giving objects, each placed by tslc in the call arena; module state holds only what __init made before it commits the arena, and tslc refuses a package where something made later can reach it; strict_arrays.ts agrees with the direct route at -O0 and -O2 and runs on V8 and JSC as printed; the JPEG decoder through the TSL route agrees with V8 natively (every fixture and maxEdge, M2's pins, 200 corrupt inputs matching V8 or trapping) and as Wasm on V8 and JSC at -O0 and -O2 (tools/r13-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `tslc's arena check: ${k.rows.join(", ")}; strict_arrays.ts ${d.agreed}/${d.cases} cases; the JPEG decoder as Wasm: ${w.fixtures} fixtures, ${w.checks} checks on V8 and JSC; natively${n !== null ? ` (${n.accel}, ${n.restructured} reshapes in its class printing; auto takes its phase 1 printing since R14, the direct route's TIR): ${n.agreed}/${n.cases} cases, ${n.pinned} pins, corrupt ${n.corrupt.matched} matched and ${n.corrupt.trapped} trapped of ${n.corrupt.total}` : ": not run"}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 46. R13's bugs, each caught.
+  M.unit("46", async () => {
+    const R13 = timedModule("r13", await import("../r13-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R13.R13_FAULTS) {
+      const x = await R13.r13FaultRun(f, accel, jobs);
+      rows.push(`${f.what}: ${caughtText(x)}`);
+      if (x.caught === 0) failures.push(`${f.name} wasn't caught`);
+    }
+    report({
+      box: `46. R13: each of ${R13.R13_FAULTS.length} bugs put into arrays in strict is caught, with how many cases caught it: an arena array one element short, growth given half the bytes it asked for, the element size taken as half, a typed array an array holds one element short, and an array made after __init left where module state reaches it (tools/r13-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
+  // 47. R14: `auto` takes what phase 1 printed reshaped only as it trusts, giving the direct route's TIR, and agreeing.
+  M.unit("47", async () => {
+    const R14 = timedModule("r14", await import("../r14-tests.ts"));
+    const failures: string[] = [];
+    const k = await R14.autoReshapedKinds();
+    failures.push(...k.failures);
+    const d = await R14.autoReshapedDual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.agreed !== d.cases)
+      failures.push(`${d.cases - d.agreed} cases differ through the two routes`);
+    for (const p of R14.R14_PROGRAMS)
+      for (const mode of ["leak", "manual"])
+        if (!d.taken.includes(`${p} ${mode}`))
+          failures.push(`${p} isn't taken reshaped by auto in ${mode}`);
+    report({
+      box: "47. R14 (D62, pile item 9): auto takes a program phase 1 printed reshaped only by the kinds it trusts (a statement-expression's statements before an operand, after a sequence's first part, in a conditional's arm, on a logical operator's right side; tslc.ts's TRUSTED_RESHAPES and TRUSTED_IN), never one with exceptions or another kind, and each such build at -O1 and -O2 gives the direct route's TIR byte for byte; every program auto takes reshaped, in strict, leak and manual at -O0 and -O2, agrees with the direct route natively and as printed on V8 and JSC with the source (tools/r14-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `taken reshaped at -O2: ${JSON.stringify(k.taken)}, by kind ${JSON.stringify(k.kinds)}; phase 1's TIR the direct route's in ${k.phase1Same} builds at -O1 and -O2; natively ${d.agreed}/${d.cases} cases in ${d.taken.length} programs; the third route ${d.printedSame}/${d.printedCases} (3.10's allowed divergences, named: ${JSON.stringify(d.divergences)})${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 48. R14's bugs, each caught.
+  M.unit("48", async () => {
+    const R14 = timedModule("r14", await import("../r14-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R14.R14_FAULTS) {
+      const x = await R14.r14FaultRun(f, accel, jobs);
+      rows.push(`${f.what}: ${caughtText(x)}`);
+      if (x.caught === 0) failures.push(`${f.name} wasn't caught`);
+    }
+    report({
+      box: `48. R14: each of ${R14.R14_FAULTS.length} bugs put into the order of a trusted reshape is caught by the differential on auto's own builds, with how many cases caught it: a sequence's earlier parts run after a later part's statements, an earlier operand evaluated after a later one's statements, a conditional's arms' statements run before its test, and a logical operator's right side's statements run where its left side decides (tools/r14-tests.ts)`,
       ok: failures.length === 0 && hvf.ok,
       detail: `${rows.join("; ")}${skipNote}`,
       failures,

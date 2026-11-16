@@ -80,7 +80,14 @@ export function listPrograms(dir: string, filter?: string): string[] {
     for (const name of readdirSync(d).sort()) {
       const p = join(d, name);
       if (statSync(p).isDirectory()) walk(p);
-      else if (name.endsWith(".ts") && (filter === undefined || name.includes(filter))) out.push(p);
+      // A dot-file is never a program: pipe-c box 4 writes `.two_squares_reordered.ts` beside two_squares.ts for a moment,
+      // and a job listing the directory then (R12's and R13's dual routes, in the same gate) found it gone when it compiled.
+      else if (
+        name.endsWith(".ts") &&
+        !name.startsWith(".") &&
+        (filter === undefined || name.includes(filter))
+      )
+        out.push(p);
     }
   };
   walk(dir);

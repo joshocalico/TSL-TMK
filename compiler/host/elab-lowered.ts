@@ -291,7 +291,15 @@ export function loweredCall(h: LoweredHost, e: ts.CallExpression, name: string):
     }
     case "load": {
       const t = tyArg();
-      return mk(t, { k: "fload", base: ref(0), mem: mem(1, t) });
+      // R14: `load<T>(base, off, "invariant")`, a word nothing writes after `new` (a class id, D73): the lowering's own
+      // mark on the leaf, which the optimiser shares as the direct route's is shared
+      const inv = a[2] !== undefined && ts.isStringLiteralLike(a[2]) && a[2].text === "invariant";
+      const m = mem(1, t);
+      return mk(t, {
+        k: "fload",
+        base: ref(0),
+        mem: inv ? m.map((x) => ({ ...x, inv: true })) : m,
+      });
     }
     case "store": {
       const t = tyArg();

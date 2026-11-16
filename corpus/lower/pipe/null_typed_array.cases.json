@@ -1,0 +1,7 @@
+[
+  { "fn": "pick", "args": [0] },
+  { "fn": "pick", "args": [3] },
+  { "fn": "fill", "args": [4] },
+  { "fn": "fill", "args": [5] },
+  { "fn": "fill", "args": [70000] }
+]

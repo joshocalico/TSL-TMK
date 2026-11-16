@@ -108,6 +108,8 @@ export async function benchMemory(opts: {
   closures?: boolean; // with classes: only closure values (R6), the cycles benchmark in leak and manual, closures printed
   typedArrays?: boolean; // with classes: only typed arrays made in functions (R9), in leak and manual
   strict?: boolean; // with classes: only objects in strict (R12), bench/memory/strict_lowered.ts, the arena reset each call
+  strictArrays?: boolean; // with classes: arrays and typed arrays in strict (R13), the arena array and R9's views, reset each call
+  reshapes?: boolean; // with classes: R14's trusted reshapes, `auto`'s build against the direct route, strict, leak and manual
 }): Promise<MemoryBench> {
   const processes = opts.quick === true ? 1 : 3;
   const warm = opts.quick === true ? 2 : 20;
@@ -229,7 +231,7 @@ export async function benchMemory(opts: {
     cBlob: Uint8Array | null = null,
     cWhich = 0,
     cycles?: boolean,
-    route?: { route: "direct" | "tsl"; classes?: boolean },
+    route?: { route: "direct" | "tsl" | "auto"; classes?: boolean },
     arenaReset = false,
   ): Promise<number | null> => {
     const lo = lowerFile(file, {
@@ -340,6 +342,100 @@ export async function benchMemory(opts: {
           ratio: t / d,
         });
     };
+    if (opts.reshapes === true) {
+      // R14 (pile item 9): the reshapes `auto` trusts, `auto`'s own build against the direct route, each benchmark only
+      // where `auto` takes it reshaped: bench/reshape/reshape_lowered.ts's one function per kind, and the benchmarks a
+      // trusted reshape touches, in `strict`, `leak` and `manual`, the arena reset after each call (D36).
+      const { lowerFile: lowerPlain } = await import("../compiler/host/tslc.ts");
+      const benches: [string, string, string][] = [
+        ["operand", "bench/reshape/reshape_lowered.ts", "operandWork"],
+        ["logical", "bench/reshape/reshape_lowered.ts", "logicalWork"],
+        ["arm", "bench/reshape/reshape_lowered.ts", "armWork"],
+        ["sequence", "bench/reshape/reshape_lowered.ts", "sequenceWork"],
+        ["acyclic", "bench/memory/acyclic_lowered.ts", "acyclicWork"],
+        ["arrays", "bench/memory/vec_lowered.ts", "vecWork"],
+        ["typed arrays", "bench/memory/typed_lowered.ts", "typedWork"],
+      ];
+      for (const memory of ["strict", "leak", "manual"]) {
+        pageSource = memory !== "strict";
+        for (const [what, rel, fn] of benches) {
+          if (
+            process.env.TMK_BENCH_ONLY !== undefined &&
+            !new RegExp(process.env.TMK_BENCH_ONLY).test(fn)
+          )
+            continue;
+          const f = join(ROOT, rel);
+          let shape = "";
+          try {
+            const a = lowerPlain(f, { memory: memory as never, route: "auto" });
+            if (a.tsl === undefined || a.tsl.file === "" || a.tsl.stats.restructured === 0)
+              continue;
+            shape = a.tsl.stats.classes === true ? "classes" : "phase 1";
+          } catch {
+            continue;
+          }
+          const v8 = await onV8(f, fn);
+          const label = `reshaped ${what} (${fn}), ${memory}, ${shape}`;
+          const d = await lowered(
+            `${label}, direct`,
+            f,
+            fn,
+            memory,
+            v8,
+            "the source on V8",
+            null,
+            0,
+            undefined,
+            { route: "direct" },
+            true,
+          );
+          const t = await lowered(
+            `${label}, auto`,
+            f,
+            fn,
+            memory,
+            v8,
+            "the source on V8",
+            null,
+            0,
+            undefined,
+            { route: "auto" },
+            true,
+          );
+          if (d !== null && t !== null)
+            out.rows.push({
+              name: `${label}: auto against direct`,
+              ms: t,
+              versus: "direct",
+              versusMs: d,
+              ratio: t / d,
+            });
+        }
+      }
+      out.host.loadEnd = loadavg();
+      return out;
+    }
+    if (opts.strictArrays === true) {
+      // R13: arrays (@tsl/jsrt's arena array, its buffers the call arena's) and typed arrays made in functions (R9's layout
+      // classes and tails, in the call arena) printed in `strict`, against the direct route, the arena reset after each call
+      // as a native caller resets it (D36): the arrays benchmark and the typed arrays one, each in `strict`.
+      pageSource = false;
+      const benches: [string, string, string][] = [
+        ["arrays", "bench/memory/vec_lowered.ts", "vecWork"],
+        ["typed arrays", "bench/memory/typed_lowered.ts", "typedWork"],
+      ];
+      for (const [what, rel, fn] of benches) {
+        if (
+          process.env.TMK_BENCH_ONLY !== undefined &&
+          !new RegExp(process.env.TMK_BENCH_ONLY).test(fn)
+        )
+          continue;
+        const f = join(ROOT, rel);
+        await both(`strict ${what} (${fn})`, f, fn, "strict", await onV8(f, fn), true);
+      }
+      out.host.loadEnd = loadavg();
+      return out;
+    }
     if (opts.strict === true) {
       // R12: objects printed as classes in `strict` (pile item 7), against the direct route, the call arena reset after
       // each call as a native caller resets it (D36).

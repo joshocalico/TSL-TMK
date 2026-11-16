@@ -432,7 +432,7 @@ export function builtin<R = void>(name: string, ...args: unknown[]): R {
 }
 
 /** The value of type T at `base + off`, laid out as lowering lays a field out (down-model.ts, memOf). */
-export function load<T>(base: Ref, off: number): T {
+export function load<T>(base: Ref, off: number, _invariant?: "invariant"): T {
   return read(addrOf(base) + off) as T;
 }
 

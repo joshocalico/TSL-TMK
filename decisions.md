@@ -56,6 +56,107 @@ The nightly full run stays paused until the owner agrees the pipeline is fixed.
 
 ---
 
+## 2026-12-25
+
+**Coordinator: R14 verified** (manifest MATCH, tree b918d320cb253fd4; sample 8/8 the same, seed 16253; gate 93.4 min, 269 of 269).
+- *A correction to the builder's note on `pre-std-tirhash.json`:* those pins are built at -O0 (tools/pre-std-hashes.ts sets `TMK_OPT=0`). So the 4 moved pins (`app_text.ts` and `app_wordcount.ts` in `leak`/`manual`) show the reshaped -O0 TIR the TSL route now gives them, not the direct route's code. -O0 is exempt from the speed rule, and box 47 checks the byte-identical claim at -O1 and -O2. Accepted.
+- The rule is narrower than "trust reshapes": four kinds, only in phase 1's printing, and only where every touched build has the direct route's exact code at -O1/-O2. So the speed rule holds by construction rather than by timing. Exceptions are held back on purpose (`R14_TRUST_EXC`), as is `rc`, which has no phase 1 printing.
+- **The JPEG decoder is now `auto`'s** through the TSL route, at the direct route's speed.
+- Builder broke one rule (a single `pgrep -f` check, nothing killed). Noted; it's repeated in the next brief.
+
+**Decision: R15 takes pile item 10, loop versioning** (with check elimination where it serves it). R13 found that class printing pays a double array-read check at computed indices (`toRgba`), and R14 found that class printing makes a callback's array on every loop turn. Those two costs keep class printing, and with it `rc` and the remaining reshaped programs, out of `auto`.
+- Measure first on the JPEG decoder's class printing and the R14 benchmarks R14 found slow (operandWork, acyclicWork).
+- Versioning must be sound: a guarded fast loop and the original as the fallback, with every check either proven or kept.
+- The same speed rule, JPEG and S4 not slower, and injected bugs that the gate catches.
+- *Next:* item 11, retiring the direct route; and `rc`'s reshaped programs once class printing is no slower.
+
+## 2026-12-24
+
+**R14 is built (builder's report; for the coordinator to verify).** Pile item 9, the reshaped programs, as a confidence rule: `auto` takes a program phase 1 printed reshaped only by four kinds it trusts. SPEC D62, 4.5, 8.3 and M5's R14 record. Nothing was added to TSL; no check or case was dropped; no limit moved.
+- **Measured first** (`reshapedWhy`, -O2): four kinds are the lowering's statement-expressions inside an expression (statements before an operand, after a sequence's first part, in a conditional's arm, on a logical operator's right side). They nearly always come together, and together they alone held back 17 of `strict`'s 18 reshaped programs, 117 of `leak`'s and `manual`'s 139, and 132 of `rc`'s 155. Every other kind alone frees at most 2 programs, so they were left.
+- **The rule** (tslc.ts `TRUSTED_RESHAPES`, `TRUSTED_IN`, switch `R14_TRUST`):
+  - *Order:* each kind keeps JS's order, argued in D62; four injected bugs, one per kind, each caught on `auto`'s own builds (box 48).
+  - *Trusted only in phase 1's printing,* where all 198 builds they touch give the direct route's TIR at -O1 and -O2, byte for byte (box 47 checks each), so the speed rule holds as a fact.
+  - *Not in class printing:* touched benchmarks there were 1.05–1.34× (a callback's array made each turn as a class), `leak` programs 1.01–1.05×, `rc` up to 2.2×. That's the classes' cost, not the reshape's. A reshaped class printing falls back to phase 1's; `rc` has no phase 1, so takes nothing reshaped.
+  - *Not with exceptions* (`R14_TRUST_EXC` off): all print reshaped, none was ever `auto`'s, and their throws were 1.00–1.02× in `leak`. Without this guard 84 programs per mode would have switched by accident.
+- **Coverage** (`auto` takes the TSL route, -O2, exact + reshaped): `strict` 30+0 → 30+18; `leak` and `manual` 62+4 → 63+43; `rc` 19+0 → 19+0. Left reshaped: exceptions (84 per mode), `rc`'s class printing, closures (9), a multi-key switch clause (3), a loop condition/step (1).
+- **JPEG and S4:** the JPEG decoder now goes through the TSL route by default (phase 1, the direct route's TIR, so the same speed: native/V8 1.075× at -O1, 1.098× at -O2). S4 1.177× and 1.129×. TSL proper pins untouched.
+- **Found and fixed:** phase 1 lost D73's invariant mark on class-id loads (`load<i32>(o, 0, "invariant")`); R13's carried TSL1008 (`nullRef()` in `leak`/`manual` class printing), plus a TIR verifier error it hid (a null array's value in a conditional).
+- **Pins:** 52 of 3,862 moved, none of TSL proper's, none unexplained (`tools/r14-pins.ts`, `tools/r14-moved.ts`): 48 by the invariant mark (pipe-tirhash.json, re-pinned), 4 by the trust (pre-std-tirhash.json).
+- **Harness additions:** the dual route can compare `auto`'s own build (`dualRoute`'s `auto`); a timing image (`RcHarness.timePasses`) and `tools/r14-time.ts` time or instruction-count a program's cases through both routes; `tmk bench memory --classes --reshapes`; route-blockers reports what `auto` takes.
+- *Rejected:* trusting the kinds in class printing (measured slower, as above); trusting "a field read through a computed base" and "a null array's value" (they'd put the JPEG decoder's class printing, 1.002–1.006× at -O1, into `auto`).
+- *Next:* item 10, loop versioning; class printing's per-iteration arrays (what made reshaped class printings slower) is the lever for taking those programs with classes.
+
+## 2026-12-23
+
+**Coordinator: R13 verified** (manifest MATCH, tree 04e1283a8e4a06dd; sample 8/8 the same, seed 15511; gate about 90 min, 267 of 267).
+- I read both relaxed harness comparisons. `bothNullRead` needs both engines to throw a `TypeError` for a read of null or undefined, with the same arguments, and counts it as a named divergence (1). The Wasm check requires a case's declared `lowered_trap` code exactly. Neither skips a case. Accepted.
+- The JPEG decoder now prints whole and agrees everywhere, but stays forced-only: it's reshaped (121 sites) and 1.002–1.006× at -O1. That's the double check in `toRgba` at computed indices, which is item 10's.
+- **Owner review:** `JsArenaArray` (a new library class, only for lowered packages), and the `stateHazard` refusal (TSL3001) for module state reaching what was made after `__init`.
+- Carried forward: the TSL1008 typed-array-against-null printing in `leak`/`manual` (fixed in `strict` only).
+
+**Decision: R14 takes pile item 9, the reshaped programs.** What "reshaped" means today: the printer had to hoist statements into temporaries or restructure a loop or branch (emit-tsl.ts `reshape`), so the TSL route's TIR can differ from the direct route's. `auto` refuses all of those (tslc.ts, D62), so a correct and verified print still goes the old way.
+- *First, measure:* the reshape kinds across all four modes and how many programs each one alone holds back (`reshapedWhy`, route-blockers).
+- *Then, kind by kind, the cheaper of:*
+  - **remove the reshape**, by printing the shape the direct route makes (or making both routes make the same one, since the direct route is retiring); or
+  - **a confidence rule:** a kind is trusted when (a) it keeps JS's evaluation order (argued in SPEC, with an injected bug that breaks the order and gets caught), (b) the three-way differential agrees on every program it touches, and (c) it's no slower: a micro-benchmark per kind, plus every touched program's cases timed or its code compared at -O1 and -O2. `auto` then takes a program whose reshapes are all trusted kinds.
+- *Rejected:* trusting all reshapes at once (the speed rule must hold kind by kind); per-program allow-lists (they don't generalise); timing each program in `auto` at compile time.
+- The speed rule, JPEG and S4 stand. The JPEG decoder joins `auto` only if it passes the speed rule; if not, it waits for item 10.
+- *Next:* item 10, loop versioning.
+
+## 2026-12-22
+
+**R13 is built (builder's report; for the coordinator to verify).** Pile item 7 finished as far as `strict` allows: arrays print in `strict` lowered code, and the JPEG decoder goes through the TSL route (forced). SPEC D36, D62, D66, 3.5's `// file: ex-jsrt-arena.ts`, 4.5's "Arrays in `strict`" and M5's R13 record. Nothing was added to TSL; no check or case was dropped; no limit moved.
+- **The class:** `@tsl/jsrt`'s `JsArenaArray<T>` in a module of its own (`@tsl/jsrt/arena`, so it links no `@tsl/std`), `JsArray`'s rules and surface, its buffers only from the call arena (`callRegionBytes`), never given back (the caller resets the arena, D36). Growth doubles and traps 14 where the arena runs out. Only a lowered package can import it (TSL1023), so the kernel's `strict` TSL can't depend on it. On the host the arena is simulated memory.
+- **Placing (region.ts, `strict` only):** an export's arguments and result live in the caller's arena until it resets it, as the direct route's do, so they no longer make a class long; module state may hold what `__init` made before it commits the arena, and tslc refuses (TSL3001) a package where something made later can reach module state (`stateHazard`). The lowering already keeps such programs on the direct route, so this is tested on hand-written lowered packages.
+- **Printing in `strict`:** arrays, typed arrays made in functions (R9's views), arrays of typed arrays (R7's holders), closure values and exports taking or giving objects. A constant-index read check folds into `get`'s, as R6 folded a variable's.
+- **The JPEG decoder:** prints whole, agrees with V8 natively (136 of 136, M2's pins, 200 corrupt inputs) and as Wasm on V8 and JSC. Its printing is reshaped (121 sites), and natively it's 1.002 to 1.006× the direct route at -O1 (0.973 to 0.985× at -O2), as Wasm on V8 up to 1.03×, so it stays forced-only. Where -O1's time went: `toRgba`'s pixel loop checked each array read twice (the lowering's check and `get`'s); folding constant indices took it from 1.03× to about 1.005×; the rest is the same double check at computed indices, for check elimination and loop versioning (pile item 10).
+- **`auto`:** takes arrays in `strict` where the printing is exact (`AUTO_STRICT_ARRAYS`): the arrays benchmark 0.58× and 0.86×, the typed arrays one 0.998 to 0.9996×, at -O1 and -O2, two quiet runs. S4 isn't touched (TSL proper, no pin moved): see M5's record.
+- **The 17 reshaped `strict` programs:** none becomes exact. 16 now class-print, all still reshaped by the lowering's statement-expressions (pile item 9); one refuses (a string field crossing an export).
+- **Pins:** 9 of 3,862 moved, all `strict` builds of generics_mono.ts and adv_temporaries.ts (`tools/r13-moved.ts`); none of TSL proper's.
+- **Harness changes to note:** the third route's V8-against-JSC comparison now allows a read of null each engine words its own way (`bothNullRead`, as corpus.ts already does for the source); R12's Wasm runs check a case's declared trap (`lowered_trap`) rather than V8's exception, as the corpus's Wasm runs do. Neither drops a case.
+- **The first full gate** failed 3 of 267 jobs, all fixed: generics_mono.ts unlisted in two older pin lists (pipe-c box 5, pipe-d box 7), and a race where pipe-c box 4's momentary `.two_squares_reordered.ts` was listed by R12's box 44 and gone when compiled (`listPrograms` now skips dot-files).
+- **Found, not fixed:** in `leak`/`manual` class printing, a typed array's pointer compared with null prints `null` against a Ref (TSL1008), so those programs stay on phase 1's printing; fixed in `strict` only, to move no pin.
+- *Rejected:* a second array class for module state (class identity as the only way to tell module state's arrays apart); letting `strict` link `JsArray` and `@tsl/std`'s heap; refusing every program with module state (the JPEG decoder has `AAN_SCALE`).
+- *Next:* pile item 9, the reshaped programs: it's what keeps the JPEG decoder and 16 of `strict`'s 18 reshaped programs off the TSL route now.
+
+## 2026-12-21
+
+**Coordinator: R12 verified** (manifest MATCH, sample 8/8, seed 14229; gate 88.5 min).
+- **The CPU budget works:** one token per core across every process, and at most 9.8 of 10 cores busy. Load averages above 100 now mostly count V8's waiting helper threads, not oversubscription.
+- **The memory margin is restored:** the dual route is capped at 2, and the highest peak in the gate was 2.32 GiB.
+- **Box 21's root cause:** a V8 reference run's timeout used a wording R7's check didn't recognise ("wall-clock limit"). So under load the reference went missing, and every case of `cyc_giveup.ts` and `cyc_interleave.ts` counted as a wrong answer. Fixed, and other fault boxes now print wrong answers, not raw failure counts. The count is 223 even at full load.
+- **Class printing in `strict` is on in `auto`:** 0.68–0.99× in every cell. JPEG and S4 are unchanged, and the JPEG decoder's code is byte-identical. 9 pins moved, all `strict` lowered builds.
+- **Coverage:** `strict` 30 / 17 / 0, `leak`/`manual` 64 / 139 / 14, `rc` 25 / 155 / 42.
+- **I checked one claim myself:** the builder reported that a compiler edit selects all 266 jobs in `--changed`. That run's changes included harness files (gate.ts, qemu-run.ts), which deliberately select everything. A compiler-only edit selects the quick steps that reach it (gate.ts `selectFor`). No regression.
+
+**Decision: R13 finishes pile item 7 with an array class for `strict` lowered code whose storage comes only from the call arena,** so the JPEG decoder and other `strict` programs with arrays print through the TSL route.
+- It's a library class (in the style of `@tsl/jsrt`, with no `@tsl/std` heap), not a language extension, so it's within "desugar, don't extend".
+- It's only for lowered packages; the kernel's own `strict` TSL doesn't use it.
+- An array that could outlive the export call refuses printing, as R12 does for objects.
+- The speed rule applies, and JPEG is the benchmark that matters. Loop versioning (item 10) is what recovers JPEG's speed, so if the TSL route is slower, it stays forced-only.
+- **Owner review:** a new library class.
+- *Next:* pile item 9, the reshaped programs (139 in `leak`/`manual`, 155 in `rc`). That's the largest remaining coverage lever before the direct route can retire.
+
+## 2026-12-20
+
+**R12 is built (builder's report; for the coordinator to verify).** Harness fixes first, then pile item 7 as far as `strict` allows (SPEC D62, D76, 8.3 and M5's R12 record). Nothing was added to TSL, no check or case was dropped, and no limit moved.
+- **A CPU budget** (`tools/cpu-budget.ts`): the pool serves a token a core, and every leaf of every job takes one while it runs (a compile on a worker, a QEMU run, a compile batch, a reference engine's or pins tool's run), the longest job's first, before its time limit starts. A token is a socket connection, so a process that dies gives its tokens back, and nothing holding one waits for another.
+  - *Measured:* at most 9.8 cores busy in a 266-job run. The host's load average still read 70 to 196: it counts every ready thread (V8's helpers included), not busy cores, so the manifest now records cores busy too.
+  - *Not reached:* a faster gate. The host is CPU-bound either way; the budget changes who waits, not how much work there is.
+- **Memory margin:** at most two of the dual route's builds at once in a process (pipe-a box 3 alone: 2.63 GiB with three, 2.29 GiB with two), and `lang-a` box 10 two suites at once (2.54 → 1.68 GiB).
+- **Box 21, at the root.** The extra wrong answers under load were every case of `cyc_giveup.ts` and `cyc_interleave.ts` counted against "V8 gave undefined". Their expansion's run on V8 (6.7 s quiet, 10.7 s with the bug) passed its 30 s limit, and guarded-run's wording ("over the 30000 ms wall-clock limit") wasn't one `ranOutOfTime` knew.
+  - *Fixed:* that wording counts as out of time; a program with no finished reference isn't compared case by case (its pins still are); a case a dual-route run never reached because it ran out of time says so; and boxes that printed `failures.length` for a bug print its wrong answers.
+  - *Measured:* six copies of the run at once give 223 each with the budget (the quiet figure), 209 without.
+  - *Test:* `tools/fault-time.test.ts`.
+- **Class printing in `strict`:** objects print as TSL classes and nothing else of phase 2 (arrays, strings, maps, closures and `Dyn` need `@tsl/jsrt`/`@tsl/std`, which `strict` code doesn't have). tslc puts what escapes its function in the call arena, as the direct route does, and refuses the printing if an object could outlive the export call. The Wasm backend learned a reference's conversions and `gen.chk`.
+  - `auto` takes it where the printing is exact and the program has a class: 0.68–0.99× the direct route on its benchmark, two quiet runs at -O1 and -O2.
+  - 9 pins moved (class_struct.ts, adv_control_paths.ts in `strict`), listed in `tools/r12-moved.ts`.
+  - Three injected bugs, each caught (pipe-d boxes 43 and 44).
+- **The JPEG decoder doesn't move:** it has arrays, so it prints as phase 1 did, its TIR and Wasm byte-identical with R12 on and off; S4 is TSL proper, untouched.
+- *Proposed, not built:* an arena-only array class for `strict`, so programs with arrays (the JPEG decoder) can class-print without a heap. It's a new library surface, so it's the owner's call.
+- *Rejected:* letting `strict` link `JsArray` (it brings `@tsl/std`'s heap into `strict` code); a higher reference time limit for box 21.
+
 ## 2026-12-19
 
 **Coordinator: T2 verified** (manifest MATCH; sample 7/8, seed 13171). The eighth was pipe-d box 21 again: the injected bug "a drop at a scope's exit left out" gave 410 wrong answers in the gate and 223 in my sample. The gate ran at load 82–90 and the sample at a lower load; 223 is the long-standing quiet figure. So this count depends on load even with timeouts excluded (R7's fix). It's not a T2 regression, but it's the third false alarm from this box, so it's fixed at the root in R12.

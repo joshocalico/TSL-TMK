@@ -1,6 +1,8 @@
 // Which pinned tirhashes the pipeline's phase 2, third chunk, moves, and why (SPEC M5, 3.5). Each program is listed with the
 // change that moves it, found by computing every pinned tirhash with that change on and off (TMK_TSL_OPT_OFF=ctorzero).
 export const PIPE_C_MOVED: Record<string, string> = {
+  "corpus/lower/pos/generics_mono.ts":
+    "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction); in strict, where auto class-prints it since R13 prints its arrays as @tsl/jsrt's arena array (AUTO_STRICT_ARRAYS, tools/r13-pins.ts)",
   "corpus/lower/pos/class_struct.ts":
     "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction); in leak and manual, where auto class-prints it since R7 prints a typed-array field as a runtime class of its pointer and length (tools/r7-pins.ts)",
   "corpus/lower/pos/read_checks.ts":

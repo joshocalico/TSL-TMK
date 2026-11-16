@@ -55,6 +55,8 @@ export interface RoutesJob {
   classes: boolean;
   bulkBytes: number;
   env: Record<string, string>;
+  /** R14: the TSL side is `auto`'s build, compared only where `auto` took the TSL route */
+  auto?: boolean;
 }
 
 /** What a test needs back: no Wasm, and of the TIR only the names of its globals, for reading counters. */
@@ -93,7 +95,15 @@ function routes(job: RoutesJob): void {
   try {
     takeEnv(job.env);
     const t0 = performance.now();
-    const r = bothRoutesBuilt(job.file, job.mode, job.level, job.fault, job.classes, job.bulkBytes);
+    const r = bothRoutesBuilt(
+      job.file,
+      job.mode,
+      job.level,
+      job.fault,
+      job.classes,
+      job.bulkBytes,
+      job.auto === true,
+    );
     const buffers =
       r.built === null
         ? []

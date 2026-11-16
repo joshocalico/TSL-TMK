@@ -100,3 +100,34 @@ test("a budget whose server is gone doesn't stop work", async () => {
     else process.env.TMK_CPU_SOCK = was;
   }
 });
+
+test("the longest job's waiter is served first", async () => {
+  const b = await serveBudget(1);
+  const was = { sock: process.env.TMK_CPU_SOCK, prio: process.env.TMK_CPU_PRIO };
+  process.env.TMK_CPU_SOCK = b.path;
+  try {
+    const first = await takeCpu();
+    const order: string[] = [];
+    const ask = async (name: string, prio: string): Promise<void> => {
+      process.env.TMK_CPU_PRIO = prio;
+      const p = takeCpu();
+      await tick(20); // in the queue before the next asks
+      const give = await p;
+      order.push(name);
+      give();
+    };
+    const all = [ask("short", "10"), ask("long", "1500"), ask("none", "")];
+    await tick(100);
+    first();
+    await Promise.all(all);
+    assert.deepEqual(order, ["long", "short", "none"]);
+  } finally {
+    for (const [k, v] of [
+      ["TMK_CPU_SOCK", was.sock],
+      ["TMK_CPU_PRIO", was.prio],
+    ] as const)
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    await b.close();
+  }
+});

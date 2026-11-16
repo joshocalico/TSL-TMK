@@ -1,0 +1,18 @@
+[
+  { "fn": "grow", "args": [0] },
+  { "fn": "grow", "args": [5] },
+  { "fn": "items", "args": [9] },
+  { "fn": "grow", "args": [300] },
+  { "fn": "nested", "args": [12] },
+  { "fn": "tables", "args": [6] },
+  { "fn": "items", "args": [0] },
+  { "fn": "scaled", "args": [3] },
+  { "fn": "picked", "args": [50, 0] },
+  { "fn": "picked", "args": [50, 1] },
+  { "fn": "made", "args": [4] },
+  { "fn": "nested", "args": [0] },
+  { "fn": "tables", "args": [1] },
+  { "fn": "scaled", "args": [40] },
+  { "fn": "grow", "args": [1000] },
+  { "fn": "made", "args": [0] }
+]

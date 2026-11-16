@@ -1,6 +1,7 @@
 // The TSL route's coverage by first blocker (R5): every lowered program the direct route builds with no fallback, in each
 // memory mode, forced through the TSL route as the dual-route differential forces it (class printing in `leak`, `manual`
-// and `rc`; phase 1's printing in `strict`), and why the printer stopped where it did. Compiles only; nothing runs.
+// and `rc`; phase 1's printing in `strict`), and why the printer stopped where it did; and (R14) whether `auto` takes the
+// TSL route for each it prints, and why not. Compiles only; nothing runs.
 //
 //   node tools/route-blockers.ts [--mode strict|leak|manual|rc] [--level 0|2] [--json out.json]
 //
@@ -42,6 +43,24 @@ interface Row {
   why?: string;
   /** R12: printed with its objects as classes in `strict`. */
   classes?: boolean;
+  /** R14: whether `auto` takes the TSL route for it (a printed or reshaped row), and if not, why */
+  auto?: { took: boolean; why?: string };
+}
+
+/** R14: what `auto` does with a program the printing takes: the TSL route, or the reference and why. */
+function autoOf(
+  lowerFile: typeof import("../compiler/host/tslc.ts").lowerFile,
+  file: string,
+  mode: BlockerMode,
+  level: 0 | 2,
+): Row["auto"] {
+  try {
+    const a = lowerFile(file, { memory: mode, opt: level, route: "auto" });
+    if (a.tsl !== undefined && a.tsl.file !== "") return { took: true };
+    return { took: false, why: blockerKind(a.tslSkipped ?? "reshaped, as auto doesn't trust") };
+  } catch (e) {
+    return { took: false, why: `threw: ${String(e).slice(0, 120)}` };
+  }
 }
 
 async function child(mode: BlockerMode, level: 0 | 2): Promise<Row[]> {
@@ -65,19 +84,24 @@ async function child(mode: BlockerMode, level: 0 | 2): Promise<Row[]> {
       rows.push({ file: rel, mode, status: "direct-only" });
       continue;
     }
-    // R12: in `strict`, class printing where it prints the program and the program has a class (its objects, nothing
-    // else of phase 2), as `auto` tries it; else phase 1's printing, as before.
+    // R12: in `strict`, class printing where it prints the program exactly and the program has a class (its objects,
+    // nothing else of phase 2), as `auto` takes it; else phase 1's printing, as before.
     if (mode === "strict") {
       try {
         const c = lowerFile(file, { memory: mode, opt: level, route: "tsl", classes: true });
         const texts = c.tsl?.modules?.map((m) => m.text) ?? [c.tsl?.text ?? ""];
-        if (texts.some((t) => /^(export )?class /m.test(t))) {
+        // as `auto`: only where it prints exactly; a reshaped printing leaves the program to phase 1's
+        if (
+          texts.some((t) => /^(export )?class /m.test(t)) &&
+          (c.tsl?.stats.restructured ?? 0) === 0
+        ) {
           const why = c.tsl?.stats.reshapedWhy;
           rows.push({
             file: rel,
             mode,
             status: (c.tsl?.stats.restructured ?? 0) > 0 ? "reshaped" : "printed",
             classes: true,
+            auto: autoOf(lowerFile, file, mode, level),
             ...(why !== undefined && Object.keys(why).length > 0
               ? { why: Object.keys(why).join(", ") }
               : {}),
@@ -102,6 +126,7 @@ async function child(mode: BlockerMode, level: 0 | 2): Promise<Row[]> {
         mode,
         status: reshaped ? "reshaped" : "printed",
         ...(reshaped && why !== undefined ? { why: Object.keys(why).join(", ") } : {}),
+        auto: autoOf(lowerFile, file, mode, level),
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -148,6 +173,12 @@ async function main(): Promise<void> {
     console.log(
       `${mode} -O${level}: ${n("printed")} printed exactly, ${n("reshaped")} reshaped, ${n("blocked")} blocked, ${n("direct-only")} not built by the direct route with no fallback`,
     );
+    // R14: what `auto` takes of them: the TSL route for a printing exactly, and for one reshaped only as it trusts
+    const took = (st: Row["status"]): number =>
+      rs.filter((r) => r.status === st && r.auto?.took === true).length;
+    console.log(
+      `  auto takes the TSL route for ${took("printed")} printed exactly and ${took("reshaped")} reshaped (R14)`,
+    );
     const cls = rs.filter((r) => r.classes === true);
     if (cls.length > 0)
       console.log(
@@ -167,6 +198,25 @@ async function main(): Promise<void> {
       "\nReshaped, by why (strict / leak / manual / rc, programs; one can have several):",
     );
     for (const [k, m] of [...kinds].sort(
+      (a, b) =>
+        [...b[1].values()].reduce((x, y) => x + y, 0) -
+        [...a[1].values()].reduce((x, y) => x + y, 0),
+    ))
+      console.log(`  ${MODES.map((x) => m.get(x) ?? 0).join(" / ")}  ${k}`);
+  }
+  // R14: the reshaped programs `auto` still leaves to the reference, by why
+  const left = new Map<string, Map<BlockerMode, number>>();
+  for (const r of all.filter((x) => x.status === "reshaped" && x.auto?.took !== true)) {
+    const k = (r.auto?.why ?? "?").slice(0, 140);
+    const m = left.get(k) ?? new Map<BlockerMode, number>();
+    m.set(r.mode, (m.get(r.mode) ?? 0) + 1);
+    left.set(k, m);
+  }
+  if (left.size > 0) {
+    console.log(
+      "\nReshaped, and left to the reference by auto, by why (strict / leak / manual / rc, programs):",
+    );
+    for (const [k, m] of [...left].sort(
       (a, b) =>
         [...b[1].values()].reduce((x, y) => x + y, 0) -
         [...a[1].values()].reduce((x, y) => x + y, 0),

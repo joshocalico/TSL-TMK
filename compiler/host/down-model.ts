@@ -201,6 +201,25 @@ export function tyOf(sh: Shape): Ty {
  * `nonNull(…)!` for a non-null read, R5's printing), `region` (no per-call region: every escaping `new` in the mode's heap),
  * `closures` and `boundary` (`auto`'s choices in `leak` and `manual` as R5 left them: tslc.ts's autoClosures, boundaryIn).
  */
+/**
+ * R13: whether a part of R13 is turned off by TMK_R13_OFF, for computing what it moved (tools/r13-pins.ts): `arrays`,
+ * `strict`'s arrays and typed arrays printed (the arena array, R9's views); `arena`, what crosses an export in `strict` kept
+ * in the caller's arena, as the direct route keeps it; `boundary` and `closures`, those printed in `strict`.
+ */
+/**
+ * R14: whether a part of R14 is turned off by TMK_R14_OFF, for computing what it moved (tools/r14-pins.ts): `trust`, `auto`
+ * taking a printing reshaped only by the kinds it trusts (tslc.ts's TRUSTED_RESHAPES); `inv`, phase 1's printing of a class id's
+ * load noted invariant (`load<i32>(o, 0, "invariant")`, D73), as the direct route notes it; `nullref`, a typed array's
+ * pointer against null printed `nullRef()` in `leak`'s, `manual`'s and `rc`'s class printing, as R13 printed it in `strict`.
+ */
+export function r14Off(part: "trust" | "inv" | "nullref"): boolean {
+  return (process.env.TMK_R14_OFF ?? "").split(",").includes(part);
+}
+
+export function r13Off(part: "arrays" | "arena" | "boundary" | "closures"): boolean {
+  return (process.env.TMK_R13_OFF ?? "").split(",").includes(part);
+}
+
 export function r6Off(part: "layout" | "checks" | "region" | "closures" | "boundary"): boolean {
   return (process.env.TMK_R6_OFF ?? "").split(",").includes(part);
 }

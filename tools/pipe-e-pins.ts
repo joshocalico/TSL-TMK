@@ -2,6 +2,8 @@
 // by computing every pinned tirhash before and after each change: a byte array's fill as one memset (TMK_TSL_OPT_OFF=bytefill
 // is what it was), JsArray's growth, and arrays printed as JsArray in `auto` (TMK_EMIT_VECS=0 is what it was).
 export const PIPE_E_MOVED: Record<string, string> = {
+  "corpus/lower/pos/generics_mono.ts":
+    "in strict, where auto class-prints it since R13 prints its arrays as @tsl/jsrt's arena array (AUTO_STRICT_ARRAYS, tools/r13-pins.ts), whose growth zeroes the new room with a byte array's fill, one memset (TMK_TSL_OPT_OFF=bytefill is a store a byte)",
   "corpus/lower/pos/read_checks.ts":
     "R6's program of reads, which auto class-prints in leak and manual with its arrays as JsArray (D66, AUTO_VECTORS); with arrays not printed (TMK_EMIT_VECS=0) the printer can't take it, so it's on the direct route",
   "corpus/lower/fallback/closure_escape.ts":

@@ -128,9 +128,14 @@ export async function strictWasm(
           );
           continue;
         }
-        // Only what prints a class: the rest is phase 1's printing, which the corpus's own Wasm runs cover.
+        // Only what prints a class: the rest is phase 1's printing, which the corpus's own Wasm runs cover. R13: or the
+        // arena array, which is a class of @tsl/jsrt's.
         const texts = o.tsl?.modules?.map((m) => m.text) ?? [o.tsl?.text ?? ""];
-        if (!texts.some((t) => /^(export )?class /m.test(t)) || o.wasm === null) continue;
+        if (
+          !texts.some((t) => /^(export )?class /m.test(t) || /\bJsArenaArray\b/.test(t)) ||
+          o.wasm === null
+        )
+          continue;
         const dir = join(outDir, `O${level}`);
         mkdirSync(dir, { recursive: true });
         const base = join(dir, basename(file, ".ts"));
@@ -173,7 +178,21 @@ export async function strictWasm(
     }
     const got = JSON.parse(r.stdout) as { fn: string; result: unknown; args: unknown }[];
     cases += got.length;
+    // R13: a case that declares where lowered code traps and JS doesn't (`lowered_trap`, 3.10 divergence 1) must trap
+    // with that code, as the corpus's own Wasm runs check it (corpus.ts)
+    const specs = JSON.parse(readFileSync(file.replace(/\.ts$/, ".cases.json"), "utf8")) as {
+      lowered_trap?: number;
+    }[];
     got.forEach((x, i) => {
+      const want = specs[i]?.lowered_trap;
+      if (want !== undefined) {
+        const t = (x.result as { trap?: number }).trap;
+        if (t !== want)
+          failures.push(
+            `${where}: ${x.fn}#${i}: expected trap ${want}, got ${JSON.stringify(x.result)}`,
+          );
+        return;
+      }
       const a = JSON.stringify({ result: x.result, args: x.args });
       const b = JSON.stringify({ result: ref[i]?.result, args: ref[i]?.args });
       if (a !== b) failures.push(`${where}: ${x.fn}#${i}: ${a}, V8 gave ${b}`);

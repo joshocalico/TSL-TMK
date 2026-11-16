@@ -94,17 +94,48 @@ export class Driver {
   }
 
   /** __tmk_main: each case under native.try, then the code that runs whether it trapped or not. */
-  main(cases: { run: string; after: string }[], setup: (b: FuncBuilder) => void): void {
+  main(cases: { run: string; after: string }[], setup: (b: FuncBuilder) => void, passes = 0): void {
     const b = new FuncBuilder("__tmk_main", [], []);
     setup(b);
     const caseIdx = b.global("__rt_case");
-    cases.forEach((c, i) => {
-      b.store("i64", caseIdx, b.i64(i));
-      const trapped = b.intrinsic("native.try", [b.func(c.run)], ["i32"])[0]!;
-      void trapped;
-      b.call(c.after, []);
-      this.puts(b, `TMK:E ${i}\n`);
-    });
+    const once = (): void =>
+      cases.forEach((c, i) => {
+        b.store("i64", caseIdx, b.i64(i));
+        const trapped = b.intrinsic("native.try", [b.func(c.run)], ["i32"])[0]!;
+        void trapped;
+        b.call(c.after, []);
+        this.puts(b, `TMK:E ${i}\n`);
+      });
+    if (passes <= 0) once();
+    else {
+      // R14 (tools/r14-time.ts): the case list `passes` times over, each case's run (not what's printed after it) timed by
+      // the counter, each pass's sum printed `TMK:TP <ticks>`, and the counter's frequency `TMK:F <hz>`. A timing image
+      // only: its results are the first pass's, and a later pass runs on the module state the one before it left.
+      this.globals.push({ name: "__tp_sum", size: 8, align: 8, section: "data" });
+      const sum = b.global("__tp_sum");
+      this.puts(b, "TMK:F ");
+      b.call("__rt_dec", [b.intrinsic("native.frequency", [], ["i64"])[0]!]);
+      b.call("__rt_nl", []);
+      for (let p = 0; p < passes; p++) {
+        b.store("i64", sum, b.i64(0));
+        cases.forEach((c, i) => {
+          b.store("i64", caseIdx, b.i64(i));
+          const t0 = b.intrinsic("native.counter", [], ["i64"])[0]!;
+          b.intrinsic("native.try", [b.func(c.run)], ["i32"]);
+          const t1 = b.intrinsic("native.counter", [], ["i64"])[0]!;
+          b.store(
+            "i64",
+            sum,
+            b.op("add.i64", [b.load("i64", sum), b.op("sub.i64", [t1, t0], "i64")], "i64"),
+          );
+          b.call(c.after, []);
+          this.puts(b, `TMK:E ${i}\n`);
+        });
+        this.puts(b, "TMK:TP ");
+        b.call("__rt_dec", [b.load("i64", sum)]);
+        b.call("__rt_nl", []);
+      }
+    }
     b.ret();
     this.funcs.push(b.finish());
   }

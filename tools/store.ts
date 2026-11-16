@@ -39,6 +39,7 @@ const NOT_KEYED = new Set([
   // the run's CPU budget (R12, tools/cpu-budget.ts): when work runs, never what it makes
   "TMK_CPU_SOCK",
   "TMK_CPU_TOKENS",
+  "TMK_CPU_PRIO",
 ]);
 
 export function storeDir(): string | null {

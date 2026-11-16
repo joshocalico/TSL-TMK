@@ -62,6 +62,7 @@ export function bothRoutes(
   level: 0 | 2,
   fault?: string,
   classes = false,
+  auto = false,
 ): { p: PipeProgram; built: Built | null } {
   const p: PipeProgram = { file: relative(ROOT, file), mode, level, handled: false };
   const t0 = performance.now();
@@ -74,14 +75,20 @@ export function bothRoutes(
   let b: ReturnType<typeof lowerFile>;
   try {
     // `rc` takes the TSL route only with classes (R2): printed in a lowered rc package that tslc's expansion counts.
+    // R14: `auto`'s own build, where it takes the TSL route reshaped (as it trusts), compared as it's built
     b = withEnv({ TMK_TEST_EMIT: fault }, () =>
-      lowerFile(file, {
-        memory: mode,
-        opt: level,
-        route: "tsl",
-        classes: classes || mode === "rc",
-      }),
+      lowerFile(
+        file,
+        auto
+          ? { memory: mode, opt: level, route: "auto" }
+          : { memory: mode, opt: level, route: "tsl", classes: classes || mode === "rc" },
+      ),
     );
+    if (auto && (b.tsl === undefined || b.tsl.file === "" || b.tir === null))
+      return { p: { ...p, why: `auto took the direct route: ${b.tslSkipped ?? ""}` }, built: null };
+    // and only what it took reshaped: what it prints exactly the differential's other boxes have
+    if (auto && b.tsl!.stats.restructured === 0)
+      return { p: { ...p, why: "auto printed it exactly" }, built: null };
   } catch (e) {
     const name = e instanceof Error ? e.constructor.name : "";
     const msg = e instanceof Error ? e.message : String(e);
@@ -158,8 +165,9 @@ export function bothRoutesBuilt(
   fault: string | undefined,
   classes: boolean,
   bulkBytes: number,
+  auto = false,
 ): { p: PipeProgram; built: BuiltImages | null } {
-  const { p, built } = bothRoutes(file, mode, level, fault, classes);
+  const { p, built } = bothRoutes(file, mode, level, fault, classes, auto);
   if (built === null || built.cases.length === 0) return { p, built: null };
   return {
     p,

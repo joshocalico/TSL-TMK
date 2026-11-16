@@ -569,7 +569,13 @@ export interface TypedModule {
   // R10: a lowered `rc` build whose strings are its own JsStr (emit-rcstr.ts): where a native caller finds a string's parts.
   rcStrLayout?: RcStrLayout;
   // R6: what tslc placed in the per-call region (region.ts), in a lowered `leak` or `manual` package.
-  region?: { sites: number; heapSites: number; long: Set<string>; why: Map<string, string> };
+  region?: {
+    sites: number;
+    heapSites: number;
+    long: Set<string>;
+    why: Map<string, string>;
+    arenaBytes?: boolean; // R13: `strict`'s call arena, which an arena array takes bytes from wherever it is (region.ts)
+  };
 }
 
 /**

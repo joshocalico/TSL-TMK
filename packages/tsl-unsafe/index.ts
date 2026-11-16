@@ -500,11 +500,27 @@ export function addrInCallRegion(_addr: u64): bool {
 
 /**
  * R6: `bytes` from the per-call region, not zeroed, given back when the export call returns: only for memory kept beside an
- * object `inCallRegion` said is there. Never on the host, where nothing is in the region.
+ * object `inCallRegion` said is there. R13: in a lowered `strict` package the region is the caller's call arena, which
+ * `@tsl/jsrt`'s `JsArenaArray` takes every buffer from. On the host, simulated memory of its own that nothing gives back
+ * (a host test's memory is the host's, as a tail's is), aligned to 8, as the arena's allocations are.
  */
-export function callRegionBytes(_bytes: usize): u64 {
-  throw new TslTrap(14);
+export function callRegionBytes(bytes: usize): u64 {
+  const n = Math.ceil(bytes / 8) * 8;
+  if (regionNext + n > regionEnd) {
+    const size = Math.max(n, REGION_CHUNK);
+    regionNext = regionEnd;
+    hostMapMemory(regionNext, size);
+    regionEnd = regionNext + size;
+  }
+  const at = regionNext;
+  regionNext += n;
+  return BigInt(at);
 }
+
+// R13: the host's simulated call arena, at addresses no other family of regions takes
+const REGION_CHUNK = 0x10_0000;
+let regionNext = 0x8_0000_0000;
+let regionEnd = regionNext;
 
 export function retireObject(item: object): void {
   const p = placed.get(item);

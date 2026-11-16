@@ -386,7 +386,15 @@ Phase 1's order, as revised by section 0 (owner, 2026-11-09). Each step leaves t
 
 1. **Built (phase 1):** `strict`, `leak` and `manual` programs without closure values: scalars, typed arrays, objects,
    vectors, module state, inheritance, strings, `Map`, `Set` and exceptions. The default route where the printer printed it
-   exactly.
+   exactly. **R12 (SPEC M5's R12 record):** in `strict`, objects print as TSL classes too, and nothing else of
+   phase 2 (arrays, strings, maps, closures and `Dyn` are `@tsl/jsrt`'s or `@tsl/std`'s, runtimes `strict` code doesn't
+   have); tslc puts what escapes its function in the call arena, as the direct route does, and `auto` takes it where the
+   printing is exact and the program has a class. **R13 (SPEC M5's R13 record):** arrays print in `strict` too, as
+   `@tsl/jsrt`'s `JsArenaArray` (`@tsl/jsrt/arena`, its buffers only from the call arena the caller resets), with typed
+   arrays made in functions, arrays of typed arrays, closure values and exports taking or giving objects; tslc keeps module
+   state to what `__init` made before the arena's commit. The JPEG decoder prints whole and agrees with V8 natively and as
+   Wasm, but its printing is reshaped (121 sites) and 1.002 to 1.006 the direct route natively at -O1, so `auto` leaves it
+   on the direct route until pile items 9 and 10.
 2. **Built (pipe-b):** the memory modes as desugarings (D63): `@tsl/gc`'s `Rc`, handles, `@tsl.moves` consuming a handle,
    TSL3009.
 3. **Built, and the default in `leak` and `manual` (D64, pipe-b boxes 7 to 9 and 11):** classes and inheritance as TSL
@@ -506,6 +514,15 @@ Phase 1's order, as revised by section 0 (owner, 2026-11-09). Each step leaves t
 
 The reshaped programs of phase 1 (make the reshaping give the direct route's TIR, or measure that it costs nothing) are folded
 into step 3, as the printer is rewritten there.
+
+**R14 (pile item 9):** `auto` now takes what phase 1 prints reshaped only by four kinds it trusts, the lowering's
+statement-expressions inside an expression (statements before an operand, after a sequence's first part, in a conditional's
+arm, on a logical operator's right side), each keeping JS's order (SPEC D62). Measured first, by `reshapedWhy`: those four
+are in nearly every reshaped program, and together alone they held back 17 of `strict`'s 18, 117 of `leak`'s and `manual`'s
+139 and 132 of `rc`'s 155. Phase 1's printing of them gives the direct route's TIR at -O1 and -O2, byte for byte, in every
+program they touch, so that's where they're trusted; in class printing the benchmarks they touch measured up to 1.34× (the
+classes' arrays, not the reshape), so a reshaped class printing falls back to phase 1's. Programs with exceptions stay
+out (their own speed rule), as do loops whose condition or step has statements, and `rc` (no phase 1 printing).
 
 ## 10. Measured in phase 1
 

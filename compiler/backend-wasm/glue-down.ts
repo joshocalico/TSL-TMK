@@ -98,7 +98,10 @@ export async function instantiate(bytes) {
     if (seen !== undefined) return seen;
     const h = meta.heap[d.id];
     if (h.k === "vec") {
-      const hdr = ex.__vec_new(v.length, h.slot);
+      // R13: an arena array of a strict class-printed build is placed by the module's own export (R5's place), a
+      // reference (i64)
+      const place = meta.refI64 === true ? h.place : undefined;
+      const hdr = place !== undefined ? fromRef(ex[place](v.length)) : ex.__vec_new(v.length, h.slot);
       call.objects.set(v, hdr);
       call.jsOf.set(hdr, v);
       const data = new DataView(ex.memory.buffer).getUint32(hdr, true);
@@ -129,11 +132,14 @@ export async function instantiate(bytes) {
         out.push(addrOf(v, call), v.length);
         return;
       case "ref":
-        out.push(v === null || v === undefined ? 0 : toHeap(d, v, call));
+        out.push(toRef(v === null || v === undefined ? 0 : toHeap(d, v, call)));
         return;
       default: return;
     }
   };
+  // R13: a reference crossing an export is an i64 in a strict class-printed build (meta.refI64), its address the low 32 bits
+  const toRef = (p) => (meta.refI64 === true ? BigInt(p) : p);
+  const fromRef = (r) => (typeof r === "bigint" ? Number(BigInt.asUintN(32, r)) : r);
   const zeroOf = (d) => (d.k === "bool" ? false : d.k === "str" ? Object.keys(meta.strings)[0] : 0);
 
   const nullish = (nul) => (nul === "null" ? null : undefined);
@@ -229,8 +235,10 @@ export async function instantiate(bytes) {
       case "arr":
         if (r[at] === 0) return [nullish(d.nul), at + 2];
         return [arrayOut(d, r[at] >>> 0, r[at + 1] >>> 0, call), at + 2];
-      case "ref":
-        return [r[at] === 0 ? nullish(d.nul) : fromHeap(d, r[at] >>> 0, call), at + 1];
+      case "ref": {
+        const p = fromRef(r[at]);
+        return [p === 0 ? nullish(d.nul) : fromHeap(d, p >>> 0, call), at + 1];
+      }
       default: return [undefined, at];
     }
   };

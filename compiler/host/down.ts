@@ -287,6 +287,9 @@ export interface DownMeta {
       >;
     }
   >;
+  // R13: a `strict` build whose objects are TSL classes (class printing): a reference an export takes or gives is the Wasm
+  // backend's i64, the address in its low 32 bits, where the direct route's is an i32 (the Wasm glue converts)
+  refI64?: boolean;
 }
 
 // A literal is a block in static data with a count that can't reach zero, so counting it needs no test (SPEC 3.5).
