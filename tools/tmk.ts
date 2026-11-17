@@ -923,6 +923,33 @@ async function cmdProfile(): Promise<number> {
 
 // --- dispatch
 
+/** `--help` or `-h` anywhere on the line. */
+function helpAsked(): boolean {
+  return args.includes("--help") || args.includes("-h");
+}
+
+/** Prints a command's usage to stdout and gives 0: asked for, so not an error, and nothing is started. */
+function usage(text: string): number {
+  console.log(text);
+  return 0;
+}
+
+const TEST_USAGE = `usage: tmk test [--changed [--since baseline.json]] [--fail-fast] [--parallel n] [--jobs n] [--order file] [--json]
+       tmk test --catch-rate [--only name] [--jobs n]
+
+The quick tier, its steps in the gate's pool (a few minutes). --changed runs only the steps, and the gate jobs, that the
+changes since the last baseline can reach (D51); --catch-rate puts in the quick tier's injected bugs and counts how many it
+catches. Not a verification: that's tmk clean, then tmk gate.`;
+
+const GATE_USAGE = `usage: tmk gate [--full | --rotation key] [--fail-fast] [--parallel n] [--jobs n] [--json]
+       tmk gate --changed [--since baseline.json] [--fail-fast] [--parallel n]
+       tmk gate --sample n [--manifest build/gate/manifest.json] [--seed n] [--parallel n]
+
+With no flag, a full verification run of the whole suite (about 1.5 hours), writing build/gate/manifest.json, which
+tmk verify-manifest checks against the tree; run tmk clean first for a run from clean. --full runs every heavy sweep, where
+a plain gate runs a rotating subset (D51); --changed runs only the gate jobs the changes since the last baseline can reach;
+--sample n runs n jobs of a manifest again and compares their results with it.`;
+
 async function main(): Promise<number> {
   const cmd = positional(0)[0];
   switch (cmd) {
@@ -978,6 +1005,8 @@ async function main(): Promise<number> {
       return r.ok ? 0 : 1;
     }
     case "gate":
+      // R21: `--help` prints how to use it and starts nothing (a gate is a 90-minute run)
+      if (helpAsked()) return usage(GATE_USAGE);
       return cmdGate();
     case "job":
       return cmdJob();
@@ -1000,6 +1029,7 @@ async function main(): Promise<number> {
       return 0;
     }
     case "test": {
+      if (helpAsked()) return usage(TEST_USAGE);
       needInstall();
       const { catchRate } = await import("./quick.ts");
       if (args.includes("--catch-rate")) {

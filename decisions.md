@@ -56,6 +56,50 @@ The nightly full run stays paused until the owner agrees the pipeline is fixed.
 
 ---
 
+## 2027-01-09
+
+**Coordinator: R21 verified after one fix of my own.** Builder's gate: 282 of 283. The one failure was native-a/1-4's unit test "a descendant dies with its parent's group" (tools/guarded-run.test.ts), which R21 didn't touch.
+- **Why it failed:** the test gave a parent 800 ms to start a child and print its pid. Under the gate's load, two Node starts can take longer, and then there's no pid. It also checked the child was gone the instant after the kill, with no time for the system to reap an orphan.
+- **The fix:** a 3 s window, then up to 2 s for the descendant to disappear. The descendant still has to die with its parent's group, so the test is no weaker. The fixed test passed 3 of 3 on its own.
+- **My re-gate:** from clean, 283 of 283 in 93.1 min. Manifest MATCH, tree ac4a2b6cf42008a3; sample 8/8 the same, seed 23719. Committed locally, not pushed.
+- **R21's results:**
+  - strings in `rc` 1.23–1.58 the direct route (from 1.6–2.0);
+  - calls that can throw 1.00 at -O1 and -O2 (backend `shrinkwrap`; both routes now 7 instructions a call);
+  - `--help` no longer starts runs;
+  - `test --changed` no longer reports FAIL with every job passed.
+- **Pins:** r10/r11's live counts moved by the one-unit table, each explained. No TSL proper pins moved.
+- **`auto`:** nothing new.
+- **Process note:** the builder used `pgrep` once (read-only, killed nothing) despite the brief. The next brief repeats the rule more strongly.
+
+**Decision: R22 takes `rc`'s remaining per-object costs, the ones every program pays.**
+- **First, `freeFlat`'s cost per call:** it saves twelve registers. See whether R21's `shrinkwrap` or a lighter frame can drop most of them, without changing D39's steps.
+- **Then freeing a thrown object** (throws are 1.22–1.25).
+- **Then short joins** (1.56/1.58): copy once instead of zero-fill plus two copies, where that's done with checked operations. Leaving a tail unzeroed needs a proof, so it waits with option 1.
+- **Then the five reshaped `rc` programs** still over 1.00, if these changes reach them.
+- *Rejected:* unzeroed allocation (unchecked without a proof; the owner's ruling); option 1 (the owner said later).
+- *Next:* item 11, retiring the direct route, once `rc` is close enough for `auto` to take strings and exceptions.
+
+## 2027-01-08
+
+**R21 is built (builder's report; for the coordinator to verify).** Strings in `rc` class printing (one-unit strings from a table, cheaper freeing and making), -O1's calls that can throw (shrink-wrapping in the backend), and two harness fixes. SPEC 3.5 (the strings paragraph and `ex-gc-rc.ts`'s block), 8.3 (pipe-d boxes 61 and 62), 9.3 (`test`, `gate`), D75 and M5's R21 record; README's `--help` line. No check, case or fault was dropped or weakened, and no limit, timeout or watchdog moved. Nothing was added to TSL, and no unchecked operation to anything lowered code can import.
+
+- **Measured first** (instructions; TCG, `TMK_ICOUNT=1`; "before" from a copy of commit 5c58fe0): strings as R20 left them, 1.58–1.97 the direct route at -O1 and -O2. Scans at -O2, after the table: freeing 105k in `freeFlat` plus 26k in `runSteps` (41 instructions a call only to hand over to `freeFlat`), against 68k; `freeFlat` dispatched a one-slot object (a `JsStr`) on its release function twice; a tail's make worked out its owner word with a checked multiply and add each time (14 instructions); a table hit cost 41 instructions out of line, a third of it the holder's own count; an append of one unit was a copy's call for 2 bytes. -O1's `risky`: 16 instructions a call against 11, three register pairs and the frame slot set up and taken down on calls that don't throw.
+- **Built:**
+  - One-unit strings below 256 from a table in the printed `rc` string runtime (`JsStrUnits`, a `JsRoomArray` of the program's own `JsStr | null`, module state), made on first use and held, as the direct route's static table holds its 256. The coordinator's "a `@tsl/jsrt` static": in `rc` the string runtime is the program's own printed copy of `JsString`'s (emit-rcstr.ts), as the expansion has to count it, so the table lives there, as checked module state, not in `@tsl/jsrt`. The hit is inlined; an append or prepend of one unit is a checked store.
+  - `@tsl/gc`: a tail's owner word kept with its size class; a one-slot object dispatched once in `freeFlat`; `runSteps` handing the first waiting object straight to `freeFlat`.
+  - The backend's `shrinkwrap` (D75, -O1 and -O2): an entry that tests and returns at once does so before the prologue, where nothing on that way calls or touches the stack or a callee-saved register.
+- **Why sound:** the same freeing steps in the same order (D39, D41 unchanged: `runSteps` hands over where it did; the `s > 1` test skips a loop that couldn't run; the owner word is the same value). A table string is held by module state like a literal, so it's never counted down to zero or freed, which is the direct route's static rule; the table's read is bounds-checked. Shrink-wrapping's quick way writes only registers the caller doesn't need kept and never the stack; everything else is reached after the prologue.
+- **Moved counts** (each pinned again by case, none in bulk): rc_strings.ts live past the base +2 from case 10 (`slices("a",3)`: "a" and the holder), +10 from case 14 (`words`: t h e space c n d b), +17 from case 17 (`sorted`: p r , l f i g), +17 throughout round two; r11_exc_counts.ts +12 from case 11 (`escapes(6)`'s description quotes "Failure", "Error", "boom": 11 strings and the holder). Result counts and step counts didn't move (2 and 2 steps an allocation; 552 live after letting go of 500 strings, 535 before: the table's 17).
+- **Tried and not built:** a throw's construction printed out of line (it would make the TSL route's `risky` 11 like the direct route's, print a function per class-printed throw in every mode and move their pins; shrink-wrapping makes both routes 7 and moves none); `make` and `tailFast` calling `freeFlat` themselves in place of `runSteps` (strings 4–8% cheaper, but objects with no slots paid `freeFlat`'s twelve saved registers: corpus/lower/rc/adv_forof_mutation.ts 0.76 → 0.97 at -O1 and 0.96 → 1.23 at -O2, and escape_global.ts, which `auto` takes, 0.997 → 1.003; taken out, both back as they were).
+- **After** (TSL / direct, -O1 and -O2, before → after): appends 1.96/1.95 → 1.32/1.28, short joins 1.58/1.63 → 1.56/1.58, substrings 1.67/1.65 → 1.26/1.23, scans 1.97/1.97 → 1.58/1.51, split and join 1.70/1.65 → 1.32/1.25. Strings' freeing at -O2 (scans): 219 instructions an object → 134 (187 a freeing call against the direct route's 108); making 107k → 86k against 78k. Calls that can throw at -O1 1.19 → 1.00 (`risky` 16 → 7, the direct route's 11 → 7), `try` 1.17 → 1.00, `try`/`finally` 1.14 → 1.00; -O2 stays 1.00. Throws 1.21–1.25, 0.6% more than before (with the collector, `freeSteps` two instructions more a call). `AUTO_RC`'s benchmarks: none worse (acyclic 0.82/0.86 → 0.79/0.83).
+- **`auto`:** nothing new. `AUTO_RC_STRINGS` stays off (strings 1.23 to 1.58 the direct route); `AUTO_RC_EXC` stays off (throws 1.22 to 1.25, though -O1's calls that can throw, `try` and `try`/`finally` are now 1.00 at both levels); `TRUSTED_IN`'s `rc` class printing stays off: tools/r14-time.ts over the 33 reshaped `rc` programs it times (`TMK_TRUST_IN=rc:classes`), before → after, read_checks 1.014 / 1.107 → 0.998 / 1.088, reshape_order 1.069 / 1.038 → 1.062 / 1.031, relative_import 1.003 / 1.001, map_grow_oom 2.19 / 2.16 and cyc_exhaust 1.42 / 1.32 unchanged: four over 1.00 at -O1 (five before) and five at -O2, and none worse by more than 0.006 (adv_*'s at -O1, all under 0.88). The other switches are untouched by R21 but for the backend's change, which is both routes'. Coverage (`node tools/route-blockers.ts`, -O2) the same before and after, line for line: `strict` 30 exact + 18 reshaped, `leak` and `manual` 63 + 43, `rc` 19 + 0.
+- **Injected bugs** (box 62), each caught by wrong answers: the one-unit table filed by a unit's low 7 bits (7), the table taken for unit 256 (6, a bounds trap), shrink-wrapping taking a callee-saved register as free (28; also in `OPT_FAULTS`, opt-a box 12).
+- **Pins:** 20 of 3,864 moved, none TSL proper's, none unexplained, all by `@tsl/gc` (tools/r21-pins.ts, stage `gc`; tools/r21-moved.ts), in the five lowered `rc` programs R19's library change moved too (bench/memory/list_lowered.ts and churn_lowered.ts, corpus/lower/fallback/escape_global.ts and closure_outlives.ts, corpus/lower/memory/store_closure.ts), at -O0 (pre-std 5, pre-strings 5), -O1 and -O2 (opt 10): a library change, which D44 allows. The printing's stage moved none (`auto` doesn't take strings in `rc`), and the backend's change is machine code. 15 pinned again; the 5 in the read-only pre-strings file set aside by key (`r21Moved`, in maps-pins' `mapsMoved`).
+- **Harness:** `tmk test --changed` now plans the gate's tops for any picked job the quick tier's plan hasn't got (it checked the milestone name, so `test/1@1` was picked and never run); a genuinely skipped job still marks a run incomplete. `tmk test --help` and `tmk gate --help` print usage and exit 0 without starting anything.
+- **Gate:** this entry was finished before the final gate, as the round asks; the result is in the builder's report.
+- *Rejected:* unzeroed string memory (the owner's ruling); the maps' fresh-allocation proof (deferred by the owner); an unchecked table read.
+- *Next:* short joins (1.56/1.58: the tail's zero fill then two copies, and a size class worked out for each new length), then freeing's per-call cost (`freeFlat`'s twelve saved registers), freeing a thrown object, then item 11.
+
 ## 2027-01-07
 
 **Coordinator: R20 verified** (manifest MATCH, tree f026d23c4a057eba; gate from clean 281 of 281 in 90.9 min; sample 8/8 the same, seed 22643). Highest per-job peak 2.33 GiB. Committed locally, not pushed.

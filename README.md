@@ -57,7 +57,7 @@ node tools/tmk.ts test --changed         # runs only the tests your edits can re
 node tools/tmk.ts test                   # the quick tier, a few minutes
 ```
 
-Run `node tools/tmk.ts` with no arguments to see every command. **`tmk gate` starts a full verification run of the whole suite (about 1.5 hours); it has no `--help` flag.**
+Run `node tools/tmk.ts` with no arguments to see every command. **`tmk gate` starts a full verification run of the whole suite (about 1.5 hours).** `tmk gate --help` and `tmk test --help` print their usage and start nothing.
 
 ## Layout
 

@@ -31,10 +31,16 @@ test("a descendant dies with its parent's group", async () => {
     const c = spawn(process.execPath, ["-e", "for (;;);"], { stdio: "ignore" });
     console.log(c.pid);
     for (;;);`;
-  const r = await guardedRun(process.execPath, ["-e", parent], { timeoutMs: 800, label: "tree" });
+  // 3 s for two Node processes to start, as the gate loads the machine (800 ms wasn't enough: R21's gate); the kill is
+  // what's tested, not how fast Node starts.
+  const r = await guardedRun(process.execPath, ["-e", parent], { timeoutMs: 3_000, label: "tree" });
   assert.equal(r.timedOut, true);
   const pid = Number(r.stdout.trim());
-  assert.ok(pid > 0);
+  assert.ok(pid > 0, `the parent printed no pid: ${JSON.stringify(r.stdout)}`);
+  // The descendant is killed with the group; give the system up to 2 s to finish taking it away (an orphan is reaped
+  // after the signal), then it must be gone.
+  const until = Date.now() + 2_000;
+  while (Date.now() < until && alive(pid)) await new Promise((res) => setTimeout(res, 50));
   assert.throws(() => process.kill(pid, 0));
 });
 
@@ -115,3 +121,12 @@ test("a runner stopped by a signal it handles leaves none of the groups it start
   }
   assert.equal(alive, false, "the job outlived the runner");
 });
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}

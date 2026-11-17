@@ -1,0 +1,7 @@
+[
+  { "fn": "loops", "args": [400] },
+  { "fn": "loops", "args": [3] },
+  { "fn": "throwsAmong", "args": [200] },
+  { "fn": "throwsAmong", "args": [4] },
+  { "fn": "fibs", "args": [18] }
+]

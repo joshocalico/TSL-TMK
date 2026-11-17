@@ -240,6 +240,13 @@ export async function registeredFaults(): Promise<RegisteredFault[]> {
     if (f.tslEnv !== undefined) hookOf("r20-tests R20_FAULTS", f, "TMK_TEST_TSL", f.tslEnv);
     if (f.optFault !== undefined) hookOf("r20-tests R20_FAULTS", f, "TMK_OPT_FAULT", f.optFault);
   }
+  const R21 = await import("./r21-tests.ts");
+  for (const f of R21.R21_FAULTS) {
+    if (f.patch !== undefined) patchOf("r21-tests R21_FAULTS", f, f.patch);
+    if (f.tslEnv !== undefined) hookOf("r21-tests R21_FAULTS", f, "TMK_TEST_TSL", f.tslEnv);
+    if (f.emit !== undefined) hookOf("r21-tests R21_FAULTS", f, "TMK_TEST_EMIT", f.emit);
+    if (f.optFault !== undefined) hookOf("r21-tests R21_FAULTS", f, "TMK_OPT_FAULT", f.optFault);
+  }
   const P = await import("./pipe-tests.ts");
   for (const f of [...P.EMIT_FAULTS, ...P.CLASS_FAULTS])
     hookOf("pipe-tests EMIT_FAULTS, CLASS_FAULTS", f, "TMK_TEST_EMIT", f.name);

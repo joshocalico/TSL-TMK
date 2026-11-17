@@ -1026,6 +1026,19 @@ export async function selectChanged(
   return selectFor(level, base, hashInputs(), base === null ? null : file);
 }
 
+/**
+ * Whether `--changed` needs the gate's tops planned as well as the quick tier's: a gate job runs only where its tops are
+ * planned, and that's any picked job the quick tier's plan hasn't got, whatever its milestone. R21: it was any job not of
+ * milestone `test`, so the gate's `test` at another level (`test/1@1`, the unit tests a new `.test.ts` file reaches, which
+ * no quick step reads) was picked and never planned: the run was incomplete with every job it ran passing.
+ */
+export function needsGateTops(
+  picked: readonly { key: string }[],
+  quickKeys: ReadonlySet<string>,
+): boolean {
+  return picked.some((x) => !quickKeys.has(x.key));
+}
+
 /** The selection for a baseline and a tree's hashes: `--changed`'s, and what `tmk select` prints for a change by hand. */
 export async function selectFor(
   level: LevelKey,
@@ -1079,7 +1092,7 @@ export async function selectFor(
       if (hits.length > 0)
         picked.push({ key: j.key, why: `no quick step reads ${hits.slice(0, 3).join(", ")}` });
     }
-    if (picked.some((x) => !x.key.startsWith("test/"))) tops.push(...gt);
+    if (needsGateTops(picked, new Set(quick.jobs.map((j) => j.key)))) tops.push(...gt);
   }
   return {
     tops,

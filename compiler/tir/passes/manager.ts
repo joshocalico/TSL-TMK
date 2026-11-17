@@ -61,6 +61,7 @@ export const PASSES = [
   "remat",
   "layout",
   "nullchecks", // R7: an explicit null check left to the next load's fault (shape.ts's implicitNullChecks)
+  "shrinkwrap", // R21: the entry's quick way out before the prologue (emit.ts's shrinkWrap)
 ] as const;
 
 /** Bugs that can be put into the passes, to show the tests catch them (`tmk milestone opt-a`, D46). */
@@ -98,6 +99,7 @@ export const OPT_FAULTS = [
   "b3-remat-stale", // a rematerialised value's operands aren't kept live to its uses, so their registers can be reused first
   "b3-layout-stale-next", // after loop rotation, a block falls through to the next block in TIR order, not in layout order
   "b3-null-past-store", // a null check is left to a load that comes after a store, so the store runs where -O0 trapped first (R7)
+  "r21-shrinkwrap-callee", // shrink-wrapping takes a callee-saved register as free, so the quick way writes it unsaved (R21)
 ] as const;
 
 export interface OptOptions {

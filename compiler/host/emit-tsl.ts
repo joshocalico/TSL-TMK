@@ -28,7 +28,7 @@ import { strLiteralText } from "./down.ts";
 import { loweredRuntime, memText, stdMem } from "./elab-lowered.ts";
 import { VEC_DATA, VEC_LEN } from "./down-rt.ts";
 import { desugarExc, EXC_ABI, EXC_STATE, STACK_LOW } from "./emit-exc.ts";
-import { RC_STR_CORE, RC_STR_NAMES, rcStrRuntime } from "./emit-rcstr.ts";
+import { RC_STR_CORE, RC_STR_NAMES, r21UnitsOff, rcStrRuntime } from "./emit-rcstr.ts";
 import {
   ARRAY_BY_ELEM,
   elemSize,
@@ -3337,6 +3337,12 @@ class Emitter {
         for (const n of RC_STR_CORE) this.coreUsed.add(n);
         this.descUsed.add("u16"); // a value: the tails' element
         for (const n of ["cast", "part", "Ref"]) this.loweredUsed.add(n);
+        // R21: the one-unit table, an array holder of the runtime's own
+        if (!r21UnitsOff()) {
+          this.gcUsed.add("JsRoomArray");
+          this.stdUsed.add("ref");
+          this.descUsed.add("u64");
+        }
         decls.push(
           ...rcStrRuntime(
             this.hashNames.length === 2 ? [this.hashNames[0]!, this.hashNames[1]!] : null,

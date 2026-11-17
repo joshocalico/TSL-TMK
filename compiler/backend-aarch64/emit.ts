@@ -1,6 +1,14 @@
 // TIR to AArch64 machine code, one function at a time (SPEC 4.4). The output depends only on the
 // canonical TIR: nothing here reads a clock, a path or a hash order.
-import { type Edge, type Func, type Instr, type Module, type TirType } from "../tir/ir.ts";
+import {
+  type Block,
+  type Edge,
+  edgesOf,
+  type Func,
+  type Instr,
+  type Module,
+  type TirType,
+} from "../tir/ir.ts";
 import * as E from "./encode.ts";
 import { Cond, invert, type MemOp, XZR } from "./encode.ts";
 import { implicitNullChecks, layoutBlocks, threadBranches } from "./shape.ts";
@@ -106,6 +114,7 @@ export const BACKEND_PARTS = [
   "remat",
   "layout",
   "nullchecks",
+  "shrinkwrap",
 ] as const;
 export type BackendPart = (typeof BACKEND_PARTS)[number];
 
@@ -117,7 +126,9 @@ export function backendFaults(): Shape {
     raw === undefined || raw.trim() === "" ? [] : raw.split(",").map((x) => x.trim());
   const off = new Set(list(env?.TMK_OPT_DISABLE));
   return {
-    faults: new Set(list(env?.TMK_OPT_FAULT).filter((x) => x.startsWith("b3-"))),
+    faults: new Set(
+      list(env?.TMK_OPT_FAULT).filter((x) => x.startsWith("b3-") || x.startsWith("r21-")),
+    ),
     on: (part) => !off.has(part),
   };
 }
@@ -180,6 +191,65 @@ const SWAPPED: Record<string, string> = {
   uge: "ule",
 };
 
+/**
+ * R21: what the entry's quick way out may do before the prologue (shrinkWrap): compute, compare, convert, load, store and
+ * check, by the operation's first word. No call, frame slot, intrinsic or stack pointer.
+ */
+const SHRINK_SAFE = new Set([
+  "add",
+  "sub",
+  "mul",
+  "and",
+  "or",
+  "xor",
+  "shl",
+  "lshr",
+  "ashr",
+  "neg",
+  "not",
+  "icmp",
+  "fcmp",
+  "iconst",
+  "fconst",
+  "select",
+  "sext",
+  "zext",
+  "trunc",
+  "bitcast",
+  "load",
+  "store",
+  "gep",
+  "globaladdr",
+  "sitofp",
+  "uitofp",
+  "fptosi",
+  "fptoui",
+  "fadd",
+  "fsub",
+  "fmul",
+  "fdiv",
+  "fneg",
+  "fabs",
+  "fsqrt",
+  "fmin",
+  "fmax",
+  "ffloor",
+  "fceil",
+  "ftrunc",
+  "fnearest",
+  "fcopysign",
+  "fpromote",
+  "fdemote",
+  "clz32",
+  "sdiv",
+  "udiv",
+  "srem",
+  "urem",
+  "bounds",
+  "gen",
+  "ref",
+]);
+
 type MoveSrc = { k: "loc"; loc: number } | { k: "remat"; r: Remat; t: TirType };
 interface Move {
   dst: number;
@@ -209,6 +279,9 @@ class FuncEmit {
   next: Int32Array = new Int32Array(0); // a position's successor in that order, or -1
   // R7: loads (by result) that stand for a null check, with the offset each reads at, whose PCs the image lists
   nullLoads: ReadonlyMap<number, number> = new Map();
+  // R21: the entry's quick way out, taken before the prologue (shrinkWrap), and while its return is emitted, no epilogue
+  wrap: { fast: number; slow: number; allocas: Set<Instr> } | null = null;
+  bareRet = false;
 
   constructor(f0: Func, ctx: EmitContext) {
     this.sh = ctx.shape?.(f0) ?? null;
@@ -365,6 +438,11 @@ class FuncEmit {
 
   epilogue(): void {
     const c = this.code;
+    if (this.bareRet) {
+      // R21: the entry's quick way out, which no prologue ran on
+      c.emit(E.RET);
+      return;
+    }
     this.adjustSp("add", this.rest);
     const { fp, size } = this.saved;
     if (size > 0) {
@@ -1891,13 +1969,100 @@ class FuncEmit {
 
   // --- the function
 
+  /**
+   * R21, -O1 and -O2 (D75): shrink-wrapping of the one shape that pays most, an entry that tests and either returns at once
+   * or goes on to the work that needs a frame (a function that can throw: its throw makes and places an object, which
+   * needs callee-saved registers and a frame slot, and it doesn't throw on almost every call). The entry block and its
+   * returning successor are emitted before the prologue, the prologue at the head of the other successor, and that return
+   * is a bare `ret`. Only where nothing on the quick way can see the difference:
+   *   - the entry has no predecessor, and each successor has the entry as its only one, so the quick way is entered once
+   *     and the slow one is the only way to everything else, each after the prologue;
+   *   - nothing on the quick way calls, or touches the stack: every value it reads or writes, the incoming arguments'
+   *     moves, the edges' moves and the results included, is in a register the caller doesn't need kept (no callee-saved
+   *     register, no spill slot, no argument or result on the stack), and every instruction is one of a list that computes,
+   *     compares, converts, loads, stores or checks (a check's trap stub calls the trap routine, which doesn't come back);
+   *   - a frame slot the entry gives (`alloca`) isn't used on the quick way: its address is worked out after the prologue,
+   *     in the same register, which nothing else holds between the two places as the value is live across them.
+   * Anything else is emitted as before.
+   */
+  shrinkWrap(): { fast: number; slow: number; allocas: Set<Instr> } | null {
+    const f = this.f;
+    if (this.saved.size === 0 && this.rest === 0) return null;
+    if (this.order[0] !== 0) return null;
+    const entry = f.blocks[0]!;
+    if (entry.term.k !== "brif") return null;
+    const preds = f.blocks.map(() => 0);
+    for (const b of f.blocks) for (const e of edgesOf(b.term)) preds[this.index.get(e.block)!]!++;
+    if (preds[0] !== 0) return null;
+    const tIdx = this.index.get(entry.term.t.block)!;
+    const fIdx = this.index.get(entry.term.f.block)!;
+    if (tIdx === fIdx || preds[tIdx] !== 1 || preds[fIdx] !== 1) return null;
+    const faults = this.sh!.faults;
+    const kept = (l: number): boolean => {
+      if (l === NONE) return true;
+      if (l >= MEM_BASE) return false;
+      // the injected bug: a callee-saved register taken as one the caller doesn't need kept
+      if (faults.has("r21-shrinkwrap-callee")) return true;
+      if (l >= FP_BASE) return !(l - FP_BASE >= 8 && l - FP_BASE <= 15);
+      return !(l >= 19 && l <= 30);
+    };
+    const locOk = (v: number): boolean => kept(this.locOf(v)) && kept(this.a.loc[v]!);
+    // the arguments' moves come before the entry's code: each from a register, into one the caller doesn't need kept
+    const params = assignRegs(f.params.map((p) => f.types[p]!));
+    for (let i = 0; i < f.params.length; i++) {
+      const l = this.a.loc[f.params[i]!]!;
+      if (l === NONE) continue;
+      if (params.locs[i]! >= MEM_BASE || !kept(l)) return null;
+    }
+    const allocas = new Set<Instr>();
+    const allocaVals = new Set<number>();
+    for (const ins of entry.instrs)
+      if (ins.op === "alloca") {
+        allocas.add(ins);
+        for (const r of ins.res) allocaVals.add(this.s.alias[r]!);
+      }
+    const quick = (b: Block, isEntry: boolean): boolean => {
+      for (const p of b.params) if (!locOk(p)) return false;
+      for (const ins of b.instrs) {
+        if (isEntry && allocas.has(ins)) continue;
+        if (!SHRINK_SAFE.has(ins.op.split(".")[0]!)) return false;
+        for (const o of ins.ops)
+          if (o.t === "v" && (!locOk(o.id) || allocaVals.has(this.s.alias[o.id]!))) return false;
+        for (const r of ins.res) if (!locOk(r)) return false;
+      }
+      const used = edgesOf(b.term).flatMap((e) => e.args);
+      if (b.term.k === "brif") used.push(b.term.cond);
+      if (b.term.k === "ret") used.push(...b.term.vals);
+      return used.every((v) => locOk(v) && !allocaVals.has(this.s.alias[v]!));
+    };
+    if (!quick(entry, true)) return null;
+    // the slow way's parameters are written by the entry's edge, before the prologue
+    const slowParamsOk = (i: number): boolean => f.blocks[i]!.params.every(locOk);
+    const rets = assignRegs(f.rets);
+    if (rets.locs.some((l) => l >= MEM_BASE)) return null;
+    for (const [fast, slow] of [
+      [tIdx, fIdx],
+      [fIdx, tIdx],
+    ] as const) {
+      const b = f.blocks[fast]!;
+      if (b.term.k !== "ret" || !quick(b, false) || !slowParamsOk(slow)) continue;
+      return { fast, slow, allocas };
+    }
+    return null;
+  }
+
   run(): void {
     const c = this.code;
     const f = this.f;
     this.computeFrame();
     const from = c.here;
     c.define(`f:${f.name}`);
-    this.prologue();
+    this.order =
+      this.sh?.on("layout") === true ? layoutBlocks(f, this.sh.faults) : f.blocks.map((_, i) => i);
+    this.next = new Int32Array(f.blocks.length).fill(-1);
+    for (let i = 0; i + 1 < this.order.length; i++) this.next[this.order[i]!] = this.order[i + 1]!;
+    this.wrap = this.sh?.on("shrinkwrap") === true ? this.shrinkWrap() : null;
+    if (this.wrap === null) this.prologue();
     // Incoming arguments, as one parallel move from the convention's places.
     const params = assignRegs(f.params.map((p) => f.types[p]!));
     const entry: Move[] = [];
@@ -1910,17 +2075,23 @@ class FuncEmit {
       if (fromLoc !== l) entry.push({ dst: l, src: { k: "loc", loc: fromLoc } });
     });
     this.parallel(entry);
-    this.order =
-      this.sh?.on("layout") === true ? layoutBlocks(f, this.sh.faults) : f.blocks.map((_, i) => i);
-    this.next = new Int32Array(f.blocks.length).fill(-1);
-    for (let i = 0; i + 1 < this.order.length; i++) this.next[this.order[i]!] = this.order[i + 1]!;
     for (const at of this.order) {
       const b = f.blocks[at]!;
       this.bind(this.blockLabel[at]!);
+      const w = this.wrap;
+      // R21: the prologue at the head of the slow way, with the entry's frame slots' addresses after it
+      if (w !== null && at === w.slow) {
+        this.prologue();
+        for (const ins of f.blocks[0]!.instrs)
+          if (w.allocas.has(ins) && !skipInstr(this.s, ins)) this.emitInstr(ins);
+      }
       for (const ins of b.instrs) {
+        if (w !== null && at === 0 && w.allocas.has(ins)) continue;
         if (!skipInstr(this.s, ins)) this.emitInstr(ins);
       }
+      this.bareRet = w !== null && at === w.fast;
       this.emitTerm(at);
+      this.bareRet = false;
     }
     // Out-of-line pieces can add more of themselves, so this is a worklist.
     for (let i = 0; i < this.deferred.length; i++) this.deferred[i]!();

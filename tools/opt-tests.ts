@@ -382,6 +382,16 @@ async function faultSteps(
   const engines = defaultEngines();
   return [
     {
+      // R21: the backend's shrink-wrapping, on R21's programs through both routes in rc and leak at -O2, against V8 (seconds,
+      // so first: R21's bug is caught here, and so may an earlier bug be, which changes only which step names it).
+      name: "R21's programs through both routes at -O2 (corpus/lower/r21, tools/r21-tests.ts)",
+      run: async () => {
+        const R21 = await import("./r21-tests.ts");
+        const d = await R21.r21Dual([accel], jobs, [2], false);
+        return d.failures.length === 0 && d.cases > 0;
+      },
+    },
+    {
       // R20: partial inlining past a frame slot in the callee's entry, on R20's program through both routes in rc and leak
       // at -O2, against V8 (seconds, so first: R20's bug is caught here, and so may an earlier bug be).
       name: "R20's program through both routes at -O2 (corpus/lower/r20/r20_copies.ts, tools/r20-tests.ts)",

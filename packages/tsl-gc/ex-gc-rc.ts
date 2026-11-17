@@ -494,7 +494,8 @@ function runSteps(n: usize): u64 {
     }
     if ((ptrAt(u64, entry).read() & EMPTY) === 0n) {
       // R19: one whose release function isn't empty: freeFlat visits its slot 0, and freeSteps takes it on from slot 1 if
-      // it has more
+      // it has more. R21: the first waiting, with no step taken here, is freeFlat's whole, with nothing to add up
+      if (left === all) return freeFlat(n);
       const took = BigInt.asUintN(64, all - left);
       stepsTaken = BigInt.asUintN(64, stepsTaken + took);
       return BigInt.asUintN(64, took + freeFlat(toUsize(left)));
@@ -546,8 +547,9 @@ function freeFlat(n: usize): u64 {
       left = spare;
       spare = 0n;
     } else left = BigInt.asUintN(64, left - 1n);
-    if (s !== 0) {
-      // the rest of its slots, one a step, as freeSteps visits them
+    if (s > 1) {
+      // the rest of its slots, one a step, as freeSteps visits them (R21: an object of one slot has no rest, and isn't
+      // dispatched on its release function a second time to find that out)
       while (a < s && left !== 0n) {
         spare = BigInt.asUintN(64, left - 1n);
         callRelease(rel, item, a, Visit.Drop);
@@ -1327,6 +1329,7 @@ export class Rc<T extends object> {
   private elem: Elem<T> = inlineOf<T>();
   private tn: usize = 0; // R3: the tail length of its last object made with one, and that object's size class
   private tk: usize = 0;
+  private tw: u32 = 0; // R21: and that object's owner word, worked out (checked) when tk is
 
   /** `release` is a top-level function, given each object as it's freed, one slot at a time (`Release`). */
   constructor(private release: Release<T>) {}
@@ -1458,6 +1461,7 @@ export class Rc<T extends object> {
       k = sizeClass(SLOT_PREFIX + tailBytes(this.elem, n));
       this.tn = n;
       this.tk = k;
+      this.tw = this.id * 256 + toU32(k);
     }
     // a free slot of its size on its list first, as `tryMake` takes one (R3: a lowered `rc` array is made so)
     const head = ptrAt(u64, heads).add(k);
@@ -1465,7 +1469,7 @@ export class Rc<T extends object> {
     if (slot !== 0n) head.write(countAt(slot).read());
     else slot = slotFor(k);
     if (slot === 0n) return null;
-    const gen = this.claim(slot, this.id * 256 + toU32(k));
+    const gen = this.claim(slot, this.tw);
     // a whole tail zeroed is one fill: only a room growth writes into (keep) takes the two around what it keeps
     const made = keep === 0 ? placeTail(slot, gen, n, item) : placeTail(slot, gen, n, item, keep);
     if (cycleGroup<T>() === GROUP_UNKNOWN) this.learn(made);
@@ -1510,15 +1514,17 @@ export class Rc<T extends object> {
       if (cyclesLinked()) idleStep();
       else if (waiting !== 0n || cur !== 0n) runSteps(budget);
       if (n !== this.tn || this.tk === 0) {
-        this.tk = sizeClass(SLOT_PREFIX + tailBytes(this.elem, n));
+        const nk = sizeClass(SLOT_PREFIX + tailBytes(this.elem, n));
+        this.tk = nk;
         this.tn = n;
+        this.tw = this.id * 256 + toU32(nk);
       }
       const k = this.tk;
       const head = ptrAt(u64, heads).add(k);
       const slot = head.read();
       if (slot !== 0n) {
         head.write(countAt(slot).read());
-        const gen = this.claim(slot, this.id * 256 + toU32(k));
+        const gen = this.claim(slot, this.tw);
         const fast = keep === 0 ? placeTail(slot, gen, n, item) : placeTail(slot, gen, n, item, keep);
         if (cyclesLinked() && rest !== 0) restIfWork();
         return fast;
@@ -1541,10 +1547,9 @@ export class Rc<T extends object> {
   /** @tsl.noinline */
   // SAFETY: as tailFast's.
   private tailMakeAfter(n: usize, keep: usize, item: T): Counted<T> | null {
-    const k = this.tk;
-    const slot = freshSlot(k);
+    const slot = freshSlot(this.tk);
     if (slot === 0n) return null;
-    const gen = this.claim(slot, this.id * 256 + toU32(k));
+    const gen = this.claim(slot, this.tw);
     const made = keep === 0 ? placeTail(slot, gen, n, item) : placeTail(slot, gen, n, item, keep);
     if (cycleGroup<T>() === GROUP_UNKNOWN) this.learn(made);
     if (cyclesLinked() && rest !== 0) restIfWork();

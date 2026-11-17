@@ -50,6 +50,40 @@ const PROGRAM = join(ROOT, "corpus/lower/pipe/rc_strings.ts");
 export const LIVE_PAST_BASE: Record<number, number> = { 20: 1, 21: 1, 24: 501 };
 
 /**
+ * R21: the one-unit strings below 256 come from a table, as the direct route's static one does (emit-rcstr.ts): module state
+ * holds each from the first time it's made, with the table's holder, and never lets go, as the direct route never frees its
+ * static strings. So past the base, after each case of the first round, the holder and the strings made so far are live
+ * too, and in the second round all 17 always (it makes the same strings, all in the table by then). By case, from the
+ * first that makes one (each a one-unit substring or `charAt`; number text and `repeat` make no one-unit string):
+ */
+export const UNIT_TABLE_LIVE: { from: number; live: number; why: string }[] = [
+  {
+    from: 10,
+    live: 2,
+    why: `slices("a", 3): \`mid\` is "aaa".substring(1, 2), "a": the table's holder and "a"`,
+  },
+  {
+    from: 14,
+    live: 10,
+    why: `words("the cat and the hat and the bat"): charAt gives t, h, e, " ", c, n, d and b ("a" is in the table): 8 more`,
+  },
+  {
+    from: 17,
+    live: 17,
+    why: `sorted("pear,apple,fig,,banana,apple"): charAt gives p, r, ",", l, f, i and g (e, a, b and n are in): 7 more; chars (19) makes a, b and c, all in, and \\udc00 and the emoji, which aren't below 256, are freed`,
+  },
+];
+
+/** What the one-unit table holds live past the base after case i of rounds of the same cases (UNIT_TABLE_LIVE). */
+export function unitTableLive(i: number): number {
+  const all = UNIT_TABLE_LIVE[UNIT_TABLE_LIVE.length - 1]!.live;
+  if (i >= CASES) return all;
+  let n = 0;
+  for (const u of UNIT_TABLE_LIVE) if (i >= u.from) n = u.live;
+  return n;
+}
+
+/**
  * Each string result's count as the caller holds it, before letting go: one, the caller's (D39), but where the result is
  * also held elsewhere: `echo` gives back the argument the caller still holds (two), `hello` and the second `readKept` a
  * literal module state holds (two), and the first `readKept` the string module state keeps (two).
@@ -165,11 +199,11 @@ export async function ownershipChecks(
       failures.push(`-O${level}: no live count after the first case`);
     let same = 0;
     for (let i = 0; i < 2 * CASES; i++) {
-      const want = (base ?? 0) + (LIVE_PAST_BASE[i % CASES] ?? 0);
+      const want = (base ?? 0) + (LIVE_PAST_BASE[i % CASES] ?? 0) + unitTableLive(i);
       if (a.live[i] === want) same++;
       else
         failures.push(
-          `-O${level} case ${i}: ${a.live[i]} live after it, where module state keeps ${want}`,
+          `-O${level} case ${i}: ${a.live[i]} live after it, where module state keeps ${want} (${unitTableLive(i)} the one-unit table's)`,
         );
       const rc = RESULT_COUNT[i % CASES];
       if (rc !== undefined && a.counts[i] !== rc)

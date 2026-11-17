@@ -149,6 +149,20 @@ export const EXC_LIVE_PAST_BASE: Record<number, number> = { 12: 4 };
 const EXC_CASES = 15;
 
 /**
+ * R21: the one-unit strings below 256 come from a table in module state, as the direct route's static one (emit-rcstr.ts,
+ * tools/r10-tests.ts's UNIT_TABLE_LIVE), kept from their first use and never freed. The first that are made here are case
+ * 11's, `escapes(6)`: its exception reaches the native caller, whose description (`tmkExcDescribe`) quotes the class name
+ * "Failure", the name "Error" and the message "boom" a unit at a time (`charAt`), so F, a, i, l, u, r, e, E, o, b and m,
+ * 11 strings, and the table's holder: 12 more live from case 11 on, in both rounds (no case before it reaches the native
+ * caller with a throw, and no later case makes a unit the table hasn't got).
+ */
+export const EXC_UNIT_TABLE = { from: 11, live: 12 };
+
+function excUnitTableLive(i: number): number {
+  return i >= EXC_UNIT_TABLE.from ? EXC_UNIT_TABLE.live : 0;
+}
+
+/**
  * Exceptions in `rc` counted by the expansion, checked natively at each level: after each of r11_exc_counts.ts's cases,
  * in two rounds, only what module state keeps is live, so nothing a throw, a catch, a rethrow, a `finally` or the native
  * caller's taking left behind leaks or is released twice; and the results are the direct route's.
@@ -177,7 +191,7 @@ export async function excCountChecks(
     if (base === undefined) failures.push(`-O${level}: no live count after the first case`);
     let same = 0;
     for (let i = 0; i < 2 * EXC_CASES; i++) {
-      const want = (base ?? 0) + (EXC_LIVE_PAST_BASE[i % EXC_CASES] ?? 0);
+      const want = (base ?? 0) + (EXC_LIVE_PAST_BASE[i % EXC_CASES] ?? 0) + excUnitTableLive(i);
       if (a.live[i] === want) same++;
       else
         failures.push(

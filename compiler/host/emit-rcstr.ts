@@ -11,10 +11,22 @@
 // one address taken is for a native caller to write a string argument's units at (`unitsAddr`, 4.5's ABI).
 //
 // What differs from JsString, by design: a substring of a flat string copies where JsString's would share it (a view's
-// owner here is always a buffer, as a string holding a string would put strings in a cycle of the type graph); and a
-// one-unit string is made each time, where JsString keeps a table of them. Neither shows in a result.
+// owner here is always a buffer, as a string holding a string would put strings in a cycle of the type graph), which
+// doesn't show in a result. A one-unit string below 256 comes from a table, as JsString's and the direct route's do (R21):
+// here the table is module state, an array of the program's own JsStr (`JsStrUnits`, counted as any holder is), each
+// made the first time it's asked for and kept from then on, so never freed, as the direct route's static ones never are.
 
 /** The names the printing gives the string runtime, reserved before anything of the program's is named. */
+/** The one-unit string as it was before R21's table (TMK_R21_OFF=units): made each time. */
+const UNITS_BEFORE = `/** The string of one unit. */
+function jsStrOfUnit(u: i32): JsStr {
+  const s = jsStrZeroed(1);
+  s.put(0, u);
+  return s;
+}
+
+`;
+
 export const RC_STR_NAMES = [
   "JsStr",
   "JsStrBuf",
@@ -24,6 +36,9 @@ export const RC_STR_NAMES = [
   "jsStrOf",
   "jsStrOfUnits",
   "jsStrOfUnit",
+  "jsStrUnitMade",
+  "JsStrUnits",
+  "jsStrUnits",
   "jsStrJoined",
   "jsStrView",
   "jsStrEq",
@@ -53,20 +68,42 @@ export const RC_STR_CORE = [
 
 /**
  * A bug put into the string runtime on purpose, each to be caught (R10, tools/r10-tests.ts): `rcstr-append-shared` appends
- * in place to a buffer whatever view ends there, so two strings built from one prefix write over each other's tails.
+ * in place to a buffer whatever view ends there, so two strings built from one prefix write over each other's tails. R21
+ * (tools/r21-tests.ts): `rcstr-unit-low7` files a one-unit string in the table by its unit's low 7 bits, so units 128 apart
+ * share a slot and the second is given the first's string; `rcstr-unit-past` takes the table for units to 256 inclusive,
+ * so unit 256 reads past the table's 256 slots (a bounds trap, never another string).
  */
 function fault(): string {
   return process.env.TMK_TEST_EMIT ?? "";
 }
 
+/**
+ * R21's printing put back as it was, for tools/r21-pins.ts (`TMK_R21_OFF=units`): a one-unit string made each time, and an
+ * append of one unit copied. Never set otherwise.
+ */
+export function r21UnitsOff(): boolean {
+  return (process.env.TMK_R21_OFF ?? "").split(",").includes("units");
+}
+
 /** The string runtime's text: the two classes and the functions the printing calls in place of JsString's statics. */
 export function rcStrRuntime(key: [string, string] | null): string[] {
+  const off = r21UnitsOff();
   // the hash key (D42): the module's own two words where a native caller can set them, otherwise their first values
   const [k0, k1] = key !== null ? key : ["608135816", "-2052912941"];
   const appendCheck =
     fault() === "rcstr-append-shared"
       ? "at + lb <= wrapI32(ab.units.length)"
       : "at === ab.end && at + lb <= wrapI32(ab.units.length)";
+  // R21: one unit is a checked store, not a copy's call
+  const appendOne = off
+    ? "ab.units.set(b.all(), toUsize(at));"
+    : "if (lb === 1) ab.units[toUsize(at)] = wrapU16(b.unit(0));\n        else ab.units.set(b.all(), toUsize(at));";
+  const prependOne = off
+    ? "bb.units.set(this.all(), toUsize(h));"
+    : "if (la === 1) bb.units[toUsize(h)] = wrapU16(this.unit(0));\n        else bb.units.set(this.all(), toUsize(h));";
+  const unitSlot = fault() === "rcstr-unit-low7" ? "u & 127" : "u";
+  const unitLimit = fault() === "rcstr-unit-past" ? "<= 256" : "< 256";
+  const unitLimitNot = fault() === "rcstr-unit-past" ? "> 256" : ">= 256";
   return `/**
  * A concatenation's buffer (R10, D42): room for units in its tail, those from \`head\` to \`end\` read by strings, which
  * appends and prepends write outside of. Never a string itself, and holds nothing.
@@ -156,7 +193,7 @@ class JsStr {
     if (ab !== null) {
       const at = this.start + la;
       if (${appendCheck}) {
-        ab.units.set(b.all(), toUsize(at));
+        ${appendOne}
         ab.end = at + lb;
         return jsStrView(ab, this.start, n, 2);
       }
@@ -166,7 +203,7 @@ class JsStr {
       const head = b.start;
       if (head === bb.head && head >= la) {
         const h = head - la;
-        bb.units.set(this.all(), toUsize(h));
+        ${prependOne}
         bb.head = h;
         return jsStrView(bb, h, n, 2);
       }
@@ -327,14 +364,61 @@ function jsStrOfUnits(u: Uint16Array): JsStr {
   return s;
 }
 
-/** The string of one unit. */
+${
+  off
+    ? UNITS_BEFORE
+    : `/**
+ * The one-unit strings below 256 (R21), as the direct route's static table and @tsl/jsrt's hold them: each made the first
+ * time it's asked for, then kept by the table from then on. A holder of the program's own, counted as an array's is (R2,
+ * R3), its 256 slots its tail, so reading one is \`JsRoomArray.get\`'s checked read.
+ */
+class JsStrUnits {
+  v: JsRoomArray<JsStr | null>;
+  room = tail(u64);
+
+  constructor() {
+    this.v = new JsRoomArray(ref<JsStr | null>(), 256, true);
+  }
+}
+
+/** The table, made with its first string. */
+let jsStrUnits: JsStrUnits | null = null;
+
+/**
+ * The string of one unit: below 256 the table's, else a new one. Inlined: the table's hit is a checked read and the
+ * string's count; anything else is \`jsStrUnitMade\`'s, out of line.
+ */
+/** @tsl.inline */
 function jsStrOfUnit(u: i32): JsStr {
-  const s = jsStrZeroed(1);
-  s.put(0, u);
-  return s;
+  if (u >= 0 && u ${unitLimit} && jsStrUnits !== null) {
+    const s = jsStrUnits.v.get(toUsize(${unitSlot}));
+    if (s !== null) return s;
+  }
+  return jsStrUnitMade(u);
 }
 
 /**
+ * The string of unit u that the table hasn't got: below 256 made and kept by the table (and the table made, the first
+ * time), else made. Out of line.
+ */
+/** @tsl.noinline */
+function jsStrUnitMade(u: i32): JsStr {
+  const s = jsStrZeroed(1);
+  s.put(0, u);
+  if (u < 0 || u ${unitLimitNot}) return s;
+  let t = jsStrUnits;
+  if (t === null) {
+    const nt: JsStrUnits = withTail(256, new JsStrUnits());
+    nt.v.attach(nt, 256);
+    jsStrUnits = nt;
+    t = nt;
+  }
+  t.v.set(toUsize(${unitSlot}), s);
+  return s;
+}
+
+`
+}/**
  * D42's string hash: HalfSipHash-1-3 of the units, two to a word, under the hash key, in 30 bits, as @tsl/jsrt's
  * jsUnitsHash and compiler/rt's strHash give it, read from the units as they are, with no address.
  */

@@ -1,0 +1,11 @@
+[
+  { "fn": "fromCodes", "args": [300] },
+  { "fn": "fromCodes", "args": [129] },
+  { "fn": "readBack", "args": [300] },
+  { "fn": "readBack", "args": [3] },
+  { "fn": "keptAndDropped", "args": [300] },
+  { "fn": "asKeys", "args": ["the cat sat on the mat, énorme ÿ Ā!"] },
+  { "fn": "asKeys", "args": [""] },
+  { "fn": "builtUp", "args": [400] },
+  { "fn": "sameEachWay", "args": [5] }
+]

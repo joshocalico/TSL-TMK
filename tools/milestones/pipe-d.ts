@@ -2578,6 +2578,43 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     });
   });
 
+  // 61. R21: strings and exceptions in rc class printing, each where a wrong answer shows.
+  M.unit("61", async () => {
+    const R21 = timedModule("r21", await import("../r21-tests.ts"));
+    const failures: string[] = [];
+    const d = await R21.r21Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of R21's programs ran");
+    if (d.agreed !== d.cases)
+      failures.push(`${d.cases - d.agreed} cases differ through the two routes`);
+    for (const p of [R21.R21_UNITS, R21.R21_QUICK])
+      if (!d.printed.includes(`${p}@rc`)) failures.push(`${p} doesn't class-print in rc`);
+    report({
+      box: "61. R21 (3.5, 4.4, D39, D42, D75): one-unit strings below 256 from a table in rc class printing (module state, never freed, as the direct route's static table), an append or prepend of one unit a checked store, @tsl/gc's making and freeing with the same steps (a tail's owner word kept, an object of one slot dispatched once, freeFlat called from make), and the backend's shrink-wrapping at -O1 and -O2 (an entry that tests and returns at once does so before its prologue); corpus/lower/r21/r21_units.ts (every unit to 300 made as a one-unit string each way the runtime makes one, units 128 apart one after the other, shared strings kept, dropped, hashed as keys and appended to) and r21_quick.ts (functions whose entry returns at once or goes on to work that needs a frame, called in loops whose values cross the calls, with throws, recursion and memory on the quick way) agree with V8 natively and through both routes with class printing forced in rc and leak at -O0 and -O2, and the printed TSL on V8 and JSC with the source (tools/r21-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${d.agreed}/${d.cases} cases the same as V8 and through both routes, class-printed: ${d.printed.join(", ")}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 62. R21's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("62", async () => {
+    const R21 = timedModule("r21", await import("../r21-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R21.R21_FAULTS) {
+      const x = await R21.r21Fault(f, accel, jobs);
+      rows.push(`${f.what}: ${caughtText(x)}`);
+      if (x.answers === 0) failures.push(`${f.name} wasn't caught: ${x.first}`);
+    }
+    report({
+      box: `62. R21: each of ${R21.R21_FAULTS.length} bugs is caught by a wrong answer, with how many cases caught it: the one-unit table filed by a unit's low 7 bits, the table taken for unit 256 (a bounds trap), and shrink-wrapping taking a callee-saved register as free (tools/r21-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
   M.vms(
     "8",
     "8. No QEMU process of this run is left, and the owner's UTM and QEMU processes were only observed",
