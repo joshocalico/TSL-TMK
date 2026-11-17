@@ -216,6 +216,32 @@ export function r14Off(part: "trust" | "inv" | "nullref"): boolean {
   return (process.env.TMK_R14_OFF ?? "").split(",").includes(part);
 }
 
+/**
+ * R17: whether a part of R17 is turned off by TMK_R17_OFF, for computing what it moved (tools/r17-pins.ts): `pop`, the
+ * lowering's pop clearing the slot it drops in an array of references in every mode (before R17, only in `rc`); `jsrt` and
+ * `holes`, the printing's JsArray constructor (emit-tsl.ts).
+ */
+export function r17Off(part: string): boolean {
+  return (process.env.TMK_R17_OFF ?? "").split(",").includes(part);
+}
+
+/**
+ * R18: whether a part of R18 is turned off by TMK_R18_OFF, for computing what it moved (tools/r18-pins.ts): `stack`, `rc`
+ * class printing keeping a class on the stack where the lowering keeps every object of it there (emit-tsl.ts's planStack,
+ * expand-rc.ts's `@tsl.stack`).
+ */
+export function r18Off(part: "stack"): boolean {
+  return (process.env.TMK_R18_OFF ?? "").split(",").includes(part);
+}
+
+/**
+ * R19's switches, for tools/r19-pins.ts's comparison: `TMK_R19_OFF=inline` prints an `rc` environment's `call` and its small
+ * kinds as before, not `@tsl.inline` (emit-tsl.ts).
+ */
+export function r19Off(part: "inline"): boolean {
+  return (process.env.TMK_R19_OFF ?? "").split(",").includes(part);
+}
+
 export function r13Off(part: "arrays" | "arena" | "boundary" | "closures"): boolean {
   return (process.env.TMK_R13_OFF ?? "").split(",").includes(part);
 }

@@ -1,0 +1,9 @@
+[
+  { "fn": "switching", "args": [10], "expect": 138.5 },
+  { "fn": "switching", "args": [3], "expect": 13.5 },
+  { "fn": "around", "args": [2], "expect": 1110 },
+  { "fn": "around", "args": [3], "expect": 1091 },
+  { "fn": "fixed", "args": [1, 10], "expect": 75 },
+  { "fn": "fixed", "args": [2, 10], "expect": 135 },
+  { "fn": "fixed", "args": [3, 10], "expect": 15 }
+]

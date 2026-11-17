@@ -56,6 +56,270 @@ The nightly full run stays paused until the owner agrees the pipeline is fixed.
 
 ---
 
+## 2027-01-05
+
+**Coordinator: R19 verified** (manifest MATCH, tree 674cfa6c126e5e6a; gate from clean 279 of 279 in 96.6 min). Highest per-job peak 2.66 GiB (pipe-d/47, 2.11 in R18), still under the 3 GiB watchdog.
+- **Sample, seed 20521: 6/8 the same.** The two that differed had every count identical:
+  - lang-a/9 named a different first failure among the same 269 and 54;
+  - pipe-d/39 printed the same divergence counts in a different key order.
+
+  That's nondeterministic ordering in the harness's details, not a change in what was compiled or caught. A second sample (seed 21587) was 8/8 the same. I accept R19 on that basis, and the ordering gets fixed at its source (see R20), not by loosening the comparison.
+- **Committed and pushed R15–R19 together** (owner: "Wait and push"). R15–R18 couldn't go alone: R19 had already changed files R18's gate verified, and no copy of them was kept. From now on each verified round is committed locally straight away (owner: "commit on verify is fine"), and pushed only when the owner asks.
+- **`auto`:** nothing new in `rc` (19 exact, 0 reshaped). Maps need the owner's deferred fresh-allocation proof (option 1); I'm leaving it deferred until the owner says "now".
+
+**Decision: R20.**
+- First, make the harness details deterministic: sort the keys of divergence maps, and pick the "first failure" by a stable order, not by which job finished first.
+- Then strings and exceptions in `rc` class printing (the next item in the order), measured first against the speed rule.
+- Arrays' last costs (a holder freed in about 90 instructions against 68, a fresh object 155 against 114) if they fall out of that work.
+- *Rejected:* starting option 1 now (the owner said later); the collector's exhaustion path (algorithmic, waits).
+- *Next:* item 11.
+
+## 2027-01-04
+
+**R19 is built (builder's report; for the coordinator to verify).** `rc` class printing's remaining measured costs: arrays growing by rooms, closure calls through the kind switch, and maps' tables; then the speed rule on whether `auto` takes reshaped `rc` programs. SPEC 3.4 (R19's invariance rule), 3.5 ("`rc` class printing's remaining costs", the `ex-gc-rc.ts` block), 8.3 (boxes 57 and 58), D39, D41, D64, D73, D74, D75 and M5's R19 record. No check, case or fault was dropped or weakened, and no limit, timeout or watchdog moved. Nothing was added to TSL, and nothing to anything lowered code can import.
+
+- **Measured first** (instructions; TCG, `TMK_ICOUNT=1`; "before" from a copy of R18's tree):
+  - *Arrays.* read_checks.ts's cases are small arrays, and 7 of its 12 trap (an index past the end), each leaving what it made, so every pass makes fresh objects: a trapping `objAt` 1,200 direct against 2,100, a fresh object 116 against 241 (every fresh slot was one `allocBytes` of the heap below). Rooms of new lengths, and holders of alternating lengths (reshape_order's literals), went out of line to `tailMake`; a holder was freed through `freeSteps`' frame, 163 instructions against 77.
+  - *Closures.* closure_selected's `select`, per turn: 14.5 direct against 28.5 (-O1) and 17.5 (-O2): `call` wasn't inlined (the caller's growth limit, used up by the `make`s), and the kind was loaded and compared every call.
+  - *Maps.* map_grow_oom and r2_maps' `reallyOut` run a map until memory runs out, and class printing holds twice the entries in the same pages (8,192 against 4,096; 4,096 against 2,048), so its pass does twice the work. At equal work, a local map's build and reads are 1.047 (-O1) and 1.086 (-O2), a set of an existing key 0.990 and 1.030: two bounds checks a chain step, the checks the owner's ruling keeps (R17's 3a, deferred).
+  - *cyc_exhaust* (out of scope): its trapping case's figure, the collector's exhaustion path (6,858 objects held at trap 14 against 7,808).
+- **Built:**
+  - `@tsl/gc`: `tailFast` makes a tail of any length in line; without the collector a fresh slot is cut from a page of its size class (`pageSlot`, `freshSlot`), as the direct route cuts its small blocks; `runSteps` hands an object whose release function isn't empty to `freeFlat`, `freeSteps`' loop without its frame.
+  - Closures: in `rc`, an environment's `call` (several kinds), and each kind's small method, print `@tsl.inline`; tslc notes a lowered `rc` package's counted class's fields that only its constructor stores invariant (D73): the kind is read once for a loop, and at -O2 the loop is unswitched on it.
+  - The backend leaves a `!` to the load through a reference's address, as through the reference (D75).
+- **Sound, D39/D41 unchanged:** the same freeing steps, in the same order, with the same effects (every pinned step count holds); a fresh slot is taken where it was, everything waiting freed before trap 14; the collector's code, chunks and walk untouched. The invariance rule is tslc's proof: the objects are a store's slots, reused only once no reference is left, and a lowered package can't import `@tsl/unsafe`.
+- **The owner's ruling:** no unchecked operation added to anything lowered code can import; `@tsl/gc`'s changes are internal, behind the SAFETY reasoning they had. What the maps need (bounds checks proved away) is the owner's deferred 3a: not built, reported.
+- **Tried and taken out:**
+  - masking dropped from a lowered `rc` package's counted references: R19's own test faulted at -O0, as freeing gives a release function its object tagged (`objectAt<Counted0>`). relative_import keeps its one `ubfx`;
+  - `roomDrop` inlined: it made `freeSteps` spill (773 → 984 a call on the object-keyed maps benchmark);
+  - -O1's inliner taking a call copied into a loop as in it: not needed, and it would have moved hand-written TSL's -O1 code.
+- **After** (before → after, -O1/-O2): read_checks 1.298/1.398 → 1.014/1.107, reshape_order 1.098/1.078 → 1.069/1.038, closure_selected 1.013/1.005 → 0.987/0.986, r3_arrays 0.925/1.005 → 0.915/0.993, grow_reuse 0.766/1.000 → 0.726/0.943, relative_import 1.004/1.002 → 1.003/1.001, cyc_exhaust 1.440/1.328 → 1.424/1.316, map_grow_oom unchanged. Over 1.00: 6 → 5 at -O1, 7 → 5 at -O2.
+- **`auto`: nothing new.** `TRUSTED_IN` is unchanged. Five programs still miss at each level: maps' two (capacity, and checks the ruling keeps) and the collector's (out of scope) can't be taken this round, and read_checks, reshape_order and relative_import are arrays' last costs. A rule by construct would leave out nearly every reshaped program, so I don't propose one. Coverage (`route-blockers`, -O2) is the same before and after, line for line: `strict` 30 + 18, `leak` and `manual` 63 + 43, `rc` 19 + 0.
+- **JPEG and S4:** the same TIR, with no `ref.addr` for the backend's change to read: the same machine code.
+- **`AUTO_RC`'s benchmarks** (`tmk bench memory --classes --rc`, instructions, class printing / direct, before → after): unchanged within 0.2% but acyclic (0.83 → 0.82 at -O1, 0.89 → 0.86 at -O2) and arrays at -O2 (0.86 → 0.84). *Found:* two cells were already over 1.00 in instructions before R19 and still are: cycles at -O1 (1.045, +0.05% now) and number-keyed maps at -O2 (1.002, unchanged). Box 26 decides on time, where both pass; for you to judge.
+- **Injected bugs** (box 58), each caught by a wrong answer: a room array's growth copying one element short (7), the inlined call switch's first two kinds swapped (3), tslc's invariance rule missing a store a method makes (6, r19_fields.ts's pins at -O1 and -O2), a map table's growth leaving the entry its move puts first out of every chain (1), a freed literal of two objects given back with its second still counted (12, trap 14), a tail of a new length made at the last length's size class (6), a fresh slot cut half a slot past the last (19). Two older bugs now patch `freeFlat`'s copy of `freeSteps`' text as well (`times: 2`), as most freeing is `freeFlat`'s; each is still caught.
+- **Pins:** 20 of 3,864 moved, none TSL proper's, none unexplained (tools/r19-pins.ts, tools/r19-moved.ts): five lowered `rc` programs (list and churn benchmarks, escape_global and store_closure by `@tsl/gc` at every level, a library change D44 allows; closure_outlives also by the printing's `@tsl.inline`, and store_closure and closure_outlives by the invariance rule at -O1 and -O2). 15 pinned again, 5 in the read-only pre-strings file set aside by key.
+- **Gate:** this entry was finished before the final gate, as the round asks; the gate's result, time and peaks are in the builder's report. (decisions.md isn't one of the manifest's inputs, tools/registry.ts's INPUT_ROOT_FILES; SPEC.md is.)
+- *Rejected:* trusting reshapes in `rc` class printing (five programs over at each level); a by-construct trust rule; an unchecked map read (the owner's ruling).
+- *Next:* maps in `rc` need the deferred proof (or the owner's word); the collector at exhaustion; arrays' last costs (a holder freed about 90 to the direct route's 68, a fresh object 155 to 114 at -O2); then strings and exceptions in `rc`, then item 11.
+
+## 2027-01-03
+
+**Coordinator: R18 verified** (manifest MATCH, tree 0e404b78b20c8295; gate from clean 277 of 277 in 98.7 min, restarted once because of my own mid-start edit; sample 8/8 the same, seed 19463). Highest per-job peak 2.38 GiB.
+- **Fault integrity fixed:** one patcher (`compiler/host/test-patch.ts`), exact match counts, and a non-applying patch is now a harness failure. All 227 injected bugs are registered and checked by a unit test in every `--changed` run. The audit repaired 7 stale or ambiguous bugs (`no-norm` had been out of the build since R6, `grow-last` since R16, plus `pop-empty` and four std map bugs that patched the wrong copy of repeated text). It also found and closed a real gap: JS Map's "trySet leaves a key on out-of-memory" was caught by nothing (`std_js_map_safety.ts` now catches it).
+- **`rc` stack objects:** an `@tsl.stack` class is placed and checked by tslc's own escape analysis, not the printer's word (a wrong tag is refused), and it stays uncounted. It adds no unchecked operation, within the owner's ruling. relative_import and closure_selected are now at about 1.00, and `inheritance.ts` (already `auto`'s) went from 1.05/1.14 to 1.00/1.00. `auto` takes nothing new in `rc`.
+- **Owner ruling applied:** a lowered package listing `"unsafeModules"` is now refused (TSL1023). It used to compile, though nothing used it.
+- After the gate, I changed one SPEC sentence ("for a later round" to "temporary", per the owner's softened ruling; backup `SPEC.md.bak-pre-r18-coord`). It's wording only, but it changes the tree hash, so the next gate covers it.
+
+**Decision: R19 takes `rc` class printing's remaining measured costs:** arrays growing by rooms (read_checks 1.30/1.40, reshape_order), closure calls through the kind switch (10–12 instructions against 5), and maps' tables from `@tsl/std` (map_grow_oom 2.19, r2_maps). The collector on 6,000-object rings (cyc_exhaust's `largeRings`, 3.67×) is algorithmic and waits. The speed rule then decides whether `TRUSTED_IN` extends to `rc` class printing.
+- *Next:* strings and exceptions in `rc`, then item 11.
+
+## 2027-01-02
+
+**R18 is built (builder's report; for the coordinator to verify).** Fault-injection integrity first, then stack placement in `rc` class printing. SPEC 3.5 ("Stack objects in `rc` class printing"), 8.3 (the fault rule, and boxes 55 and 56), D39, D64, D74 and M5's R18 record. No check, case or fault was dropped or weakened, and no limit, timeout or watchdog moved. Nothing was added to TSL; the `@tsl.stack` tag means something only in a lowered `rc` package.
+
+- **The fault rule.** An injected bug that isn't in the build is a harness failure of its box, never "caught":
+  - one place applies a patch, `compiler/host/test-patch.ts`: the text must be there exactly as many times as the patch says (once unless `times`), or the build throws `TSL_TEST_PATCH: …`; a file is named at a `/`;
+  - every runner (std-tests, gc-tests, r2/r11/r16/r17 tests, pipe-d boxes 4, 11, 18 and 19, quick's `--catch-rate`) takes its patch from `tools/faults.ts`'s `patchEnv`, which checks it against the source first, and passes its failures through `faultFailures`, which throws on a build that says a patch didn't apply; both throw `FaultHarnessError`, which fails the box and says why;
+  - `registeredFaults` lists all 227 bugs the tools know (84 by patch, 143 by name through a `TMK_TEST_*` or `TMK_OPT_FAULT` hook), and tools/faults.test.ts, a unit test (so `tmk test --changed`'s first job, selected by every change), checks each patch's text and each name's hook. An edit that orphans a bug now fails in seconds.
+- **What the audit found** (each repaired to target the same code as it is now, and run as its box runs it):
+
+  | Bug | Box | File | Not in the build since | Caught now |
+  |---|---|---|---|---|
+  | `grow-last` | pipe-d 4 | ex-jsrt-array.ts | R16 (growth reads `old`) | by hand 5, dual 8 |
+  | `no-norm` | pipe-d 18 | ex-jsrt-map.ts | R6 (scratch word read into `s`) | by hand 1, dual 4 |
+  | `pop-empty` | pipe-d 4 | ex-jsrt-array.ts | text twice (pop's, shift's) since pipe-d; pop's patched, as meant | by hand 2 |
+  | a deleted entry left visible | native-g 6 | ex-std-map.ts | text 3 times since the maps step (D47); ExactMap's patched | 13 |
+  | trySet leaving a key behind | native-g 6 | ex-std-map.ts | twice since the maps step; ExactMap's | 1 |
+  | a stale key reaching a closure | native-g 6 | ex-std-map.ts | twice since the maps step; ExactMap's | 1 |
+  | compaction losing values | native-g 6 | ex-std-map.ts | twice since the maps step; ExactMap's | 12 |
+  | (R17's) a freeing step visiting every slot | pipe-d 21 | ex-gc-rc.ts | R4 to R16 | caught (R17) |
+
+  - The four map bugs now name ExactMap's code by the text around it, and each has a new counterpart in JS's Map (whose code is the same text again).
+  - **Finding:** JS's Map `trySet` leaving a key behind when out of memory was caught by nothing: no case ran JS's Map out of memory. New corpus/std/std_js_map_safety.ts (two cases, every small page limit) now catches it (1). The other three counterparts: 681, 1, 39.
+- **Measured first** (instructions; TCG, `TMK_ICOUNT=1`; `tmk profile --instructions` now takes `--args`). The 29 reshaped `rc` programs (`TMK_TRUST_IN=rc:classes`, tools/r14-time.ts) were over 1.00 on 6 at -O1 and 9 at -O2, plus r2_maps and r3_closures whose traps differ. Placement explained only part of it:
+  - relative_import's `viaImport`: 21 direct, 92 + a 58-instruction freeing step printed. closure_selected's `reassign`: 19 against 129 + 92 (two empty closure environments counted).
+  - The rest isn't placement. read_checks: arrays growing by rooms (`numAt`, n 20: 1,535 against 2,152). reshape_order: array literals' freeing (184 against 136 a call). closure_selected's `select`: closure calls through the kind switch (10 to 12 against 5). cyc_exhaust: the figure is its trapping case's; `largeRings` alone is 3.67x (the collector on rings of 6,000). Maps' tables (map_grow_oom 2.19, r2_maps): left for the maps round.
+- **Built:**
+  - class printing in `rc` tags `@tsl.stack` a class the lowering keeps every object of on the stack (`planStack`: each `new` placed on the stack, not long, holding only numbers, booleans and other such classes, held by nothing counted);
+  - tslc's expansion leaves it uncounted, its `new` a plain `new`, its constructor and methods expanded as any function's, and refuses a tagged class holding anything else (TSL9001);
+  - tslc's escape checking places that `new` on the stack and refuses one that could outlive its frame (TSL3001/3002);
+  - such an object is zeroed by one `mem.fill`, which scalar replacement takes; and the backend makes a constant zero fill of up to 64 bytes stores, not a call to `__rt_memset`'s byte loop.
+- **Sound, and D39/D41 unchanged** (3.5): a stack object can't be reached after its frame (tslc's escape checking refuses the program, whatever the printer said), can't be counted or released (no store; nothing counted holds it), and the collector never meets it (it scans counted fields of counted objects and the counted heap's pages). `@tsl/gc` is untouched.
+- **Found on the way and fixed:** the expansion's first form copied a tagged class's methods as written, so corpus/lower/exc/exc_effects.ts's method that throws made its counted error a stack object, which tslc refused. `route-blockers` before and after showed the one program going from printed to blocked; methods are now expanded, and it prints as before.
+- **After** (before → after, -O1/-O2): relative_import 1.062/1.130 → 1.004/1.002, closure_selected 1.067/1.061 → 1.013/1.005, closure_escape 0.996/1.004 → 0.972/0.983, grow_reuse 0.806/1.058 → 0.766/1.000, r3_arrays 0.946/1.029 → 0.925/1.005, read_checks 1.323/1.426 → 1.298/1.398; map_grow_oom, cyc_exhaust, reshape_order unchanged. Over 1.00: 6 → 6 at -O1, 9 → 7 at -O2.
+- **`auto`: nothing new.** `TRUSTED_IN` is unchanged. read_checks, reshape_order, cyc_exhaust and the maps are over by more than placement gives, and what's left there is arrays' rooms, closure calls, the collector on large rings and maps. Coverage unchanged (`route-blockers`, -O2): `strict` 30 + 18, `leak` and `manual` 63 + 43, `rc` 19 + 0. Of `rc`'s 19 exact, inheritance.ts now keeps its object on the stack: 1.046/1.136 → 1.000/1.000.
+- **JPEG and S4:** JPEG's TIR is unchanged; its constant zero fills are now stores: 0.9983 to 1.0000 of the instructions, every fixture, both levels (tower-portrait 91,975,815 → 91,975,394 at -O1). S4 (TSL proper, no such fill) is the same machine code.
+- **Injected bugs** (box 56), each caught:
+  - an escaping object placed on the stack: tslc refuses the build (1); with the escape checking also off, wrong answers (2);
+  - a stack object reachable from a heap object the collector scans: refused (1); with the checking off, wrong answers (3);
+  - a stack object released by `@tsl/gc`: a wrong answer and trap 18 (1);
+  - the escape checking off alone: corpus/neg/lowered-rc not refused (3); the expansion taking a tagged class holding a reference: the same (1).
+- **The owner's ruling (2027-01-01) applied:** R18 adds no unchecked operation to anything lowered code can import, and no raw `load`/`store`/`alloc`/`allocStack`/`elemAddr` to class printing. A stack object is a plain `new` that tslc's escape checking places and checks; the tag only lets the expansion leave a class uncounted, and tslc refuses a wrong one; the `mem.fill` and the backend's stores are tslc's lowering of that `new`.
+  - *`@tsl/unsafe` from a lowered package:* TSL5001 unless the module is listed under `"unsafeModules"`, but a lowered package's tsl.json **could** list it (a probe compiled, asking only for `// SAFETY:` comments). The printer never writes that setting and no lowered package in the repo has one, so refusing it moves no pin: it's now TSL1023 with the other settings a lowered package can't take (compiler/host/program.ts, corpus/neg/lowered-unsafe).
+- **Pins:** 4 of 3,864 moved, none TSL proper's (inheritance.ts in `rc` at -O0, -O1, -O2; tools/r18-pins.ts, tools/r18-moved.ts), one set aside in the read-only pre-strings file.
+- **Gate:** one full gate from clean at default settings, 277 of 277 jobs passing in 98.7 min (5,922.5 s; load 66 to 84, at most 228, on 10 CPUs), tree 0e404b78b20c8295; `node tools/tmk.ts verify-manifest`: MATCH. The coordinator's edit to decisions.md (outside the manifest's inputs) landed as the first gate started; that gate was stopped and this one started fresh. Highest per-job peaks: native-f/6@2 2.38 GiB, pipe-d/3 2.21, pipe-b/7 2.17, pipe-a/3 2.14, pipe-d/47 2.11. `tmk test --changed` before it: 43 of 43.
+- *Rejected:* trusting reshapes in `rc` class printing (7 programs over at -O2); keeping a class on the stack per site rather than per class (a reference's count would need the site, which a class's references don't carry); counting stack objects with a pinned count (count operations the direct route doesn't pay).
+- *Next:* `rc` arrays' rooms (read_checks, reshape_order), closure calls through the kind switch, the collector on large rings, then maps in `rc`, then strings and exceptions in `rc`.
+
+## 2027-01-01 (owner ruling)
+
+**Owner: "Lowered TSL should have no way of violating memory safety."** On 3a: option 1 (the optimiser rule: fresh-allocation separation plus per-call write summaries), but later. No lowered-only unchecked read, ever.
+- *What this means for the current design (coordinator):* phase 1's printing breaks the rule today. `@tsl/lowered`'s `load`, `store`, `alloc`, `allocStack` and `elemAddr` are unchecked raw memory operations, "trusted exactly as much as the direct route" (its header comment). `auto` currently uses that printing for most `leak`/`manual` programs, all 18 trusted-reshape `strict` programs, and the JPEG decoder.
+- *Note:* phase 1's raw-memory printing is temporary (softened by the owner below: a note, not a hard steer).
+- *Standing rule for every builder from now on:* add no unchecked operation to anything lowered code can import. A lowered package's only escape hatch would be `@tsl/unsafe`, which lowered packages must not import (check that TSL1023-style rules enforce it).
+- **Owner, clarifying: "I never asked for any of that to be outside of unsafe."** That's correct. Putting raw `load`/`store`/`alloc`/`allocStack`/`elemAddr` in `@tsl/lowered` (D62 phase 1) gave lowered code unsafe power without `@tsl/unsafe`'s gate (`unsafeModules`) or its rules. That was the builders' design and my review missed it. It was never the owner's.
+- **Owner, on how hard to steer:** "raw-memory printing is temporary" is enough, not a hard steer. So there is no relabelling round and no reordering. Phase 1's raw operations are noted as transitional and retire on the normal path toward item 11. The one firm rule left is to add no new unchecked operation that lowered code can import.
+- *Order:* unchanged.
+
+## 2026-12-31
+
+**Coordinator: R17 verified** (manifest MATCH; gate from clean 275 of 275 in 96.4 min; sample 8/8 the same, seed 18451). Highest per-job peak 2.46 GiB.
+- `@tsl/gc`'s freeing step went from 144 to 58 instructions (the direct route's is 65), and making an object costs the same as the direct route. D39/D41 are unchanged: a skipped `return 0` release is the same step, in the same order, still counted. `rc_steps_leaves.ts` pins exact step counts at four budgets and agrees with the host simulation.
+- `rc` reshaped programs over 1.00× went from 19/21 to 7/10 (-O1/-O2). `auto` takes nothing new yet. What's left is mostly objects the direct route keeps on the stack while class printing counts every one, plus maps.
+- `JsArray` gets a `holes` flag. A direct-route bug was found and fixed along the way: in `leak`/`manual`, a pop left the dropped reference in its slot, so lengthening the array again read it back where JS gives `undefined`.
+- **3a (the fresh-allocation rule) is deferred, for the owner.** It can't reach operandWork's or sequenceWork's reads without per-call write summaries and cross-function tracking of `JsArray.data`, and its soundness would rest on every `@tsl/unsafe` module's promises. The alternative, a lowered-only unchecked `get`, is a new API. *Owner review:* both options. The cost is about 2–12% on two benchmarks in class printing only.
+- **Test-integrity problem found (R17 surprise, widened by me):** `compiler/host/program.ts` throws `TSL_TEST_PATCH: no <from> in <file>` when an injected bug's text no longer matches the source. Older fault boxes count any failure as "caught", so a stale fault passes while testing nothing. R17 found two (box 21's since R4, and JsMap's `no-norm`). Its own runner excludes this, but nothing else does.
+
+**Decision: R18 first fixes fault integrity, then stack placement in `rc` class printing.**
+1. *Integrity:* one shared rule: a fault whose patch doesn't apply is a harness failure, never "caught". This applies to every place faults are injected (`TSL_TEST_PATCH`, patch lists in milestones, quick.ts, std-tests, gc-tests, r*-tests). Audit every fault list, repair each stale patch so it targets real code again, and report each one found (name, box, since when, and whether it's caught now). A fault that is genuinely no longer caught is a finding, not something to hide.
+2. *Then:* keep non-escaping objects on the stack in `rc` class printing, as the direct route does (the remaining `rc` cost). Then the speed rule decides what `auto` takes in `rc`.
+- *Next:* maps in `rc` (`@tsl/std` tables), strings and exceptions in `rc`, then item 11.
+
+## 2026-12-30
+
+**R17 is built (builder's report; for the coordinator to verify).** `rc` class printing's freeing step and allocation, and two array costs. SPEC 3.5 (`ex-gc-rc.ts`, `ex-gc-roomarray.ts`, `ex-jsrt-array.ts`, `ex-jsrt-map.ts` blocks), 8.3, D39, D66 and M5's R17 record. No check or case was dropped; no limit moved. Nothing was added to TSL itself; `@tsl/unsafe` gained `releaseIsEmpty` (below).
+- **Measured first** (instructions; TCG, `tmk profile --instructions`):
+
+  | What | Direct route | Class printing, R16 | R17 |
+  |---|---|---|---|
+  | Freeing an object with no slots, one step (adv_forof_mutation.ts), -O1 / -O2 | 65 / 65.5 | 144.2 / 143.2 | 58.3 / 58.3 |
+  | Freeing with the collector linked (adv_temporaries.ts), an allocation | 70.0 | 113.9 + 60.5 | 87.4 |
+  | Making one, -O2 (`churn`'s turn: a `new`, its drop, the loop) | 59.2 | 23 + `make` 19.2 + `tryMake` 54 | 59.3 |
+  | Counts (`share`, `drop`) | inlined | inlined, the same work | unchanged |
+  | adv_forof_mutation.ts's `replaceCurrent`, a call, -O1 / -O2 | 31,958 / 24,893 | 44,357 / 46,373 | 23,915 / 23,889 |
+
+  Where the 143 went: 12 registers saved, the `stepping` flag, the cursor's three words read and written back every call, `spare` set and read back around the release function's call (which, inlined, was `return 0`), a compare chain, a tagged reference made, and checked usize arithmetic at four instructions each (the budget, the index, `stepsTaken`, `liveObjects`, the freed count, the generation).
+- **Built:**
+  - `@tsl/gc`: a store whose release function is `return 0;` alone (tslc's `releaseIsEmpty`) is marked in its entry, and `runSteps` frees such objects in a loop that calls nothing, handing the rest of the budget to `freeSteps` (the general loop) at the first object that isn't one.
+  - The budget is counted down unchecked, the step count wraps, and each store's made and freed counts live in its entry (`rcLive` adds them up).
+  - `make`, `makeTail` and `makeTailKeep` are inlined, with their slot taken in line. `quickFree` skips the empty call too. `sizeClass` uses leading zeros.
+  - tslc no longer evaluates an `objectAt` given straight to `retireObject`.
+  - `JsRoomArray`'s `push`, `setLength` and `clear` are inlined.
+- **D39 and D41 unchanged:** the skipped call does nothing and gives 0, and freeing takes the same step for it, in the same order, counted. The quick path stops at the first object with slots, or one a scan gave up. The collector's code isn't touched. corpus/rc/rc_steps_leaves.ts pins the counts (budgets 32, 1, 2, 3), with the host, which calls every release function, agreeing. Every existing count, and box 21's and native-e's boxes, are unchanged.
+- **3a, `get`'s check: the fresh-allocation rule can't reach it, so neither it nor the fallback is built; that needs the owner.**
+  - In operandWork's loop, the store between the lowering's length and `get`'s check goes through a buffer address loaded from the array's `data` each turn. The turn's full path also calls `pushGrow`. sequenceWork's reload of `bag.items` is the same.
+  - The rule needs the store's address known to be fresh. A loaded field that a call may replace isn't, and a call's writes aren't visible stores at all.
+  - Reaching it would take per-call write summaries (trusting the allocator's contract) and cross-function points-to for `JsArray.data`. That is a bigger rule, and its soundness against `@tsl/unsafe` code would rest on every unsafe module's SAFETY promises.
+- **3b, `JsArray`'s `holes` flag:**
+  - A fourth constructor argument. False for an array of numbers or bytes: a pop is the length's store, and growth zeroes nothing past the copy.
+  - A longer length zeroes what it adds when there are no holes, so a slot below the length never reads anything but what was written or zero.
+  - The first form left that to the lowering and broke compiler/rt's map, which lengthens its buckets expecting zeros (app_lru.ts trapped 2). `JsRoomArray` had that assumption too; nothing reached it, and now it zeroes the same way.
+  - **Found and fixed:** in `leak` and `manual` the direct route's pop didn't clear the slot it drops from an array of references, so a longer length read the popped object back where JS reads a hole. Its pop now clears in every mode, as shift and a shorter length already did (r17_free.ts's `objectPopHole`).
+- **After** (class printing / direct, instructions):
+  - The 29 reshaped `rc` programs over 1.00: 19/21 at -O1/-O2 before, 7/10 after.
+  - Still over: small programs whose objects the direct route keeps on the stack while tslc's `rc` counts every object (read_checks 1.32/1.43, relative_import, closure_selected, reshape_order, cyc_exhaust); maps' tables (map_grow_oom 2.19, r2_maps); and at -O2, grow_reuse 1.06, r3_arrays 1.03 and closure_escape 1.004.
+  - sequenceWork 1.207/1.592 → 1.000/1.296 (`bag` in the call region, read again each turn). operandWork `leak` 1.024/1.181 → 0.975/1.119, `manual` 1.028/1.186 → 0.979/1.124.
+- **`auto`: nothing new.** `TRUSTED_IN` is unchanged. Coverage is unchanged (`route-blockers`, -O2): `strict` 30 + 18, `leak` and `manual` 63 + 43 each, `rc` 19 + 0.
+- **JPEG and S4:** JPEG's TIR is byte-identical at every level through both routes, and no TSL proper pin moved.
+- **Injected bugs**, each caught by a wrong answer (box 54):
+  - quick path one past the budget: 10 cases;
+  - quick path's step not taken (the decrement skipped): 6;
+  - every release taken as empty: 10;
+  - `JsArray.pop` leaving a reference whatever the flag: 1;
+  - a no-holes longer length not zeroing: 1.
+
+  The brief's "fresh rule on a non-fresh reference" has no rule to put it in.
+- **Pins:** 180 of 3,864 moved, none TSL proper's, none unexplained (tools/r17-pins.ts, tools/r17-moved.ts). 39 of them are in the read-only pre-strings file, set aside by key.
+- **Harness:**
+  - Box 21's "a freeing step doing a whole object's slots at once" had targeted text R4 removed, so from R4 to R16 its patch threw and the box counted that as caught. It now runs against `freeSteps`.
+  - The same is true today of pipe-d's JsMap bug `no-norm`: its text is `scratch`, the source's is `s`. I left it for you, not R17's.
+  - pipe-d box 5's expected printing now has `JsArray`'s fourth argument.
+- *Rejected:* trusting `rc` class printing (still over 1.00 on 7 and 10 programs); the lowered-only unchecked read (owner's call); counting leaves' freeing as zero steps (D39).
+- *Next:* placement in `rc` class printing (stack objects, as the direct route does), which is most of what's left in `rc`; the call region's `bag` in sequenceWork; the owner's ruling on 3a.
+
+## 2026-12-29
+
+**Coordinator: R15 and R16 verified together** (manifest MATCH, tree 446d4b094911848a; gate from clean 273 of 273 in 93.2 min; sample 8/8 the same, seed 17389). Highest per-job peak 2.51 GiB (pipe-d/47); native-e/3 down from 2.84 to 1.69/1.87 GiB.
+- Box 9 now compares medians over iterations 180–199 with the same inequalities and same-page thresholds. It's not weaker: a wrong verdict needs 10 of 20 samples wrong, not one, and two injected diagnosis bugs still fail it. Accepted.
+- `JsArray`/`JsArenaArray`: the constructor makes one block, `push`/`setLength`/`clear` are inlined, and the printer drops a dead length re-read after a push. operandWork went from 1.32× to 1.03× at -O1; acyclicWork and vecWork are now below 1.00. JPEG is byte-identical and no hand-written TSL pin moved. 97 lowered pins moved, each explained.
+- `auto` takes nothing new: operandWork at -O2 (1.11–1.19) and sequenceWork (1.21/1.59) still lose.
+- The builder used `pgrep -qf` once more (it only observed). That's two rounds running; the brief now says why: it matches its own command line.
+- Not pushed: the owner's one push was used on 2026-12-25. R15 and R16 wait for the owner.
+
+**Decision: R17 takes `rc` class printing's costs, since that's what `rc` needs.** `leak`/`manual` already get their reshaped programs through phase 1's printing, so class printing's remaining losses there cost speed, not coverage. In `rc`, class printing is the only TSL route (19 exact, 0 reshaped taken).
+- *First:* `@tsl/gc`'s freeing step (143 instructions against the direct route's 65), measured and brought down. Same D39 bound and same collector behaviour.
+- *Then, the two array costs R16 found,* which `rc` class printing pays too:
+  - (a) `get`'s check on a read the lowering already proved in bounds. **I'm choosing the optimiser rule over a lowered-only unchecked read.** The rule is that memory from a fresh allocation can't be what an older reference points to, so a store into it can't change an older array's length. It's general, helps hand-written TSL too, and adds no API. A lowered-only `getUnchecked` is the fallback only if the rule can't reach it, and it would need owner review.
+  - (b) a "never has holes" flag on `JsArray` (as `JsRoomArray` has), so `pop` on an array of numbers skips the capacity check and slot clearing.
+- The speed rule decides what `auto` newly takes in `rc` (and, with (a) and (b), reshaped class printing in `leak`/`manual`).
+- *Next:* strings and exceptions in `rc`, then item 11.
+
+## 2026-12-28
+
+**R16 is built (builder's report; for the coordinator to verify).** `JsArray` construction and `push` in class printing, native-e box 9's timing check, and native-e box 3's memory. SPEC 3.5 (both array classes' `// file:` blocks), 3.7, 8.3, D66 and M5's R16 record. Nothing was added to TSL; no check or case was dropped; no limit moved.
+- **Measured first** (instructions a call, class printing forced / direct, -O1 and -O2, `manual`):
+
+  | Program | -O1 | -O2 | Where the difference went |
+  |---|---|---|---|
+  | operandWork | 1.321 | 1.574 | `grow` 351 calls a call at 76 to 88 (201 from the constructor), `push` a call each (1,100 at 18.8); the rest the same |
+  | acyclicWork | 1.127 | 1.194 | a literal made by the constructor plus a growth, not one block |
+  | vecWork | 1.064 | 0.870 | `push` a call; a `pop` two (`setLength` 18, `clear` 13) |
+  | churn's arrays / arraysOfObjects | 1.50 / 1.59 | 1.57 / 1.75 | `grow` 73, and `@tsl/std`'s `Heap.allocBytes` 55 to 66 against `__heap_alloc`'s 44 |
+  | churn's arraysGrowing | 1.07 | 1.02 | `push` a call |
+
+- **Built:** both array classes are made at their final size in one step by an inlined constructor (one zeroed block, no growth); `push` inlined, a store and the length raised while there's room, growth a call out of line; `setLength` and `clear` inlined; growth leaner. A constructor now takes `@tsl.inline`/`@tsl.noinline` (a hint only; no constructor had either before, so nothing moved by it). The printing leaves out the length read after a push whose value nothing uses.
+- **After:** operandWork 1.028 and 1.186 (`leak` 1.024, 1.181); acyclicWork 0.835, 0.922; vecWork 0.733, 0.793; arraysGrowing 0.759, 0.967 (`leak` 1.016, 1.337); arrays 1.216, 1.295; arraysOfObjects 1.364, 1.527 (those two are `@tsl/std`'s heap, TSL proper, not changed here).
+- **`auto`: nothing new.** Over the reshape benchmarks (counted, strict/leak/manual): operandWork 0.96/1.02/1.03 at -O1 and 1.11/1.18/1.19 at -O2, sequenceWork 1.21 and 1.59. What's left in operandWork is `get`'s check on a read the lowering made unchecked (6,000 instructions a call) and the growth path; in sequenceWork, `pop`'s room check and clearing of the popped slot. `TRUSTED_IN` is unchanged and so is coverage (`node tools/route-blockers.ts`, -O2, `auto`'s take: `strict` 30 exact + 18 reshaped, `leak` and `manual` 63 + 43 each, `rc` 19 + 0, as R15). JPEG: the same TIR at every level; S4: no TSL proper pin moved.
+- **Box 9:** the same two inequalities over each variant's median of iterations 180 to 199, the page shares as before; two bugs put into the diagnosis each fail it (in the box every run). Argued in 8.3.
+- **Box 3's memory:** 2.06 to 2.17 GiB alone → 1.81 and 1.85: `rcPrograms`' lowering of every program moved to a child process, and a compile worker past 512 MiB let go after its job (the workers' 640 MiB limit doesn't hold under `--max-old-space-size`).
+- **Pins:** 97 of 3,864 moved, all lowered, none of TSL proper's, none unexplained (75 pinned again, 22 in the read-only pre-strings file set aside by key).
+- *Rejected:* an unchecked read for lowered code (an API or rule change, the owner's call); changing `@tsl/alloc`'s heap (TSL proper's, and its pins mustn't move).
+- *Next:* the read the lowering proved, and `pop` in an array of numbers (a `holes` flag as `JsRoomArray` has), before `auto` can take reshaped class printing; then `@tsl/gc`'s step cost.
+
+## 2026-12-27
+
+**Coordinator: R15 not yet verified.** Its gate passed 270 of 271 jobs (93.8 min) and verify-manifest says NO MATCH. The failure is native-e/9@2.
+- What box 9 checks: `reused.ms > paced.ms`, comparing ONE wall-clock sample each (iteration 199). A single 6.8 ms hiccup at load 165 in the "budget 2" run flipped it. The program is built at -O0 explicitly, so R15's passes can't reach it, and it passed twice alone.
+- That is a fragile check, not an R15 bug, but "no MATCH, no acceptance" stands. Nothing is pushed until a gate matches.
+- *Decision:* R16 makes box 9's comparison robust without weakening it: the same inequality, over the median of the last N iterations of each variant instead of one sample. It argues in SPEC why that's at least as strong, and shows the check still fails when the diagnosis is broken (an injected bug). R16's gate from clean then verifies R15 and R16 together.
+- Accepted from R15's report: `conds` and `version` as designed (soundness argued in D73; four injected bugs caught; a new trap program with 30 cases); 842 pins moved, all at -O1/-O2 and every one re-pinned exactly; S4 -O2 median from 1.129× to 1.040× clang (matmul 2.53× to 1.05×); JPEG not slower.
+- The unit test change ("with `checks` off the bounds check stays" now also turns off `conds` and `version`) is not a weakening: the claim it tests is about `checks`, its assertions are unchanged, and -O1 assertions were added.
+- R13's "double bounds check" was really a repeated null test, which `conds` removes. operandWork and acyclicWork's cost is `JsArray` construction and an un-inlined `push`; `rc`'s is `@tsl/gc`'s freeing step (143 instructions against 65).
+- Memory margin: native-e/3@0 peaks at 2.84 GiB against the 3 GiB watchdog (R12 reported 2.32 as the highest). It's the same in the previous manifest, so it isn't R15's, but the margin is thin.
+
+**Decision: R16 takes `JsArray` construction and `push` in class printing**, the cost that keeps class printing slower than the direct route in `leak`/`manual` (operandWork 1.34–1.58×, acyclicWork 1.13–1.20×).
+- Build array literals at their final size in one step (no general growth), and give `push` a fast path the inliner takes, as the direct route's `__vec_new` and push do.
+- The -O0 pins of lowered programs using `JsArray` will move (D44 allows that for a library change; each is listed).
+- Also: the box 9 fix above, and native-e/3's memory margin (find what peaks; bring it back under about 2.5 GiB without raising the watchdog).
+- *Next:* `@tsl/gc`'s per-step cost (R17), then `rc` class printing in `auto`, then item 11.
+
+## 2026-12-26
+
+**R15 is built (builder's report; for the coordinator to verify).** Pile item 10, loop versioning, with check elimination where it serves it. SPEC 4.3 (`conds`, `version`), D44, D73 and M5's R15 record. Nothing was added to TSL; no check or case was dropped; no limit moved. `auto` takes nothing new (below).
+- **Measured first** (instruction counts, TCG with `TMK_ICOUNT=1`, and `tmk profile --instructions`):
+
+  | Program, -O1 unless said | Class printing / direct | Where the difference goes |
+  |---|---|---|
+  | JPEG decoder, one decode of tower-portrait | 94,163,802 / 93,415,815 = 1.0080 | 730,000 of the 748,000 extra in `toRgba`'s pixel loop: three null tests per pixel, each the second test of one SSA value on a path the first had decided (the rest: arena arrays made and grown, 28,000) |
+  | JPEG decoder at -O2 | 0.9978 | |
+  | operandWork, `manual` | 1.344 (-O2 1.576) | `JsArray`: `push` a call each element (18.8 instructions), growth from the constructor 68 to 88 a time against `__vec_new`'s 32 to 51; the same allocations in both routes |
+  | acyclicWork, `manual` | 1.127 (-O2 1.195) | the array literal built by the constructor and a growth, not one exact allocation |
+  | `rc` class printing, 29 programs | 18 of 29 over 1.00 at -O1, 19 at -O2, up to 2.19 | `@tsl/gc`'s freeing steps (`runSteps` 143 instructions a step against `__rc_work`'s 65) and `tryMake` (adv_forof_mutation.ts) |
+
+  So checks were the cost only in the JPEG decoder's class printing, and there not the double bounds check R13 named but a repeated null test.
+- **Built** (compiler/tir/passes/conds.ts, version.ts; manager.ts):
+  - `conds`, -O1 and -O2: a test a test above it answered goes. Facts come from an edge into a block reached by that edge alone (the entry block excepted) and from a bounds check passed; they hold in every block that block dominates. A branch on a known value becomes a jump, an integer compare the facts decide becomes its constant, a bounds check with `i < n` known goes. One walk of the dominator tree.
+  - `version`, -O2: loop versioning. A guard in the preheader (plain arithmetic and compares of values from outside the loop, a divisor made at least 1) chooses a fast copy without the checks it proves, or the loop as it was. Indices: from outside the loop, the counter plus an offset, or the counter times a stride plus an offset, against a length from outside the loop. Sound by construction: the fallback is untouched, the guard can't trap or write, and its values can't change in the loop. Not the "hoisting with a guard" D73 rejects: no check moves or runs earlier.
+- **After** (instruction counts): the JPEG decoder's class printing at -O1 is 1.0003 to 1.0029 the direct route over six fixtures (was 1.0080 on tower), 0.990 to 0.994 at -O2; the direct route itself 1.5% fewer instructions at -O1 and 1.7% at -O2. Timed on HVF, two runs, load 5.5 to 6.5: within the timer's noise at -O1, 0.95 to 0.99 at -O2. operandWork and acyclicWork in class printing still 1.09 to 1.38 (their cost is `JsArray`'s, not checks'). S4's median native/clang at -O2 1.040 in both runs (1.129 with the passes off): matmul 2.53 to 1.05× clang, its fast inner loop free of checks; at -O1 1.181 and 1.177 (1.173 off), every S4 program's -O1 TIR byte-identical with and without the passes, so that's noise. The JPEG decoder against V8 1.076/1.081 at -O1 and 1.102/1.103 at -O2 (1.078 and 1.099 off). Nothing slower. -O1 compiles in 1.158× -O0's time (1.152× off).
+- **`auto`:** takes nothing new. In `leak` and `manual` a reshaped class printing already falls back to phase 1's, which `auto` takes. The JPEG decoder's class printing has reshape kinds `auto` doesn't trust. `rc`'s class printing is still slower for reasons that aren't checks. Coverage is unchanged: `strict` 30 exact + 18 reshaped, `leak` and `manual` 63 + 43 each, `rc` 19 + 0.
+- **Not done, needs its own step:** the per-turn array cost. Both routes allocate the same per turn, so stack placing or hoisting wouldn't close the gap. The gap is `JsArray`'s code: construction through the general growth, and `push` not inlined. Changing `JsArray` moves -O0 pins of every lowered program that uses it, so it should be a round of its own.
+- **Injected bugs**, each caught by corpus/trap/loop_versions.ts at -O2 (pipe-d box 50; opt-a box 12 through a new first step): a fact from an edge that doesn't dominate (1 case), the guard one turn short (7), a bound or length the loop changes read once for the guard (2), every guard against the first check's length (1).
+- **Pins:** 842 of 3,862 moved, all at -O1 or -O2, none at -O0, none unexplained, 53 of them TSL proper's. Each is pinned again in its file, so every pin is still compared exactly. tools/r15-moved.ts lists each one with the pass that moved it and that pass's counts for the build (`R15_REPINNED`).
+- **Harness:** pipe-d boxes 49 and 50, tools/r15-tests.ts, tools/r15-pins.ts. tslc's `TMK_TRUST_IN` lets tools/r14-time.ts time what `auto` would take (measurement only). One existing unit test's assertion now also turns `conds` and `version` off: they prove the same check `checks` does, and the test is about `checks`.
+- *Rejected:* versioning at -O1 (copies are -O2's, D73); trusting `rc` class printing (measured slower); changing `JsArray` this round (above).
+- *Next:* `JsArray`'s construction and `push` in class printing, then `@tsl/gc`'s step cost, before item 11.
+
 ## 2026-12-25
 
 **Coordinator: R14 verified** (manifest MATCH, tree b918d320cb253fd4; sample 8/8 the same, seed 16253; gate 93.4 min, 269 of 269).

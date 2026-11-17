@@ -17,6 +17,7 @@ import ts from "typescript";
 import type { Diag } from "./diag.ts";
 import { findTslJson, repoRelative } from "./program.ts";
 import { cycleGraph } from "./cycle-graph.ts";
+import { r18Off } from "./down-model.ts";
 
 export interface RcExpansion {
   texts: Map<string, string>; // absolute path -> expanded module text
@@ -34,6 +35,36 @@ export function isRcModule(file: string): boolean {
 
 const rcModuleCache = new Map<string, boolean>();
 
+/**
+ * R19: whether a class is declared in a lowered `rc` package (`tmk lower --emit tsl`'s), which can't import @tsl/unsafe
+ * (TSL1023), whose every count this expansion places (isCountedExactly), and which isn't tagged `@tsl.stack` (R18): so every
+ * object of it is in a counted slot a store's `make` placed, which @tsl/gc reuses only once no reference to its object is
+ * left (3.5's proof), and nothing but its own code writes its fields (tslc's markInvariantFields).
+ */
+export function loweredRcHeapClass(decl: unknown): boolean {
+  const d = decl as ts.ClassDeclaration | undefined;
+  if (d === undefined || !ts.isClassDeclaration(d)) return false;
+  return isCountedExactly(d) && !stackTagged(d) && inLoweredRc(d);
+}
+
+/** Whether a declaration is in a lowered `rc` package (its tsl.json's `lowered.memory`). */
+function inLoweredRc(d: ts.Node): boolean {
+  const sf = d.getSourceFile?.();
+  if (sf === undefined) return false;
+  let hit = loweredRcCache.get(sf.fileName);
+  if (hit === undefined) {
+    const pkg = findTslJson(sf.fileName);
+    hit =
+      pkg !== null &&
+      pkg.lowered !== undefined &&
+      (pkg.lowered as { memory?: unknown }).memory === "rc";
+    loweredRcCache.set(sf.fileName, hit);
+  }
+  return hit;
+}
+
+const loweredRcCache = new Map<string, boolean>();
+
 /** R10: a class whose every member is a field initialised by `array(…)`: a layout class's storage, which holds scalars. */
 function isLayoutStorage(st: ts.ClassDeclaration): boolean {
   if ((process.env.TMK_R10_OFF ?? "").split(",").includes("typed")) return false;
@@ -49,6 +80,67 @@ function isLayoutStorage(st: ts.ClassDeclaration): boolean {
         m.initializer.expression.text === "array",
     )
   );
+}
+
+/**
+ * R18: a class `rc` class printing tagged `@tsl.stack` in a lowered package (emit-tsl.ts's planStack): the lowering keeps
+ * every object of it on its function's stack, as the direct route does, so it isn't counted. Like a layout class's storage
+ * (R10), it has no store and no release function, a `new` of it stays a `new`, and its references are never shared or
+ * dropped; tslc's escape checking then puts that `new` on the stack, as a `strict` package's, and refuses any program where
+ * one could be reached after its frame (3.5). What it holds is numbers and booleans alone, so nothing counted is held by an
+ * object no count tracks. Anywhere else the tag means nothing: a hand-written package's classes are all counted.
+ */
+export function stackTagged(st: ts.ClassDeclaration): boolean {
+  if (r18Off("stack")) return false;
+  const sf = st.getSourceFile();
+  if (!/@tsl\.stack\b/.test(sf.text.slice(st.getFullStart(), st.getStart(sf)))) return false;
+  const low = findTslJson(sf.fileName)?.lowered as { memory?: unknown } | undefined;
+  return low?.memory === "rc";
+}
+
+/**
+ * R18: why a `@tsl.stack` class can't be one, or null: a base or a tail, or a field that isn't a number, a boolean or an
+ * object of another such class (which holds no count either).
+ */
+function stackRefusal(
+  st: ts.ClassDeclaration,
+  checker: ts.TypeChecker,
+  seen = new Set<ts.ClassDeclaration>(),
+): string | null {
+  if (st.heritageClauses !== undefined || st.typeParameters !== undefined)
+    return "a base or type parameters";
+  seen.add(st);
+  const NUM = ts.TypeFlags.NumberLike | ts.TypeFlags.BooleanLike | ts.TypeFlags.BigIntLike;
+  const scalar = (t: ts.Type): boolean => {
+    if (t.flags & NUM) return true;
+    if (t.flags & (ts.TypeFlags.Null | ts.TypeFlags.Undefined)) return true;
+    if (t.isUnion()) return t.types.every(scalar);
+    // a flavoured number (`i32`): a number and a brand
+    if (t.isIntersection()) return t.types.some((p) => (p.flags & NUM) !== 0);
+    // another class kept on the stack (one already being looked at, in a cycle of them, is taken as one)
+    const d = t.getSymbol()?.valueDeclaration;
+    return (
+      d !== undefined &&
+      ts.isClassDeclaration(d) &&
+      stackTagged(d) &&
+      (seen.has(d) || stackRefusal(d, checker, seen) === null)
+    );
+  };
+  for (const m of st.members) {
+    if (!ts.isPropertyDeclaration(m)) continue;
+    if (m.modifiers?.some((x) => x.kind === ts.SyntaxKind.StaticKeyword) === true)
+      return "a static field";
+    if (
+      m.initializer !== undefined &&
+      ts.isCallExpression(m.initializer) &&
+      ts.isIdentifier(m.initializer.expression) &&
+      m.initializer.expression.text === "tail"
+    )
+      return "a tail";
+    if (!scalar(checker.getTypeAtLocation(m)))
+      return `a field that isn't a number, a boolean or a @tsl.stack class's object (${m.name.getText()})`;
+  }
+  return null;
 }
 
 /**
@@ -91,6 +183,7 @@ interface CountedClass {
   file: string;
   cyclic?: boolean; // the type graph puts it in a cycle (D41, R1c): its release function visits a vector's elements in place for a scan
   leaf?: boolean; // R4: no slots of its own, so freeing one is only giving its block back (isLeaf)
+  stack?: boolean; // R18: tagged @tsl.stack, counted only by the injected bug `r18-stack-counted`, whose `new` stays a `new`
 }
 
 interface Val {
@@ -198,6 +291,7 @@ export function expandRcProgram(program: ts.Program, rootFile: string): RcExpans
 
 class Expander {
   classes = new Map<ts.Symbol, CountedClass>();
+  stackClasses = new Set<ts.ClassDeclaration>(); // R18: tagged @tsl.stack, uncounted, their members expanded all the same
   quiet = new Map<ts.Node, boolean>();
   diags: Diag[] = [];
   storesUsed = new Set<CountedClass>();
@@ -361,6 +455,25 @@ class Expander {
         // function makes, R9) isn't counted: it holds no reference and has no tail, and a `new` of it stays a `new`, which
         // tslc puts on the stack, or refuses where its view would outlive the frame, as a `strict` package's stack object.
         if (isLayoutStorage(st)) continue;
+        // R18: a class the printing keeps on the stack isn't counted either (stackTagged), once it's one that can be
+        const stack = stackTagged(st);
+        if (stack) {
+          // the injected bug (TMK_TEST_RC_TSL=r18-stack-refs): a tagged class taken whatever it holds
+          const why = fault() === "r18-stack-refs" ? null : stackRefusal(st, this.checker);
+          if (why !== null) {
+            this.diag(
+              st.name,
+              "TSL9001",
+              `rc: ${st.name.text} is tagged @tsl.stack, but has ${why}`,
+            );
+            continue;
+          }
+          // the injected bug (TMK_TEST_RC_TSL=r18-stack-counted): its `new` left on the stack, its references counted still
+          if (fault() !== "r18-stack-counted") {
+            this.stackClasses.add(st);
+            continue;
+          }
+        }
         const name = st.name.text;
         const tail = st.members.some(
           (m) =>
@@ -378,6 +491,7 @@ class Expander {
           tail,
           file: sf.fileName,
           cyclic: (this.groups.get(st) ?? 0) !== 0,
+          ...(stack ? { stack: true } : {}),
         });
       }
     }
@@ -692,6 +806,10 @@ class Expander {
           body.push(pre + this.classDecl(st, c));
           continue;
         }
+        if (this.stackClasses.has(st)) {
+          body.push(pre + this.stackClassDecl(st));
+          continue;
+        }
       }
       if (ts.isFunctionDeclaration(st) && st.body !== undefined) {
         body.push(pre + this.functionDecl(st));
@@ -872,6 +990,40 @@ class Expander {
   }
 
   // --- classes
+
+  /**
+   * R18: a class kept on the stack, which isn't counted: its fields as written (numbers, booleans and references to other
+   * such classes, nothing counted), and its constructor and methods expanded as any function is, since what they make,
+   * read and store of counted classes is counted as anywhere else.
+   */
+  stackClassDecl(st: ts.ClassDeclaration): string {
+    const sf = this.sf;
+    const lines: string[] = [sf.text.slice(st.getStart(sf), st.members.pos)];
+    for (const m of st.members) {
+      // each member's leading text as it was, so what follows keeps its lines (a diagnostic's place is the source's)
+      const pre = sf.text.slice(m.getFullStart(), m.getStart(sf));
+      if (ts.isConstructorDeclaration(m) && m.body !== undefined) {
+        const f = new FnExpand(this, m, true);
+        f.ctorInit = new Set();
+        lines.push(
+          `${pre}constructor(${m.parameters.map((p) => p.getText(sf)).join(", ")}) ${f.body(m.body, [])}`,
+        );
+        continue;
+      }
+      if (
+        (ts.isMethodDeclaration(m) ||
+          ts.isGetAccessorDeclaration(m) ||
+          ts.isSetAccessorDeclaration(m)) &&
+        m.body !== undefined
+      ) {
+        lines.push(pre + this.methodText(m));
+        continue;
+      }
+      lines.push(pre + m.getText(sf));
+    }
+    lines.push(sf.text.slice(st.members.end, st.end));
+    return lines.join("");
+  }
 
   classDecl(st: ts.ClassDeclaration, c: CountedClass): string {
     const sf = this.sf;
@@ -1528,6 +1680,8 @@ class FnExpand {
     const args = this.args(e, e.arguments ?? []);
     const text = `new ${e.expression.getText(this.sf)}${e.typeArguments !== undefined ? `<${e.typeArguments.map((t) => t.getText(this.sf)).join(", ")}>` : ""}(${args.join(", ")})`;
     if (cls === null) return this.val(text, e);
+    // the injected bug `r18-stack-counted`: a stack object, counted all the same, which @tsl/gc's drop then frees
+    if (cls.stack === true) return { ...this.val(text, e), own: true, root: "owned" };
     if (cls.tail)
       throw new Unsupported(
         e,

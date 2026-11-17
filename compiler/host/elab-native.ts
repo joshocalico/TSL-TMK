@@ -2117,7 +2117,13 @@ export class NativeElaborator extends Elaborator {
         params: [thisVar, ...params],
         ret: T.void,
         exported: false,
-        attrs: [],
+        // R16: a constructor takes `@tsl.inline` and `@tsl.noinline` as a method does (3.7): only a hint, as everywhere
+        attrs:
+          ctor !== undefined
+            ? ["inline", "noinline"].filter((a) =>
+                new RegExp(`@tsl\\.${a}\\b`).test(this.docOf(ctor)),
+              )
+            : [],
         body: [],
         at: this.loc(ctor ?? decl),
         display: `new ${c.key}`,
@@ -4116,6 +4122,24 @@ export class NativeElaborator extends Elaborator {
           info: { fns: this.releaseInsts(e) },
         });
       }
+      case "releaseIsEmpty": {
+        // R17: whether a release function is one of the closed set whose body is `return 0;` and nothing else (a class with
+        // no slots of its own, as tslc's expansion writes a leaf's, a weak reference's or a room's): calling it does
+        // nothing and gives 0, so freeing may take that step without the call. Its code address compared with each such
+        // function's, as releaseIndex compares it with all of them; false for any other, which is always safe.
+        const f = this.expr(a[0]!);
+        if (f.ty.k === "unk") return mk(T.bool, { k: "err" });
+        if (this.dry) return mk(T.bool, { k: "err" });
+        const fns = this.releaseFns.filter(isEmptyRelease).map((d) => this.instance(d, [], e));
+        const idx = mk(T.u32, {
+          k: "builtin",
+          name: "unsafe.releaseIndex",
+          args: [f],
+          loc,
+          info: { fns },
+        });
+        return mk(T.bool, { k: "cmp", op: "ne", a: idx, b: mk(T.u32, { k: "lit", value: 0 }) });
+      }
       case "callRelease": {
         // Closed-world dispatch (D70's form, R1d): the number compared with each release function's in turn, each arm a
         // direct call, and trap 18 for a number that's none of them, which only memory written unsafely can give.
@@ -4164,12 +4188,23 @@ export class NativeElaborator extends Elaborator {
         }
         return mk(T.usize, { k: "seq", items, result: out });
       }
-      case "retireObject":
+      case "retireObject": {
+        // R17: natively retiring is nothing, and an `objectAt(slot)` given to it straight is only a read of the slot's
+        // generation, so it isn't evaluated either (`@tsl/gc`'s giveBack): that read would otherwise be kept, as a load
+        // -O0 ran (keep.ts), where nothing uses it. Anything else is evaluated for what it does, as before.
+        let x = a[0]!;
+        while (ts.isParenthesizedExpression(x)) x = x.expression;
+        if (ts.isCallExpression(x) && ts.isIdentifier(x.expression)) {
+          const sym = this.symbolOf(x.expression);
+          if (sym !== undefined && this.isUnsafeSymbol(sym) && sym.name === "objectAt")
+            return mk(T.void, { k: "tuple", items: [] });
+        }
         return mk(T.void, {
           k: "seq",
           items: [this.expr(a[0]!)],
           result: mk(T.void, { k: "tuple", items: [] }),
         });
+      }
       case "pageRunFreed": {
         // No code at all, arguments included, in a program with no @tsl/std: this is how Heap stays byte-identical there.
         const hook = this.runFreedHook;
@@ -4229,4 +4264,22 @@ export class NativeElaborator extends Elaborator {
         );
     }
   }
+}
+
+/**
+ * R17: a release function whose body is `return 0;` alone, its parameters with no initialisers: calling it has no effect
+ * and gives 0, whatever it's given (`releaseIsEmpty`).
+ */
+function isEmptyRelease(d: ts.FunctionDeclaration): boolean {
+  // the injected `release-empty-all` bug (R17): every release function taken as doing nothing, so freeing gives an object
+  // with slots back without visiting them, and what it held is never dropped
+  if (process.env.TMK_TEST_TSL === "release-empty-all") return true;
+  const body = d.body;
+  if (body === undefined || body.statements.length !== 1) return false;
+  if (d.parameters.some((p) => p.initializer !== undefined)) return false;
+  const st = body.statements[0]!;
+  if (!ts.isReturnStatement(st) || st.expression === undefined) return false;
+  let x = st.expression;
+  while (ts.isParenthesizedExpression(x)) x = x.expression;
+  return ts.isNumericLiteral(x) && Number(x.text) === 0;
 }

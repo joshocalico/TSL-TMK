@@ -319,22 +319,23 @@ export async function defineNativeE(M: MilestoneDef): Promise<void> {
     const faultOff = await rcTests.faultInjection("hvf", jobs, { cycles: false });
     M.keep("faultOff", faultOff);
     M.keep("diag", diag);
-    const row = (what: string, it: number): (typeof diag.rows)[0] | undefined =>
-      diag.rows.find((r) => r.what.startsWith(what) && r.iteration === it);
-    const reused = row("rc, collector off, budget 32", 199);
-    const notReused = row("rc, collector off, blocks", 199);
-    const paced = row("rc, collector off, budget 2", 199);
-    const collectorOn = row("rc, collector on", 199);
-    const diagFound =
-      reused !== undefined &&
-      notReused !== undefined &&
-      paced !== undefined &&
-      collectorOn !== undefined &&
-      reused.samePage < 0.1 &&
-      notReused.samePage > 0.9 &&
-      paced.samePage > 0.9 &&
-      reused.ms > notReused.ms &&
-      reused.ms > paced.ms;
+    // R16: the same inequalities, each variant's time the median of its iterations 180 to 199 rather than iteration 199's
+    // one sample, which a single scheduling hiccup flipped (R15's gate); the share on one page as before, at 199, with the
+    // same thresholds (SPEC M5's R16 record says why this is at least as strong). tools/r16-tests.ts's box9Check.
+    const { box9Check, BOX9_FAULTS } = await import("../r16-tests.ts");
+    const check = box9Check(diag);
+    // Not vacuous: each bug put into the diagnosis fails the check (the free list keeping order, the reused variant's work
+    // a tenth), with what of it failed
+    const faulty: string[] = [];
+    const missed: string[] = [];
+    for (const f of BOX9_FAULTS) {
+      const c = box9Check(await rcTests.listDiagnosis("hvf", f.name));
+      faulty.push(
+        `${f.name}: ${c.ok ? "NOT CAUGHT" : `caught (${[c.samePage ? "" : "same page", c.timing ? "" : "medians"].filter((x) => x !== "").join(", ")})`}`,
+      );
+      if (c.ok) missed.push(`${f.name} (${f.what}) wasn't caught: ${c.text}`);
+    }
+    const diagFound = check.ok && missed.length === 0;
     const accounted =
       faultOff.silent === faultOff.silentNeverRan &&
       faultOff.silentSites.length === 0 &&
@@ -347,9 +348,11 @@ export async function defineNativeE(M: MilestoneDef): Promise<void> {
           faultOff.decNeverReached +
           faultOff.decImmortal.length;
     report({
-      box: "9. The three leftovers. The list's slowdown is measured apart: it's the free list losing the list's order, not counts, and it's gone with the collector linked. Every omitted increment and decrement that went unnoticed is accounted for, with the test gaps closed",
+      box: "9. The three leftovers. The list's slowdown is measured apart: it's the free list losing the list's order, not counts, and it's gone with the collector linked (each variant's time the median of its last 20 iterations, and two bugs put into the diagnosis each failing it, R16). Every omitted increment and decrement that went unnoticed is accounted for, with the test gaps closed",
       ok: diagFound && accounted && !faultOff.skipped,
-      detail: `list, at iterations 1, 20, 60 and 199: ${[...new Set(diag.rows.map((r) => r.what))]
+      detail: `list: ${check.text}${check.samePage ? "" : " (same-page shares wrong)"}${check.timing ? "" : " (the medians' order wrong)"}; bugs put in: ${faulty.join("; ")}; at iterations 1, 20, 60 and 199: ${[
+        ...new Set(diag.rows.map((r) => r.what)),
+      ]
         .map(
           (w) =>
             `${w}: ${diag.rows
@@ -360,7 +363,11 @@ export async function defineNativeE(M: MilestoneDef): Promise<void> {
         .join(
           "; ",
         )}. Increments left out, of ${faultOff.injected}: ${faultOff.trapped16} trapped 16, ${faultOff.otherFailures} gave a wrong answer or a fatal exception, ${faultOff.silent} did nothing: ${faultOff.notInTheCode} not in the code at all (worked out, then not used), ${faultOff.reachedOnlyNull} only ever on a null, ${faultOff.neverReached} never reached. Decrements left out, of ${faultOff.decTried}: ${faultOff.decLeaked} showed as a leak, ${faultOff.decImmortal.length} an extra count on what module state holds for good (${faultOff.decImmortal.join(", ")}), ${faultOff.decReachedOnlyNull} only ever on a null, ${faultOff.decNotInTheCode} not in the code at all, ${faultOff.decNeverReached} never reached (${faultOff.decNeverReachedSites.join(", ")})`,
-      failures: accounted ? [] : [JSON.stringify(faultOff).slice(0, 1200)],
+      failures: [
+        ...(check.ok ? [] : [`the list's diagnosis: ${check.text}`]),
+        ...missed,
+        ...(accounted ? [] : [JSON.stringify(faultOff).slice(0, 1200)]),
+      ],
     });
   });
 

@@ -1,0 +1,14 @@
+[
+  { "fn": "leavesQueued", "args": [0], "rcOnly": true, "expect": 0 },
+  { "fn": "leavesQueued", "args": [10], "rcOnly": true, "expect": 10010010 },
+  { "fn": "leavesQueued", "args": [32], "rcOnly": true, "expect": 32032032 },
+  { "fn": "leavesQueued", "args": [33], "rcOnly": true, "expect": 32032033 },
+  { "fn": "leavesQueued", "args": [100], "rcOnly": true, "expect": 32032100 },
+  { "fn": "mixedQueued", "args": [0], "rcOnly": true, "expect": 1 },
+  { "fn": "mixedQueued", "args": [1], "rcOnly": true, "expect": 8000081 },
+  { "fn": "mixedQueued", "args": [4], "rcOnly": true, "expect": 32000321 },
+  { "fn": "mixedQueued", "args": [5], "rcOnly": true, "expect": 32000401 },
+  { "fn": "mixedQueued", "args": [20], "rcOnly": true, "expect": 32001601 },
+  { "fn": "budgetsLeaves", "args": [3], "rcOnly": true, "expect": 50707 },
+  { "fn": "budgetsLeaves", "args": [20], "rcOnly": true, "expect": 51015 }
+]

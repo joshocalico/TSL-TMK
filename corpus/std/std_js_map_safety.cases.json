@@ -1,0 +1,4 @@
+[
+  { "fn": "trySetFailsPartWay", "args": [], "expect": true },
+  { "fn": "trySetFailsPartWayKeys", "args": [], "expect": true }
+]

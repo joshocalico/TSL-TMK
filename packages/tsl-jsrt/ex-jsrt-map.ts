@@ -307,14 +307,14 @@ export class JsMap<K, V> {
     private withVals: bool,
     private giveBack: bool,
   ) {
-    this.keys = new JsArray(kd, 0, giveBack);
-    this.vals = new JsArray(vd, 0, giveBack);
-    this.chain = new JsArray(u32, 0, giveBack);
-    this.heads = new JsArray(u32, 0, giveBack);
-    this.okeys = new JsArray(kd, 0, giveBack);
-    this.ovals = new JsArray(vd, 0, giveBack);
-    this.ochain = new JsArray(u32, 0, giveBack);
-    this.oheads = new JsArray(u32, 0, giveBack);
+    this.keys = new JsArray(kd, 0, giveBack, true);
+    this.vals = new JsArray(vd, 0, giveBack, true);
+    this.chain = new JsArray(u32, 0, giveBack, true);
+    this.heads = new JsArray(u32, 0, giveBack, true);
+    this.okeys = new JsArray(kd, 0, giveBack, true);
+    this.ovals = new JsArray(vd, 0, giveBack, true);
+    this.ochain = new JsArray(u32, 0, giveBack, true);
+    this.oheads = new JsArray(u32, 0, giveBack, true);
   }
 
   get size(): u32 {
@@ -420,7 +420,7 @@ export class JsMap<K, V> {
    * which keeps what it's made with too, as each new array before R3 was kept).
    */
   private forget<T>(d: ElemOf<T>, a: JsArray<T>): void {
-    const kept = new JsArray(d, 0, false);
+    const kept = new JsArray(d, 0, false, true);
     kept.adopt(a);
   }
 
@@ -515,7 +515,7 @@ export class JsMap<K, V> {
     if (g === null || !g.live) return;
     let r = g.keep;
     if (r === null) {
-      r = new JsArray(u32, 0, this.giveBack);
+      r = new JsArray(u32, 0, this.giveBack, true);
       if (this.tables) g.keep = r;
     }
     r.adopt(this.ochain);

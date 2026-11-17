@@ -1,5 +1,6 @@
 // TIR for native TSL's objects: class fields, stack `new`, closures, raw pointers, generation checks and
 // layout views (SPEC 3.4, 3.5, 4.3). lower.ts calls in here for these, and otherwise knows nothing of them.
+import ts from "typescript";
 import type { Block, Func, Operand, TirType } from "../tir/ir.ts";
 import type { FnLower, ModuleCtx } from "./lower.ts";
 import {
@@ -15,7 +16,7 @@ import {
   type TypedModule,
   type Var,
 } from "./types.ts";
-import { untaggedCounted } from "./expand-rc.ts";
+import { stackTagged, untaggedCounted } from "./expand-rc.ts";
 import { tslOptOff } from "./program.ts";
 import { walkStmts, walkTE } from "./walk.ts";
 
@@ -496,7 +497,22 @@ export function lowerNativeBuiltin(fl: FnLower, te: TE): number[] {
           Math.min(Math.max(te.c.align, 8), 16),
           fl.trapOp("memory", 14, te.at ?? ""),
         );
-        zeroFill(fl, p, te.c.size);
+        // R18: an `rc` class printing keeps on the stack (`@tsl.stack`) is zeroed as the direct route zeroes its stack
+        // objects, one `mem.fill`, which scalar replacement takes (sroa.ts) where its field-by-field stores weren't
+        const decl = te.c.decl as ts.Node | undefined;
+        if (decl !== undefined && ts.isClassDeclaration(decl) && stackTagged(decl))
+          fl.emit(
+            "intrinsic",
+            [
+              { t: "name", name: "mem.fill" },
+              v(p),
+              v(fl.iconst("i32", 0)),
+              // the whole slot, which is 8 bytes at least (entryAlloca), as scalar replacement wants it
+              v(fl.iconst("ix", Math.max(te.c.size, 8))),
+            ],
+            [],
+          );
+        else zeroFill(fl, p, te.c.size);
       }
       const self = heapSelf ?? fl.ptrToI64(p);
       // An initialiser of zero needs no store where the object is already zero: on the stack and in `manual` it was

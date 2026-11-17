@@ -2,6 +2,7 @@
 // ask beyond the dual-route differential itself: the bugs put into each new transform, and which programs catch each.
 import { join } from "node:path";
 import { ROOT, wrongAnswers, type Engines } from "./corpus.ts";
+import { faultFailures, patchEnv } from "./faults.ts";
 import type { Accel } from "./qemu-run.ts";
 
 /**
@@ -180,7 +181,8 @@ export async function r2FaultRun(
 ): Promise<{ caught: number; answers: number; first: string; broken: boolean }> {
   const env: Record<string, string | undefined> = { TMK_OPT: "2" };
   if (f.where === "expansion") env.TMK_TEST_RC_TSL = f.name;
-  if (f.where === "library") env.TSL_TEST_PATCH = JSON.stringify(f.patch);
+  // checked against the source first (SPEC 8.3): a patch that doesn't apply throws, failing the box, never caught
+  if (f.where === "library") env.TSL_TEST_PATCH = patchEnv(f.patch!);
   if (f.where === "lowering") env.TMK_TEST_DOWN = f.name;
   if (f.where === "backend") env.TMK_TEST_TSL = f.name; // R4: tslc's own, which every TSL program goes through
   return withEnv(env, async () => {
@@ -207,6 +209,7 @@ export async function r2FaultRun(
       const r = await runNative("rc", [accel], jobs, f.handWritten, engines);
       failures.push(...r.failures);
     }
+    faultFailures(failures, f.name);
     return {
       caught: failures.length,
       // R7: the failures that are wrong answers, not cases out of time, whose number depends on the host's load

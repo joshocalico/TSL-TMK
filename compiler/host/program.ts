@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import ts from "typescript";
 import type { Diag } from "./diag.ts";
+import { applyTestPatch, patchNames, testPatches } from "./test-patch.ts";
 
 export function repoRoot(): string {
   let dir = dirname(new URL(import.meta.url).pathname);
@@ -129,25 +130,18 @@ export function createTslProgram(
   const reuse = compileReuse();
   if (reuse) shareResolution(host, options, outside);
   host.getSourceFile = (name, languageVersion, onError, fresh) => {
-    // Tests of @tsl/std put a bug in it to show they catch it (`tmk milestone native-g`). It's the same text otherwise.
-    // One patch, or a list (tools/r6-pins.ts puts R6's library changes back as they were, file by file).
-    const patch = process.env.TSL_TEST_PATCH;
-    const patches =
-      patch === undefined
-        ? []
-        : ([JSON.parse(patch)].flat() as { file: string; from: string; to: string }[]).filter((p) =>
-            name.endsWith(p.file),
-          );
-    if (patches.length > 0) {
-      let text = readFileSync(name, "utf8");
-      for (const p of patches) {
-        if (!text.includes(p.from)) throw new Error(`TSL_TEST_PATCH: no ${p.from} in ${p.file}`);
-        text = text.replace(p.from, p.to);
-      }
-      return ts.createSourceFile(name, text, languageVersion, true);
-    }
+    // An rc module's expansion first: it was made from this module as patched, if it was (R18).
     const expanded = texts?.get(name);
     if (expanded !== undefined) return ts.createSourceFile(name, expanded, languageVersion, true);
+    // Tests of @tsl/std put a bug in it to show they catch it (`tmk milestone native-g`). It's the same text otherwise.
+    // One patch, or a list (tools/r6-pins.ts puts R6's library changes back as they were, file by file). A patch whose
+    // text isn't there exactly as many times as it says throws (SPEC 8.3's fault rule): a harness failure, never caught.
+    const patches = testPatches(process.env.TSL_TEST_PATCH).filter((p) => patchNames(name, p));
+    if (patches.length > 0) {
+      let text = readFileSync(name, "utf8");
+      for (const p of patches) text = applyTestPatch(text, p);
+      return ts.createSourceFile(name, text, languageVersion, true);
+    }
     if (reuse && libraryFile(name)) {
       // By its text as read now: the same text and settings give the same parse, and its binding with it.
       const text = host.readFile(name);
@@ -303,10 +297,11 @@ export function packageLowerMemory(file: string): LowerMemorySetting {
  */
 /**
  * Which of TSL's speed-ups are switched off, for measuring each and for finding what moved a pin (D64): the classes' four,
- * `bytefill`, a byte array's `fill` as one memset (D66), and `clsid`, class ids' loads noted as invariant (D73).
+ * `bytefill`, a byte array's `fill` as one memset (D66), `clsid`, class ids' loads noted as invariant (D73), and (R19)
+ * `ctorfields`, a lowered `rc` package's fields its constructors alone store noted invariant too.
  */
 export function tslOptOff(
-  name: "prefix" | "init" | "mask" | "ctorzero" | "bytefill" | "clsid",
+  name: "prefix" | "init" | "mask" | "ctorzero" | "bytefill" | "clsid" | "ctorfields",
 ): boolean {
   return (process.env.TMK_TSL_OPT_OFF ?? "").split(",").includes(name);
 }
@@ -350,7 +345,12 @@ export function configDiags(pkg: TslPackage): Diag[] {
     const why = loweredWhy(pkg.lowered);
     if (why !== null)
       out.push({ code: "TSL1019", file, ...positionOf(pkg.jsonText, "lowered"), msg: why });
-    if (pkg.noStd === true || (pkg.memory !== undefined && pkg.memory !== "strict"))
+    // R18 (the owner's ruling, 2027-01-01): nor "unsafeModules", so nothing in a lowered package can import @tsl/unsafe
+    if (
+      pkg.noStd === true ||
+      (pkg.memory !== undefined && pkg.memory !== "strict") ||
+      pkg.unsafeModules.length > 0
+    )
       out.push({
         code: "TSL1023",
         file,

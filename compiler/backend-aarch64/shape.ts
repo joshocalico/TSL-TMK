@@ -271,9 +271,10 @@ const LOAD_BYTES: Record<string, number> = {
  * R7: an explicit null check whose next operation is a load through the same reference, at an offset inside the null guard,
  * left to the load. `brif (icmp.eq x, 0), T, S` with T a block that only traps with code 6 (`!` on null), and S reached from
  * this branch alone, whose instructions up to its first that isn't pure are a load from `x` plus a constant offset (through
- * `bitcast` and a `gep` with a constant index): the branch becomes a jump to S, and the load is returned, by its result, to
- * be listed in the image's table of loads standing for a null check (`__rt_null_pcs`), with its offset. A fault at that
- * instruction at exactly that address, the offset itself, is the reference having been null, and is trap 6 whether a
+ * `bitcast`, `ref.addr` since R19, and a `gep` with a constant index): the branch becomes a jump to S, and the load is
+ * returned, by its result, to be listed in the image's table of loads standing for a null check (`__rt_null_pcs`), with its
+ * offset. A fault at that instruction at exactly that address, the offset itself, is the reference having been null, and
+ * is trap 6 whether a
  * `native.try` is active or not (`__rt_exception`), exactly what the check's own trap reported: inside a try `TMK:C ... T 6`,
  * outside `TMK:PANIC trap 6`. Anything else keeps its old report outside a try (`TMK:FATAL`, with the ESR): a load nowhere in
  * the table, and a listed one through a reference that wasn't null but faulted all the same (a `manual` or unsafe program's
@@ -347,6 +348,14 @@ export function implicitNullChecks(
       // The bug put into this rule (OPT_FAULTS, R7): a store before the load is passed over, so it runs before the fault
       // where -O0's check trapped first.
       if (q[0] === "store" && faults.has("b3-null-past-store")) continue;
+      // R19: a reference's address (`ref.addr`, its generation bits masked off) is followed as a `bitcast` is: null's is 0,
+      // so the load through it is at the offset itself, as through the reference (a class printed in `rc`, or any class
+      // whose references carry a tag, read after a `!`)
+      if (ins.op === "ref.addr") {
+        const o = off.get(vals[0]!);
+        if (o !== undefined) off.set(ins.res[0]!, o);
+        continue;
+      }
       if (!isPureOp(ins.op)) return;
       if (q[0] === "bitcast" && (q[1] === "ptr" || q[1] === "i64")) {
         const o = off.get(vals[0]!);

@@ -9,6 +9,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ROOT, wrongAnswers } from "./corpus.ts";
+import { faultFailures, patchEnv } from "./faults.ts";
 import { buildDownImage, bulkFor, downResults } from "./native-exec.ts";
 import { type Accel, qemuRun } from "./qemu-run.ts";
 
@@ -360,7 +361,7 @@ export async function r11FaultRun(
   jobs: number,
 ): Promise<{ caught: number; answers: number; first: string; broken: boolean }> {
   const env: Record<string, string | undefined> =
-    f.where === "patch" ? { TSL_TEST_PATCH: JSON.stringify(f.patch) } : {};
+    f.where === "patch" ? { TSL_TEST_PATCH: patchEnv(f.patch!) } : {}; // checked first (SPEC 8.3)
   return withEnv(env, async () => {
     const P = await import("./pipe-tests.ts");
     const failures: string[] = [];
@@ -378,6 +379,7 @@ export async function r11FaultRun(
     failures.push(...r.failures);
     const c = await pacingChecks(accel, [2], f.where === "printer" ? f.name : undefined);
     failures.push(...c.failures);
+    faultFailures(failures, f.name);
     return {
       caught: failures.length,
       answers: wrongAnswers(failures),

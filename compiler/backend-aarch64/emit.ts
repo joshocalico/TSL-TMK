@@ -1771,9 +1771,23 @@ class FuncEmit {
         this.jcc(Cond.HI, trap);
         return;
       }
-      case "mem.fill":
+      case "mem.fill": {
+        // R18: a fill with zero of a constant size, a multiple of 4 up to 64 bytes (a stack object cleared before its
+        // constructor, where scalar replacement couldn't take it), is stores of the zero register, 8 bytes each and the last
+        // 4; anything else calls the runtime's, whose loop is a byte at a time.
+        const z = this.s.remat[this.s.alias[vals[1]!]!];
+        const n = this.s.remat[this.s.alias[vals[2]!]!];
+        const size = n?.k === "int" ? Number(n.val) : -1;
+        if (z?.k === "int" && z.val === 0n && size > 0 && size <= 64 && size % 4 === 0) {
+          const rd = this.gpr(vals[0]!, X16);
+          let off = 0;
+          for (; off + 8 <= size; off += 8) c.emit(E.memImm("strx", XZR, rd, off));
+          if (off < size) c.emit(E.memImm("strw", XZR, rd, off));
+          return;
+        }
         this.callSymbol("f:__rt_memset", vals, []);
         return;
+      }
       case "mem.copy": {
         // A small copy of a constant size, a multiple of 8 up to 48 bytes (an object placed in its slot, R1b), is loads into
         // scratch registers and then stores, all loads first, so it's a memmove for overlapping bytes too. Anything else

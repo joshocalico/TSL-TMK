@@ -378,6 +378,16 @@ export function releaseIndex<F extends (item: never, at: usize, op: never) => us
   if (i < 0) i = hostReleases.push(f) - 1;
   return i + 1;
 }
+/**
+ * R17: whether `f` is a release function whose body is `return 0;` and nothing else, which freeing may skip calling: natively
+ * a comparison of its code address with each such function's in the closed set; on the host always false, so the host
+ * calls it, which does nothing and gives 0 all the same.
+ */
+export function releaseIsEmpty<F extends (item: never, at: usize, op: never) => usize>(
+  _f: F,
+): boolean {
+  return false;
+}
 export function callRelease<O>(i: u32, item: object, at: usize, op: O): usize {
   const f = hostReleases[i - 1] as ((item: object, at: usize, op: O) => usize) | undefined;
   if (f === undefined) throw new TslTrap(18);

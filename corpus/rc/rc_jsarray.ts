@@ -15,14 +15,14 @@ class Item {
 class Bag {
   v: JsArray<Item | null>;
   constructor() {
-    this.v = new JsArray(ref<Item | null>(), 0, true);
+    this.v = new JsArray(ref<Item | null>(), 0, true, true);
   }
 }
 
 class Nums {
   v: JsArray<u32>;
   constructor() {
-    this.v = new JsArray(u32, 0, true);
+    this.v = new JsArray(u32, 0, true, true);
   }
 }
 

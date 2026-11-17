@@ -109,6 +109,7 @@ const LEAVES = new Set([
   "mode-hashes.ts",
   "rc-off-hashes.ts",
   "opt-hashes.ts",
+  "rc-programs.ts",
 ]);
 
 export function isLeaf(args: string[]): boolean {

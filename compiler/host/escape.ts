@@ -3,11 +3,11 @@
 // error names the storing line and the calls leading there (SPEC 12.1, risk 14). The same analysis decides where a
 // generation check goes: a reference loaded from memory gets one at each member access, and a reference whose
 // object was known to be live when it was obtained doesn't (SPEC 3.5, 3.10 divergence 5).
-import type ts from "typescript";
+import ts from "typescript";
 import type { DiagSink } from "./diag.ts";
 import { computeCaptures } from "./lower-native.ts";
 import { classMemory, type MemorySetting } from "./program.ts";
-import { isCountedExactly } from "./expand-rc.ts";
+import { isCountedExactly, stackTagged } from "./expand-rc.ts";
 import { r9Off } from "./down-model.ts";
 import type {
   ClassInst,
@@ -371,6 +371,14 @@ class Escape {
             ...(te.at !== undefined ? { site: te.at } : {}),
           };
         }
+        // the injected bug (TMK_TEST_TSL=r18-stack-unchecked): a `@tsl.stack` class's `new` (R18) not taken as a stack
+        // object, so nothing it escapes to is refused
+        if (
+          process.env.TMK_TEST_TSL === "r18-stack-unchecked" &&
+          ts.isClassDeclaration(te.c.decl as ts.Node) &&
+          stackTagged(te.c.decl as ts.ClassDeclaration)
+        )
+          return { flags: 0, params: new Set() };
         return {
           flags: STACK | (sc.loopDepth > 0 ? LOOPNEW : 0),
           params: new Set(),

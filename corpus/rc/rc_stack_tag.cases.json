@@ -1,0 +1,4 @@
+[
+  { "fn": "outlive", "args": [3], "expect": 34 },
+  { "fn": "outlive", "args": [70], "expect": 771 }
+]

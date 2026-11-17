@@ -11,7 +11,7 @@ class Item {
 
 /** Pushes 0..n-1 through every doubling and reads each back: growth keeps every element, the last included. */
 export function grows(n: u32): i32 {
-  const a = new JsArray(i32, 0, true);
+  const a = new JsArray(i32, 0, true, true);
   for (let i: i32 = 0; i < toI32(n); i++) a.push(i * 3);
   let bad: i32 = 0;
   for (let i: usize = 0; i < a.length; i++) if (a.get(i) !== toI32(toU32(i)) * 3) bad++;
@@ -20,7 +20,7 @@ export function grows(n: u32): i32 {
 
 /** The last element pushed before each doubling, read straight after it. */
 export function lastAfterGrowth(): i32 {
-  const a = new JsArray(f64, 0, true);
+  const a = new JsArray(f64, 0, true, true);
   let bad: i32 = 0;
   for (let i: i32 = 0; i < 70; i++) {
     a.push(toF64(i) + 0.5);
@@ -31,7 +31,7 @@ export function lastAfterGrowth(): i32 {
 
 /** JS: `[].pop()` is undefined, and the array stays empty; then a push gives length 1. */
 export function popEmpty(): i32 {
-  const a = new JsArray(i32, 0, true);
+  const a = new JsArray(i32, 0, true, true);
   const x = a.pop(-1);
   const y = a.pop(-1);
   a.push(7);
@@ -40,7 +40,7 @@ export function popEmpty(): i32 {
 
 /** Pops in reverse order, then one more on empty. */
 export function popAll(n: u32): i32 {
-  const a = new JsArray(i32, 0, true);
+  const a = new JsArray(i32, 0, true, true);
   for (let i: i32 = 1; i <= toI32(n); i++) a.push(i);
   let s: i32 = 0;
   for (let k: i32 = 1; k <= toI32(n); k++) s = s * 3 + a.pop(0) - k;
@@ -49,7 +49,7 @@ export function popAll(n: u32): i32 {
 
 /** JS: `const a = []; a[3] = x;` leaves holes at 0, 1 and 2, which read as undefined. */
 export function holes(): i32 {
-  const a = new JsArray(ref<Item | null>(), 0, true);
+  const a = new JsArray(ref<Item | null>(), 0, true, true);
   a.reserve(4);
   a.setLength(4);
   a.set(3, new Item(5));
@@ -61,9 +61,9 @@ export function holes(): i32 {
 
 /** A buffer that was used and given back, taken again by a new array: its holes still read as holes. */
 export function holesInReusedBuffer(): i32 {
-  const first = new JsArray(ref<Item | null>(), 0, true);
+  const first = new JsArray(ref<Item | null>(), 0, true, true);
   for (let i: i32 = 0; i < 5; i++) first.push(new Item(i + 1)); // the 4-slot buffer went back dirty
-  const a = new JsArray(ref<Item | null>(), 0, true);
+  const a = new JsArray(ref<Item | null>(), 0, true, true);
   a.setLength(3);
   a.set(2, new Item(9));
   let n: i32 = 0;
@@ -76,9 +76,9 @@ export function holesInReusedBuffer(): i32 {
  * a 32-byte buffer holding 1 to 8; `b` grows into it keeping 4 elements, and slots 4 to 7 must read 0, not 5 to 8.
  */
 export function holesPastTheCopy(): i32 {
-  const first = new JsArray(i32, 0, true);
+  const first = new JsArray(i32, 0, true, true);
   for (let i: i32 = 1; i <= 9; i++) first.push(i);
-  const b = new JsArray(i32, 0, true);
+  const b = new JsArray(i32, 0, true, true);
   for (let i: i32 = 0; i < 4; i++) b.push(100 + i);
   b.reserve(5);
   b.setLength(8);
@@ -89,7 +89,7 @@ export function holesPastTheCopy(): i32 {
 
 /** JS: `a.length = 1` then `a[2] = x` leaves a hole at 1, not the old element. */
 export function shrinkThenGrow(): i32 {
-  const a = new JsArray(ref<Item | null>(), 0, true);
+  const a = new JsArray(ref<Item | null>(), 0, true, true);
   a.push(new Item(1));
   a.push(new Item(2));
   a.push(new Item(3));
@@ -102,7 +102,7 @@ export function shrinkThenGrow(): i32 {
 
 /** Shift moves everything down, and on empty gives `none`. */
 export function shifts(): i32 {
-  const a = new JsArray(i32, 0, true);
+  const a = new JsArray(i32, 0, true, true);
   for (let i: i32 = 1; i <= 6; i++) a.push(i * 10);
   const x = a.shift(-1);
   const y = a.shift(-1);
@@ -110,13 +110,13 @@ export function shifts(): i32 {
   a.forEach((v, i) => {
     s = s + v * toI32(toU32(i + 1));
   });
-  const e = new JsArray(i32, 0, true);
+  const e = new JsArray(i32, 0, true, true);
   return x + y * 1000 + s * 10 + e.shift(-1) * 100000;
 }
 
 /** `new Array(n)`: n holes, then filled. */
 export function sized(n: u32): i32 {
-  const a = new JsArray(i32, toUsize(n), true);
+  const a = new JsArray(i32, toUsize(n), true, true);
   let z: i32 = 0;
   for (let i: usize = 0; i < a.length; i++) z = z + a.get(i);
   for (let i: usize = 0; i < a.length; i++) a.set(i, 2);
@@ -126,7 +126,38 @@ export function sized(n: u32): i32 {
 
 /** Past the end traps 2, as `a[i]!` does on a hole that isn't there. */
 export function pastTheEnd(): i32 {
-  const a = new JsArray(i32, 0, true);
+  const a = new JsArray(i32, 0, true, true);
   a.push(1);
   return a.get(1);
+}
+
+/** R17: JS: `[a, b, c].pop()` then `length = 3` leaves a hole where the popped element was, not the element. */
+export function popThenLonger(): i32 {
+  const a = new JsArray(ref<Item | null>(), 0, true, true);
+  a.push(new Item(1));
+  a.push(new Item(2));
+  a.push(new Item(3));
+  const x = a.pop(null);
+  a.setLength(3);
+  const last = a.get(2);
+  return (last === null ? 1 : 100 + last.id) + (x === null ? 0 : x.id * 10);
+}
+
+/**
+ * R17: an array of numbers with no holes (its fourth argument false): pops leave what they drop, so a longer length
+ * zeroes what it adds, and the slots it adds read 0, as a new array's do; growth past pops keeps what's below the length.
+ */
+export function noHoles(): i32 {
+  const a = new JsArray(i32, 0, true, false);
+  for (let i: i32 = 1; i <= 6; i++) a.push(i);
+  const s = a.pop(-1) + a.pop(-1);
+  a.setLength(6);
+  let sum: i32 = 0;
+  for (let i: usize = 0; i < a.length; i++) sum = sum + a.get(i);
+  const shifted = a.shift(-1);
+  for (let i: i32 = 0; i < 6; i++) a.push(10);
+  if (a.length !== 11) return -1;
+  let after: i32 = 0;
+  for (let i: usize = 0; i < a.length; i++) after = after + a.get(i);
+  return s * 1_000_000 + sum * 10_000 + after * 10 + shifted;
 }

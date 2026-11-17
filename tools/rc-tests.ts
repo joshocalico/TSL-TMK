@@ -54,6 +54,25 @@ export function rcPrograms(filter?: string): string[] {
   });
 }
 
+/**
+ * rcPrograms, worked out in a child process (tools/rc-programs.ts, R16): the same list, with the lowering it takes given back
+ * when the child ends, not left in this process's heap beside the compile workers (native-e box 3's peak memory).
+ */
+export async function rcProgramsApart(filter?: string): Promise<string[]> {
+  const { guardedRun } = await import("./guarded-run.ts");
+  const h = await guardedRun(
+    process.execPath,
+    [
+      "--no-warnings",
+      join(ROOT, "tools/rc-programs.ts"),
+      ...(filter !== undefined ? [filter] : []),
+    ],
+    { timeoutMs: 900_000, label: "rc-programs.ts", cwd: ROOT },
+  );
+  if (!h.ok) throw new Error(`tools/rc-programs.ts: ${h.why.slice(0, 300)}`);
+  return JSON.parse(h.stdout) as string[];
+}
+
 interface OneRun {
   ok: boolean;
   skipped: boolean;
@@ -155,7 +174,7 @@ export async function leakTest(
   const failures: string[] = [];
   const rows: LeakRow[] = [];
   let skippedAccel = false;
-  await pool(files ?? rcPrograms(), jobs, async (file) => {
+  await pool(files ?? (await rcProgramsApart()), jobs, async (file) => {
     const name = file.slice(ROOT.length + 1);
     const row: LeakRow = {
       program: name,
@@ -484,7 +503,9 @@ export async function elisionFigures(
 }> {
   const list =
     programs ??
-    rcPrograms().filter((f) => !f.includes("adv_large_drop") && !f.includes("math_values"));
+    (await rcProgramsApart()).filter(
+      (f) => !f.includes("adv_large_drop") && !f.includes("math_values"),
+    );
   const out = {
     programs: 0,
     staticOn: 0,
@@ -1152,6 +1173,20 @@ export async function cycleLatency(
 
 export interface ListDiagnosis {
   rows: { what: string; iteration: number; ms: number; sequential: number; samePage: number }[];
+  /**
+   * R16: each variant over its last iterations, `tailFrom` to `tailTo`: the median time and the median share on one page,
+   * which native-e box 9 compares (one sample each, at 199, before: a single scheduling hiccup could flip it).
+   */
+  tails: { what: string; n: number; medianMs: number; medianSamePage: number }[];
+  tailFrom: number;
+  tailTo: number;
+}
+
+/** The median of a list of numbers (the mean of the middle two where it's even). */
+function medianOf(xs: number[]): number {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 === 1 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
 }
 
 /**
@@ -1159,9 +1194,17 @@ export interface ListDiagnosis {
  * the list is the next block in memory, or in the same page. `blocks not reused` keeps all the counting and freeing, but gives
  * no block back, so what's left of the slowdown isn't the counts.
  */
-export async function listDiagnosis(accel: Accel = "hvf"): Promise<ListDiagnosis> {
+export async function listDiagnosis(
+  accel: Accel = "hvf",
+  // R16: a bug put into the diagnosis, to show box 9 fails with it (tools/r16-tests.ts's BOX9_FAULTS): "ordered-free-list",
+  // the reused variant's freed blocks never reused, as a free list keeping the list's order would make it; "short-work", the
+  // reused variant timed over a tenth of the work
+  fault?: string,
+): Promise<ListDiagnosis> {
   const file = join(ROOT, "bench/memory/list_lowered.ts");
-  const out: ListDiagnosis = { rows: [] };
+  const tailFrom = 180;
+  const tailTo = 199;
+  const out: ListDiagnosis = { rows: [], tails: [], tailFrom, tailTo };
   const variants: {
     what: string;
     memory: string;
@@ -1193,7 +1236,8 @@ export async function listDiagnosis(accel: Accel = "hvf"): Promise<ListDiagnosis
     // inlined into its callers, and replacing it afterwards would change nothing (SPEC D46).
     const o = lowerFile(file, { memory: v.memory, rc: v.rc, opt: 0 });
     let m = cloneModule(o.tir as Module);
-    if (v.noReuse === true) {
+    const reusedVariant = v.what.startsWith("rc, collector off, budget 32");
+    if (v.noReuse === true || (fault === "ordered-free-list" && reusedVariant)) {
       const i = m.funcs.findIndex((f) => f.name === "__rc_block_free");
       m.funcs[i] = assemble("func @__rc_block_free(%p: ptr) -> () {\nbb_e:\n  ret\n}").funcs[0]!;
     }
@@ -1212,7 +1256,8 @@ export async function listDiagnosis(accel: Accel = "hvf"): Promise<ListDiagnosis
     drv.usePageRange(main, mid, limit);
     main.call("__init", []);
     const sig = drv.sigOf("listWork");
-    const arg = main.fbits("f64", new BigUint64Array(new Float64Array([20000]).buffer)[0]!);
+    const work = fault === "short-work" && reusedVariant ? 2000 : 20000;
+    const arg = main.fbits("f64", new BigUint64Array(new Float64Array([work]).buffer)[0]!);
     const head = main.block(["i64"]);
     const inner = main.block();
     const done = main.block();
@@ -1294,6 +1339,14 @@ export async function listDiagnosis(accel: Accel = "hvf"): Promise<ListDiagnosis
         samePage: x[2]! / x[3]!,
       });
     }
+    // R16: iterations tailFrom to tailTo, each a row; a missing one leaves the tail short, which box 9 refuses
+    const tail = rows.slice(tailFrom, tailTo + 1).filter((x) => x.length >= 4 && x[3]! > 0);
+    out.tails.push({
+      what: v.what,
+      n: tail.length,
+      medianMs: tail.length > 0 ? medianOf(tail.map((x) => (x[0]! / freq) * 1000)) : NaN,
+      medianSamePage: tail.length > 0 ? medianOf(tail.map((x) => x[2]! / x[3]!)) : NaN,
+    });
   }
   return out;
 }

@@ -22,6 +22,7 @@ import {
   newNode,
   resetNodeIds,
   sizeOf,
+  r17Off,
   tyOf,
   U32_MAX,
   unifyLocs,
@@ -7862,7 +7863,10 @@ export class DownLower {
             ? mk(tyOf(osh), { k: "tuple", items: [lit32(1), loaded] }, { sh: osh })
             : loaded;
         body.push({ k: "expr", e: mk(rv.ty, { k: "setvar", v: rv, val: value }) });
-        if (this.memory === "rc") body.push(this.clearSlot(seq, next, es));
+        // R17: in every mode, as shift and a shorter length clear theirs: a slot past the length reads as a hole if the
+        // array is made longer again, which in `leak` and `manual` read back the object the pop took (`rc` cleared it
+        // already, to release it). Only an array of references has anything to clear.
+        if (this.memory === "rc" || !r17Off("pop")) body.push(this.clearSlot(seq, next, es));
         body.push({
           k: "expr",
           e: mk(T.void, { k: "fstore", base: seq.te, mem: [{ t: "ix", off: VEC_LEN }], val: next }),

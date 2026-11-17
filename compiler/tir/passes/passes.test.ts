@@ -831,7 +831,17 @@ bb3:
   // i <= n: the last turn's index is the length, and the check fires there.
   const le = fn(opt(src("ule")).text, "f");
   assert.match(le, /bounds\.chk/, le);
-  assert.equal(fn(opt(src("ult"), 2, ["checks"]).text, "f").includes("bounds.chk"), true);
+  // R15: with `checks` off, conds.ts (the header's test dominating the check) and loop versioning (a guard that folds to
+  // true) prove it too, so all three are off to show `checks` is what removes it here.
+  assert.equal(
+    fn(opt(src("ult"), 2, ["checks", "conds", "version"]).text, "f").includes("bounds.chk"),
+    true,
+  );
+  assert.equal(fn(opt(src("ult"), 1, ["loopbounds"]).text, "f").includes("bounds.chk"), false);
+  assert.equal(
+    fn(opt(src("ult"), 1, ["loopbounds", "conds"]).text, "f").includes("bounds.chk"),
+    true,
+  );
 });
 
 test("check elimination: a mask of the length less one is below the length, once the length isn't 0", () => {
@@ -1026,4 +1036,170 @@ bb0:
   const pre = (t: string): string => t.slice(0, t.indexOf("bb1("));
   assert.match(pre(fn(opt(src("load.i32.inv")).text, "f")), /load\.i32\.inv/);
   assert.doesNotMatch(pre(fn(opt(src("load.i32.na")).text, "f")), /load\.i32/);
+});
+
+// R15: dominating conditions (conds.ts) and loop versioning (version.ts).
+
+function optFaults(
+  text: string,
+  level: OptLevel,
+  faults: string[],
+  disable: string[] = [],
+): string {
+  const lines = (text + TRAPS).split("\n").filter((l) => l.trim() !== "");
+  const m = canonicalize(parseModule(lines.join("\n") + "\n"));
+  assert.deepEqual(verifyModule(m), []);
+  return printModule(optimizeModule(m, { level, verifyEach: true, disable, faults }).module);
+}
+
+const RETEST = (join: boolean): string => `func @f(%0: i64, %1: ptr) -> (i64) export {
+bb0:
+  %2 = iconst.i64 0
+  %3 = icmp.eq.i64 %0, %2
+  brif %3, bb1, bb2
+bb1:
+  trap t1
+bb2:
+  %4 = load.i64.na %1
+  ${join ? "br bb4" : "br bb3"}
+bb3:
+  ${join ? "" : "brif %3, bb5, bb6"}
+${join ? "" : "bb5:\n  trap t1\nbb6:\n  ret %4"}
+${join ? "bb4:\n  brif %3, bb7, bb8\nbb7:\n  trap t1\nbb8:\n  ret %4" : ""}
+}
+`;
+
+test("conds: a null test made again where the first one's answer is known goes, at -O1", () => {
+  const f = fn(opt(RETEST(false), 1).text, "f");
+  assert.equal(count(f, /brif/), 1, f);
+  // with the pass off, both tests stay
+  assert.equal(count(fn(opt(RETEST(false), 1, ["conds"]).text, "f"), /brif/), 2);
+});
+
+// A block reached two ways: the first test's answer is known on one of them only.
+const JOIN = `func @f(%0: ix, %1: ix, %2: ptr) -> (i32) export {
+bb0:
+  %3 = icmp.uge.ix %0, %1
+  %9 = iconst.i32 7
+  brif %3, bb1, bb2(%9)
+bb1:
+  %4 = iconst.i32 1
+  br bb2(%4)
+bb2(%5: i32):
+  %6 = icmp.uge.ix %0, %1
+  brif %6, bb3, bb4
+bb3:
+  trap t2
+bb4:
+  %7 = gep %2, %0, 4, 0
+  %8 = load.i32.na %7
+  %10 = add.i32 %8, %5
+  ret %10
+}
+`;
+
+test("conds: a test where the earlier test's edge doesn't dominate stays; the injected bug takes it", () => {
+  const ok = fn(opt(JOIN, 1).text, "f");
+  assert.match(ok, /trap t/, ok);
+  assert.equal(count(ok, /brif/), 2, ok);
+  const bug = fn(optFaults(JOIN, 1, ["conds-not-dominating"]), "f");
+  assert.doesNotMatch(bug, /trap t/, bug);
+});
+
+test("conds: the lowering's check and get's own on the same read, either way round, and a bounds check under a test", () => {
+  const src = `func @f(%0: ix, %1: ix, %2: ptr) -> (i32) export {
+bb0:
+  %3 = icmp.ult.ix %0, %1
+  brif %3, bb2, bb1
+bb1:
+  trap t2
+bb2:
+  %4 = icmp.uge.ix %0, %1
+  brif %4, bb3, bb4
+bb3:
+  trap t2
+bb4:
+  %5 = bounds.chk %0, %1, t2
+  %6 = gep %2, %5, 4, 0
+  %7 = load.i32.na %6
+  ret %7
+}
+`;
+  const f = fn(opt(src, 1).text, "f");
+  assert.equal(count(f, /brif/), 1, f);
+  assert.doesNotMatch(f, /bounds\.chk/, f);
+  // a signed test says nothing of an unsigned one
+  const s = fn(opt(src.replace("icmp.ult.ix %0, %1", "icmp.slt.ix %0, %1"), 1).text, "f");
+  assert.equal(count(s, /brif/), 2, s);
+});
+
+// matmul's inner loop (corpus/pos/matmul_f64.ts): a[B + k] and b[k * n + j], k < m, with B, n, j and the lengths from
+// outside the loop.
+const STRIDED = (
+  lenB: string,
+  inLoopLen = false,
+): string => `func @f(%0: ptr, %1: ix, %2: ptr, %3: ix, %4: ix, %5: ix, %6: ix, %20: ptr) -> (f64) export {
+bb0:
+  %7 = iconst.ix 0
+  %8 = fconst.f64 0x0
+  br bb1(%7, %8)
+bb1(%9: ix, %10: f64):
+  %11 = icmp.ult.ix %9, %4
+  brif %11, bb2, bb3
+bb2:
+  %12 = add.chk.u.ix %5, %9, t1
+  %13 = bounds.chk %12, %1, t2
+  %14 = gep %0, %13, 8, 0
+  %15 = load.f64.na %14
+  %16 = mul.chk.u.ix %9, %4, t1
+  %17 = add.chk.u.ix %16, %6, t1
+  ${inLoopLen ? "store.ix.na %0, %9\n  %30 = load.ix.na %20" : ""}
+  %18 = bounds.chk %17, ${inLoopLen ? "%30" : lenB}, t2
+  %19 = gep %2, %18, 8, 0
+  %21 = load.f64.na %19
+  %22 = fmul.f64 %15, %21
+  %23 = fadd.f64 %10, %22
+  %24 = iconst.ix 1
+  %25 = add.ix %9, %24
+  br bb1(%25, %23)
+bb3:
+  ret %10
+}
+`;
+
+test("version: a strided loop gets a fast copy without its checks, guarded, and keeps the loop as it was", () => {
+  const f = fn(opt(STRIDED("%3")).text, "f");
+  // two loops: one with both checks and their arithmetic's, one with none
+  assert.equal(count(f, /bounds\.chk/), 2, f);
+  assert.equal(count(f, /add\.chk|mul\.chk/), 3, f);
+  assert.equal(count(f, /icmp\.ult\.ix %\d+, %4/), 2, f);
+  assert.match(f, /udiv\.ix/, f);
+  // with it off, one loop
+  const off = fn(opt(STRIDED("%3"), 2, ["version"]).text, "f");
+  assert.equal(count(off, /icmp\.ult\.ix %\d+, %4/), 1, off);
+  // -O1 doesn't copy loops
+  const o1 = fn(opt(STRIDED("%3"), 1).text, "f");
+  assert.equal(count(o1, /icmp\.ult\.ix %\d+, %4/), 1, o1);
+});
+
+test("version: a length the loop can write isn't the guard's; the injected bug reads it once before", () => {
+  // the a[] check is still versioned; b[]'s, against a length loaded in the loop after a store there, isn't
+  const f = fn(opt(STRIDED("%3", true)).text, "f");
+  assert.equal(count(f, /bounds\.chk/), 3, f);
+  const bug = fn(optFaults(STRIDED("%3", true), 2, ["version-bound-in-loop"]), "f");
+  assert.equal(count(bug, /bounds\.chk/), 2, bug);
+});
+
+test("version: each check's guard is against its own length; the injected bug uses the first's", () => {
+  const f = fn(opt(STRIDED("%3")).text, "f");
+  assert.match(f, /icmp\.ult\.ix %\d+, %3/, f);
+  const bug = fn(optFaults(STRIDED("%3"), 2, ["version-wrong-length"]), "f");
+  assert.doesNotMatch(bug, /icmp\.ult\.ix %\d+, %3/, bug);
+});
+
+test("version: the guard is the loop's bound against the room left; the injected bug allows one more", () => {
+  const src = STRIDED("%3");
+  const ok = fn(opt(src).text, "f");
+  const bug = fn(optFaults(src, 2, ["version-off-by-one"]), "f");
+  assert.equal(count(bug, /add\.ix/) - count(ok, /add\.ix/), 2, `${ok}\n${bug}`);
 });

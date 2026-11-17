@@ -38,6 +38,7 @@ export interface ProfileOptions {
   memory: string; // the direct route's memory mode
   cycles: boolean; // the direct route's collector
   n: number; // the argument
+  args?: number[]; // R18: every argument, for a function of more than one (`--args 20,3`); `n` alone otherwise
   calls: number; // calls made while looking (`--time` makes more as it needs, up to its limit)
   warm: number; // `--instructions`: calls first, not counted (a second run, subtracted)
   mode: "time" | "instructions";
@@ -74,7 +75,7 @@ function buildFor(o: ProfileOptions, calls: number): { img: ImageOutput; m: Modu
   const w: Work = {
     name: o.fn,
     fn: o.fn,
-    args: [o.n],
+    args: o.args ?? [o.n],
     which: 0,
     cArgs: [o.n, 0],
     ops: o.n,

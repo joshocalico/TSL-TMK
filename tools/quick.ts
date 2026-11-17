@@ -6,6 +6,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as corpus from "./corpus.ts";
 import { defaultEngines, ROOT, type SuiteResult } from "./corpus.ts";
+import { patchEnv, type TestPatch } from "./faults.ts";
 import { guardedRun } from "./guarded-run.ts";
 import { buildPath } from "./build-dir.ts";
 import { jobsFlag, repoChecks, unitTests, type MilestoneDef } from "./tmk-common.ts";
@@ -448,10 +449,11 @@ export function writeTestJson(r: {
 
 // --- what the tier catches
 
-interface InjectedFault {
+export interface InjectedFault {
   family: string;
   name: string;
   env: Record<string, string>;
+  patch?: TestPatch; // checked against the source before the run (SPEC 8.3), and put into env as TSL_TEST_PATCH
   order: string; // where this one can show, so it stops early when it does
 }
 
@@ -471,7 +473,8 @@ export async function injectedFaults(): Promise<InjectedFault[]> {
     ...FAULTS.map((f) => ({
       family: "@tsl/std bug",
       name: f.name,
-      env: { TSL_TEST_PATCH: JSON.stringify({ file: f.file, from: f.from, to: f.to }) },
+      env: {},
+      patch: { file: f.file, from: f.from, to: f.to },
       order: "native std",
     })),
     ...CC_FAULTS.map((f) => ({
@@ -504,7 +507,19 @@ export async function catchRate(jobs: number, only?: string): Promise<boolean> {
     (f) => only === undefined || new RegExp(only).test(`${f.family} ${f.name}`),
   );
   const out: { family: string; name: string; caught: boolean; seconds: number; by: string }[] = [];
+  let harness = 0;
   for (const f of faults) {
+    // a patch that doesn't apply is a harness failure, never caught (SPEC 8.3): the child's tier would fail on it
+    let env = f.env;
+    if (f.patch !== undefined) {
+      try {
+        env = { ...env, TSL_TEST_PATCH: patchEnv(f.patch) };
+      } catch (e) {
+        harness++;
+        console.log(`HARNESS ${f.family}: ${f.name}: ${String(e).slice(0, 300)}`);
+        continue;
+      }
+    }
     const r = await guardedRun(
       process.execPath,
       [
@@ -521,7 +536,7 @@ export async function catchRate(jobs: number, only?: string): Promise<boolean> {
         timeoutMs: 1_200_000,
         label: `catch ${f.name}`,
         cwd: ROOT,
-        env: { ...process.env, ...f.env },
+        env: { ...process.env, ...env },
       },
     );
     const by = /^FAIL +[\d.]+ s (.*?):/m.exec(r.stdout)?.[1] ?? "";
@@ -541,5 +556,6 @@ export async function catchRate(jobs: number, only?: string): Promise<boolean> {
   }
   for (const [k, v] of fam) console.log(`${k}: ${v.caught}/${v.all} caught`);
   console.log(`all: ${out.filter((r) => r.caught).length}/${out.length} caught`);
-  return true;
+  if (harness > 0) console.log(`${harness} injected bug(s) not put in: harness failures`);
+  return harness === 0;
 }

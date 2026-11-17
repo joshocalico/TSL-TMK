@@ -56,7 +56,7 @@ const GT_BUG: Record<string, { signed: boolean; flip: boolean } | undefined> = {
   ugt: { signed: false, flip: false },
 };
 
-interface Fact {
+export interface Fact {
   k: number; // the header's parameter
   m: number; // what it's below
   signed: boolean;
@@ -161,7 +161,7 @@ export function loopBoundsFunc(
 }
 
 /** What a loop's header test proves on the way into the loop, where it's the shape above; else null. */
-function loopFact(
+export function loopFact(
   f: Func,
   l: Loop,
   preds: number[][],

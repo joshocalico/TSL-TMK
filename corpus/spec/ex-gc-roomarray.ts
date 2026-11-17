@@ -83,11 +83,27 @@ export class JsRoomArray<T> {
     return v;
   }
 
-  /** Appends v and gives the new length, as JS's `push` does. */
-  // SAFETY: grow left room for one more, so the slot at len is in the room.
+  /**
+   * Appends v and gives the new length, as JS's `push` does. R17: inlined at every level that inlines, as JsArray's is
+   * (R16): with room left, a store and the length raised; full, `pushGrow`, out of line.
+   */
+  /** @tsl.inline */
+  // SAFETY: n is below cap, so the slot at n is in the room.
   push(v: T): usize {
     const n = this.len;
-    if (n === this.cap) this.grow(n + 1);
+    if (n >= this.cap) return this.pushGrow(v);
+    this.slot(n).write(v);
+    const m = n + 1;
+    this.len = m;
+    return m;
+  }
+
+  /** `push` on a full array: a room twice as big (`grow`), then the store. Out of line, so `push` stays small. */
+  /** @tsl.noinline */
+  // SAFETY: grow left room for one more, so the slot at len is in the room.
+  private pushGrow(v: T): usize {
+    const n = this.len;
+    this.grow(n + 1);
     this.slot(n).write(v);
     const m = n + 1;
     this.len = m;
@@ -120,10 +136,23 @@ export class JsRoomArray<T> {
     if (n > this.cap) this.grow(n);
   }
 
-  /** JS's `a.length = n` within what's reserved: shorter zeroes what it drops (`holes`), longer adds holes. Gives n. */
+  /**
+   * JS's `a.length = n` within what's reserved: shorter zeroes what it drops (`holes`), longer adds holes. Gives n. R17:
+   * inlined, as JsArray's is, and shorter tested first, which needs no test of the room, as the length is never above it:
+   * so the lowering's pop (the length one less, once it's above zero) is that test, and with holes, one slot zeroed. And
+   * with no holes, a longer length zeroes what it adds, as nothing kept those slots zero (a shorter length left them, and
+   * growth zeroes nothing past what it copies): each slot below the length reads what was written there, or zero.
+   */
+  /** @tsl.inline */
   setLength(n: usize): usize {
-    if (n > this.cap) trap(Trap.Bounds);
-    if (n < this.len && this.holes) this.clear(n, this.len);
+    const len = this.len;
+    if (n < len) {
+      if (this.holes) this.clear(n, len);
+    } else {
+      if (n > this.cap) trap(Trap.Bounds);
+      // with no holes, what's past the length wasn't kept zero, so a longer length zeroes what it adds (R17)
+      if (!this.holes) this.clear(len, n);
+    }
     this.len = n;
     return n;
   }
@@ -155,7 +184,9 @@ export class JsRoomArray<T> {
     for (let i: usize = 0; i < n; i++) f(this.get(i), i);
   }
 
-  // SAFETY: the slots from `from` to `to` are below cap, so these are the room's, a whole element at a time.
+  /** @tsl.inline */
+  // SAFETY: the slots from `from` to `to` are below cap, so these are the room's, a whole element at a time; an element's
+  // size is a constant, so one arm is left.
   private clear(from: usize, to: usize): void {
     const size = elemSize(this.elem);
     const end = this.at(to);

@@ -10,5 +10,7 @@
   { "fn": "shrinkThenGrow", "args": [], "expect": 1 },
   { "fn": "shifts", "args": [], "expect": -74990 },
   { "fn": "sized", "args": [5], "expect": 10 },
-  { "fn": "pastTheEnd", "args": [], "trap": 2 }
+  { "fn": "pastTheEnd", "args": [], "trap": 2 },
+  { "fn": "popThenLonger", "args": [], "expect": 31 },
+  { "fn": "noHoles", "args": [], "expect": 11100691 }
 ]

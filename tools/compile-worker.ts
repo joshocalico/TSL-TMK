@@ -2,6 +2,7 @@
 // loaded, as a batch of compiles in one process always has, and lowers a program and builds its image for whichever job asks.
 // Each answer depends only on what the job says: lowerFile's output is a function of the file, its options and the injected bug.
 import { parentPort } from "node:worker_threads";
+import { getHeapStatistics } from "node:v8";
 import type { LowerOptions, LowerOutput } from "../compiler/host/tslc.ts";
 import type { LowerCase } from "./lower-exec.ts";
 import { lowerFile } from "./lowering.ts";
@@ -111,15 +112,24 @@ function routes(job: RoutesJob): void {
             (b, i, all) => all.indexOf(b) === i,
           );
     parentPort!.postMessage(
-      { id: job.id, routes: r, compileMs: performance.now() - t0, imageMs: 0 },
+      { id: job.id, heapMb: heapMb(), routes: r, compileMs: performance.now() - t0, imageMs: 0 },
       buffers as ArrayBuffer[],
     );
   } catch (e) {
     parentPort!.postMessage({
       id: job.id,
+      heapMb: heapMb(),
       error: e instanceof Error ? (e.stack ?? e.message) : String(e),
     });
   }
+}
+
+/**
+ * R16: this worker's heap after a job, in MiB, which the pool reads to let a worker that grew large go (compile-pool.ts's
+ * RECYCLE_HEAP_MB).
+ */
+function heapMb(): number {
+  return getHeapStatistics().used_heap_size / 2 ** 20;
 }
 
 parentPort?.on("message", (job: BuildJob | RoutesJob) => {
@@ -141,7 +151,13 @@ function build(job: BuildJob): void {
       o.diags.length > 0 ||
       (job.noFallback === true && o.fallbackDiags.length > 0)
     ) {
-      parentPort!.postMessage({ id: job.id, o: slim(o), compileMs: t1 - t0, imageMs: 0 });
+      parentPort!.postMessage({
+        id: job.id,
+        heapMb: heapMb(),
+        o: slim(o),
+        compileMs: t1 - t0,
+        imageMs: 0,
+      });
       return;
     }
     const cases = job.cases ?? roundCases(o);
@@ -162,6 +178,7 @@ function build(job: BuildJob): void {
     parentPort!.postMessage(
       {
         id: job.id,
+        heapMb: heapMb(),
         o: slim(o),
         cases,
         built: { image, placements: built.placements },
@@ -173,6 +190,7 @@ function build(job: BuildJob): void {
   } catch (e) {
     parentPort!.postMessage({
       id: job.id,
+      heapMb: heapMb(),
       error: e instanceof Error ? (e.stack ?? e.message) : String(e),
     });
   }

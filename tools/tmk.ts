@@ -884,7 +884,7 @@ async function cmdProfile(): Promise<number> {
   const [file, fn] = positional(1);
   if (file === undefined || fn === undefined) {
     console.error(
-      "usage: tmk profile <file> <fn> [--time|--instructions] [--route direct|tsl|printed] [--memory rc] [--cycles on|off] [--n 20000] [--calls k] [--warm k] [--samples k] [--top 30] [--focus regex] [--annotate regex] [--per ops]",
+      "usage: tmk profile <file> <fn> [--time|--instructions] [--route direct|tsl|printed] [--memory rc] [--cycles on|off] [--n 20000] [--args a,b] [--calls k] [--warm k] [--samples k] [--top 30] [--focus regex] [--annotate regex] [--per ops]",
     );
     return 2;
   }
@@ -905,6 +905,9 @@ async function cmdProfile(): Promise<number> {
     memory: flagValue("--memory") ?? "rc",
     cycles: flagValue("--cycles") !== "off",
     n: num("--n", 20000),
+    ...(flagValue("--args") !== undefined
+      ? { args: flagValue("--args")!.split(",").map(Number) }
+      : {}),
     calls: num("--calls", mode === "time" ? 20000 : 2),
     warm: num("--warm", mode === "time" ? 0 : 2),
     mode,

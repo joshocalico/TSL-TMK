@@ -104,7 +104,7 @@ export function order(): i32 {
  * start at a page and double (D67), so this crosses every size a chunk takes. Gives how many strings read wrong after.
  */
 export function chunks(k: u32): i32 {
-  const kept = new JsArray(ref<JsString | null>(), 0, false);
+  const kept = new JsArray(ref<JsString | null>(), 0, false, true);
   for (let i: u32 = 0; i < k; i++) {
     const n = toI32((i * 37) % 200) + 1;
     const s = JsFlat.zeroed(n);

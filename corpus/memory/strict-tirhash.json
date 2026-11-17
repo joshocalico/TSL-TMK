@@ -57,7 +57,7 @@
   "corpus/lower/pos/export_glue.ts": "576a68c817be00f693ddd0537380cd655a182014766a8ff219463fc75e1e8434",
   "corpus/lower/pos/float_rem.ts": "fcde2e1d0627c24d559f4bea5f04fa24d00cde0b928a75076a9c6ca3014f5179",
   "corpus/lower/pos/floor_div.ts": "a8905457102460d37d5505b898fdf72c13af860102b5bc4df1e6e5918dc17ec8",
-  "corpus/lower/pos/generics_mono.ts": "5c74475055eb8331ead63ab1a73b78694e8408266d64ab11afe9fd4a9d1cabe5",
+  "corpus/lower/pos/generics_mono.ts": "79a68f2ec69936443e34f4197d6492ea41b271bb6c5580666d93ef436a744f48",
   "corpus/lower/pos/literal_param.ts": "4b7aaca0900c19f9b745df0642290c2b535259bd10f6e55ae012ac457354bffd",
   "corpus/lower/pos/math_host.ts": "7b77a40906883f5bc8c7de5a2d924ec084c258b01a1fada6b5c5af9ea5c078bc",
   "corpus/lower/pos/math_spread.ts": "6b64b9208cb400b22c81a1cdb16867fac9925b57c29d8ab3ab4b01fa23946bd6",

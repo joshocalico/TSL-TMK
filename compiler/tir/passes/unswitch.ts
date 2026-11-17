@@ -109,7 +109,7 @@ function loopCost(f: Func, l: Loop): number {
   return c;
 }
 
-function definedIn(f: Func, blocks: Set<number>): Set<number> {
+export function definedIn(f: Func, blocks: Set<number>): Set<number> {
   const s = new Set<number>();
   for (const at of blocks) {
     const b = f.blocks[at]!;
@@ -124,7 +124,7 @@ function definedIn(f: Func, blocks: Set<number>): Set<number> {
  * trap, a return) that only it reaches; the one block outside it that it jumps to, if any; and what it defines that's used
  * after it, which a merge block before the exit passes on, one parameter each.
  */
-interface Region {
+export interface Region {
   index: Map<number, number>;
   blocks: Set<number>;
   defined: Set<number>;
@@ -133,7 +133,7 @@ interface Region {
   usedAfter: number[];
 }
 
-function regionOf(f: Func, l: Loop): Region | null {
+export function regionOf(f: Func, l: Loop): Region | null {
   const index = new Map<number, number>();
   f.blocks.forEach((b, i) => index.set(b.id, i));
   const preds: number[][] = f.blocks.map(() => []);
@@ -192,7 +192,7 @@ function regionOf(f: Func, l: Loop): Region | null {
  * what the region defines that's used after it, and those uses read the merge's parameters. Returns the copies, by the
  * original's block id. The caller adds an edge into the copy and pushes nothing: the blocks are added here.
  */
-function copyRegion(
+export function copyRegion(
   f: Func,
   r: Region,
   header: number,

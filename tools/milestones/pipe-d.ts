@@ -3,6 +3,7 @@
 // as it (`xs.push(v)`, `xs.get(i)`, `xs.length`) instead of the `__vec_*` runtime and loads at the lowering's offsets.
 import { join } from "node:path";
 import { caughtText, defaultEngines, faultCount, listPrograms, ROOT } from "../corpus.ts";
+import { faultFailures, patchEnv } from "../faults.ts";
 import { jobsFlag, needInstall, type MilestoneDef } from "../tmk-common.ts";
 import { timedModule } from "../timing.ts";
 
@@ -24,19 +25,26 @@ async function withEnv<X>(k: string, v: string, f: () => Promise<X> | X): Promis
   }
 }
 
+/** The files the bugs of JSARRAY_FAULTS, JSSTRING_FAULTS and JSMAP_FAULTS are put into (tools/faults.ts checks each). */
+export const JSARRAY_FILE = "packages/tsl-jsrt/ex-jsrt-array.ts";
+export const JSSTRING_FILE = "packages/tsl-jsrt/ex-jsrt-string.ts";
+export const JSMAP_FILE = "packages/tsl-jsrt/ex-jsrt-map.ts";
+
 /** The bugs put into JsArray's source (TSL_TEST_PATCH, as native-g puts them into @tsl/std), each of which has to be caught. */
 export const JSARRAY_FAULTS: { name: string; what: string; from: string; to: string }[] = [
   {
     name: "grow-last",
     what: "growth losing the last element: the copy into the new buffer one element short",
-    from: "copyBytes(next, this.data, kept);",
-    to: "copyBytes(next, this.data, kept - size);",
+    // R18: R16 read the buffer into `old` first, so from R16 to R18 this text wasn't in the source (SPEC 8.3)
+    from: "      copyBytes(next, old, kept);",
+    to: "      copyBytes(next, old, kept - size);",
   },
   {
     name: "pop-empty",
     what: "pop on an empty array giving its stale first slot, not JS's undefined",
-    from: "if (n === 0) return none;",
-    to: "if (n === 0) return ptrAt(this.elem, this.at(0)).read();",
+    // R18: pop's, which shift's has the same text as (the first, pop's, was the one patched)
+    from: "    if (n === 0) return none;\n    const v = this.slot(n - 1).read();",
+    to: "    if (n === 0) return ptrAt(this.elem, this.at(0)).read();\n    const v = this.slot(n - 1).read();",
   },
   {
     name: "hole-read",
@@ -125,8 +133,9 @@ export const JSMAP_FAULTS: { name: string; what: string; from: string; to: strin
   {
     name: "no-norm",
     what: "-0 not made +0",
-    from: "  ptrAt(f64, scratch).write(x + 0);",
-    to: "  ptrAt(f64, scratch).write(x);",
+    // R18: R6 read the scratch word into `s` first, so from R6 to R18 this text wasn't in the source (SPEC 8.3)
+    from: "  ptrAt(f64, s).write(x + 0);",
+    to: "  ptrAt(f64, s).write(x);",
   },
 ];
 
@@ -260,7 +269,7 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     const failures: string[] = [];
     const rows: string[] = [];
     for (const f of JSARRAY_FAULTS) {
-      const patch = JSON.stringify({ file: "ex-jsrt-array.ts", from: f.from, to: f.to });
+      const patch = patchEnv({ file: JSARRAY_FILE, from: f.from, to: f.to });
       const byHand = await withEnv("TSL_TEST_PATCH", patch, () =>
         runNative("std", [accel], jobs, "js_array", engines),
       );
@@ -274,6 +283,7 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
           filter: (x) => /hoisting|grow_reuse|cyc_interleave|adv_temporaries|app_retry/.test(x),
         }),
       );
+      faultFailures([...byHand.failures, ...dual.failures], f.name);
       const caught: string[] = [];
       if (!byHand.ok) caught.push(`by hand ${faultCount(byHand.failures)}`);
       if (dual.failures.length > 0) caught.push(`dual route ${faultCount(dual.failures)}`);
@@ -302,8 +312,8 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     for (const want of [
       'import { ref } from "@tsl/std";',
       'import { JsArray } from "@tsl/jsrt";',
-      "new JsArray(i32, 0, false)",
-      "new JsArray(ref<Cell | null>(), 0, false)",
+      "new JsArray(i32, 0, false, false)",
+      "new JsArray(ref<Cell | null>(), 0, false, true)",
       ".push(",
       ".get(",
       ".length",
@@ -477,7 +487,7 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     const failures: string[] = [];
     const rows: string[] = [];
     for (const f of JSSTRING_FAULTS) {
-      const patch = JSON.stringify({ file: "ex-jsrt-string.ts", from: f.from, to: f.to });
+      const patch = patchEnv({ file: JSSTRING_FILE, from: f.from, to: f.to });
       const byHand = await withEnv("TSL_TEST_PATCH", patch, () =>
         runNative("std", [accel], jobs, "js_string", engines),
       );
@@ -492,6 +502,7 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
           ...(f.dualOnly !== undefined ? { dirs: f.dualOnly.dirs } : {}),
         }),
       );
+      faultFailures([...byHand.failures, ...dual.failures], f.name);
       const caught: string[] = [];
       if (!byHand.ok) caught.push(`by hand ${faultCount(byHand.failures)}`);
       if (dual.failures.length > 0) caught.push(`dual route ${faultCount(dual.failures)}`);
@@ -873,7 +884,7 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
       );
     // Bugs put into JsMap, each caught by the hand-written program and by the dual route.
     for (const f of JSMAP_FAULTS) {
-      const patch = JSON.stringify({ file: "ex-jsrt-map.ts", from: f.from, to: f.to });
+      const patch = patchEnv({ file: JSMAP_FILE, from: f.from, to: f.to });
       const byHand = await withEnv("TSL_TEST_PATCH", patch, () =>
         withEnv("TMK_OPT", "2", () => runNative("std", [accel], jobs, "js_map", engines)),
       );
@@ -890,6 +901,7 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
           }),
         ),
       );
+      faultFailures([...byHand.failures, ...dual.failures], f.name);
       const caught: string[] = [];
       if (!byHand.ok) caught.push(`by hand ${faultCount(byHand.failures)}`);
       if (dual.failures.length > 0) caught.push(`dual route ${faultCount(dual.failures)}`);
@@ -989,7 +1001,7 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
       );
     // Bugs put into string keys: each caught by the hand-written program, and by the dual route where a result shows it.
     for (const f of STRKEY_FAULTS) {
-      const patch = JSON.stringify({ file: f.file, from: f.from, to: f.to });
+      const patch = patchEnv({ file: f.file, from: f.from, to: f.to });
       const byHand = await withEnv("TSL_TEST_PATCH", patch, () =>
         withEnv("TMK_OPT", "2", () => runNative("std", [accel], jobs, "js_map", engines)),
       );
@@ -1006,6 +1018,7 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
           }),
         ),
       );
+      faultFailures([...byHand.failures, ...dual.failures], f.name);
       const hand = !byHand.ok;
       const route = dual.failures.length > 0;
       const caught = hand && (route || f.byHandOnly !== undefined);
@@ -2308,6 +2321,219 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     }
     report({
       box: `48. R14: each of ${R14.R14_FAULTS.length} bugs put into the order of a trusted reshape is caught by the differential on auto's own builds, with how many cases caught it: a sequence's earlier parts run after a later part's statements, an earlier operand evaluated after a later one's statements, a conditional's arms' statements run before its test, and a logical operator's right side's statements run where its left side decides (tools/r14-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
+  // 49. R15: conds.ts at -O1 and -O2, loop versioning at -O2, and loops where the guard must fail.
+  M.unit("49", async () => {
+    const R15 = timedModule("r15", await import("../r15-tests.ts"));
+    const failures: string[] = [];
+    const sh = await R15.r15Shapes();
+    failures.push(...sh.failures);
+    const rows: string[] = [...sh.rows];
+    for (const level of [0, 1, 2] as const) {
+      const r = await R15.r15Native(accel, jobs, level);
+      rows.push(`-O${level}: ${r.summary}`);
+      failures.push(...r.failures.map((x) => `-O${level}: ${x}`));
+      if (r.count === 0) failures.push(`-O${level}: no case of loop_versions.ts ran`);
+    }
+    report({
+      box: "49. R15 (D44, D73, pile item 10): a test a test above it answered goes at -O1 and -O2 (conds.ts), and -O2 versions a loop whose checks a guard before it proves (version.ts: a fast copy without them, the loop as it was the fallback); matmul's inner loop has a fast copy with no bounds or overflow check and a fallback with both, and is the loop it was at -O1; corpus/trap/loop_versions.ts, loops where the guard holds and loops where it must fail (a bound one past, a length or a bound the loop changes, two arrays of different lengths, a stride past the end, one array as two, a test after a join), agrees with V8 natively at -O0, -O1 and -O2, trapping where V8 does (tools/r15-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 50. R15's bugs, each caught.
+  M.unit("50", async () => {
+    const R15 = timedModule("r15", await import("../r15-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R15.R15_FAULTS) {
+      const r = await R15.r15Native(accel, jobs, 2, f.name);
+      rows.push(`${f.what}: ${r.failures.length} cases wrong`);
+      if (r.failures.length === 0) failures.push(`${f.name} wasn't caught`);
+    }
+    report({
+      box: `50. R15: each of ${R15.R15_FAULTS.length} bugs put into the optimiser's new passes is caught by corpus/trap/loop_versions.ts at -O2, with how many cases caught it: a test's answer taken where its edge doesn't dominate, the versioning guard allowing one turn more than the checks, a bound or length the loop changes read once before it for the guard, and every guard against the first check's length (tools/r15-tests.ts; opt-a box 12 catches each too)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
+  // 51. R16: class printing's arrays made at their final size in one step, `push` inlined with its slow path out of line.
+  M.unit("51", async () => {
+    const R16 = timedModule("r16", await import("../r16-tests.ts"));
+    const failures: string[] = [];
+    const sh = await R16.r16Shapes();
+    failures.push(...sh.failures);
+    const d = await R16.r16Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of R16's programs ran");
+    if (d.agreed !== d.cases)
+      failures.push(`${d.cases - d.agreed} cases differ through the two routes`);
+    for (const mode of ["strict", "leak", "manual"])
+      if (!d.printed.includes(`${R16.R16_PROGRAMS[0]!}@${mode}`))
+        failures.push(`${R16.R16_PROGRAMS[0]!} doesn't class-print in ${mode}`);
+    report({
+      box: "51. R16 (D44, D66): class printing's arrays (@tsl/jsrt's JsArray, and JsArenaArray in strict) are made at their final size in one step by an inlined constructor, and push is inlined with its slow path out of line, at -O1 and -O2 (no call to either left in operandWork, none to growth from a literal); corpus/lower/r16/r16_arrays.ts (literals of every length to 9, pushes to and past each capacity with another array made just after, growth, pop then push, arrays of objects) and the corpus's array programs agree through both routes with class printing forced in strict, leak and manual at -O0 and -O2, and the printed TSL on V8 and JSC with the source (tools/r16-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${sh.rows.join("; ")}; ${d.agreed}/${d.cases} cases the same, class-printed: ${d.printed.join(", ")}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 52. R16's bugs, each caught.
+  M.unit("52", async () => {
+    const R16 = timedModule("r16", await import("../r16-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R16.R16_FAULTS) {
+      const x = await R16.r16FaultRun(f, accel, jobs);
+      rows.push(`${f.what}: ${caughtText(x)}`);
+      if (x.answers === 0) failures.push(`${f.name} wasn't caught by a wrong answer`);
+    }
+    report({
+      box: `52. R16: each of ${R16.R16_FAULTS.length} bugs put into the two array classes is caught by R16's cases through the dual route, with how many cases caught it: a literal made one element short, push's fast path not raising the length, push's fast path taken at full capacity, and growth copying one element fewer than the array holds (tools/r16-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
+  // 53. R17: @tsl/gc's freeing step at the direct route's cost, and JsArray's "no holes" flag.
+  M.unit("53", async () => {
+    const R17 = timedModule("r17", await import("../r17-tests.ts"));
+    const failures: string[] = [];
+    const sh = await R17.r17Shapes();
+    failures.push(...sh.failures);
+    const d = await R17.r17Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of R17's program ran");
+    if (d.agreed !== d.cases)
+      failures.push(`${d.cases - d.agreed} cases differ through the two routes`);
+    for (const mode of ["rc", "leak", "manual"])
+      if (!d.printed.includes(`${R17.R17_PROGRAM}@${mode}`))
+        failures.push(`${R17.R17_PROGRAM} doesn't class-print in ${mode}`);
+    const st = await R17.r17Steps(accel, jobs);
+    failures.push(...st.failures);
+    if (st.cases === 0 || st.agreed !== st.cases)
+      failures.push(`the step counts: ${st.agreed}/${st.cases} agree`);
+    report({
+      box: "53. R17 (D39, D66): @tsl/gc's freeing step at the direct route's cost (an object whose store's release function does nothing given back with no call, the same step; Rc's make inlined, its free slot taken in line, at -O1 and -O2), and JsArray's no-holes flag for an array of numbers, with the lowering's pop clearing the slot it drops from an array of references in every mode; corpus/lower/r17/r17_free.ts (leaves among objects with one to three references, lists and trees dropped while leaves are made, arrays of numbers popped, shifted, cut and made longer by writes, arrays of objects popped and made longer and grown into a buffer another gave back) agrees through both routes with class printing forced in rc, leak and manual at -O0 and -O2, and the printed TSL on V8 and JSC with the source; corpus/rc/rc_steps*.ts's pinned step counts, R17's leaves among them, natively and on the host (tools/r17-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${sh.rows.join("; ")}; ${d.agreed}/${d.cases} cases the same, class-printed: ${d.printed.join(", ")}; step counts ${st.agreed}/${st.cases}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 54. R17's bugs, each caught.
+  M.unit("54", async () => {
+    const R17 = timedModule("r17", await import("../r17-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R17.R17_FAULTS) {
+      const x = await R17.r17FaultRun(f, accel, jobs);
+      rows.push(`${f.what}: ${caughtText(x)}`);
+      if (x.answers === 0) failures.push(`${f.name} wasn't caught by a wrong answer`);
+    }
+    report({
+      box: `54. R17: each of ${R17.R17_FAULTS.length} bugs is caught, with how many cases caught it: the freeing step's quick path freeing one past its budget, and giving a block back without taking its step (by corpus/rc/rc_steps*.ts's pinned counts), tslc taking every release function as one that does nothing (the same), JsArray's pop leaving a reference in the slot it drops, and a longer length of an array with no holes not zeroing what it adds (by corpus/std/leak/js_array.ts's cases) (tools/r17-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
+  // 55. R18: stack objects in rc class printing.
+  M.unit("55", async () => {
+    const R18 = timedModule("r18", await import("../r18-tests.ts"));
+    const failures: string[] = [];
+    const sh = await R18.r18Shapes();
+    failures.push(...sh.failures);
+    const d = await R18.r18Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of R18's program ran");
+    if (d.agreed !== d.cases)
+      failures.push(`${d.cases - d.agreed} cases differ through the two routes`);
+    for (const mode of ["rc", "leak", "manual"])
+      if (!d.printed.includes(`${R18.R18_PROGRAM}@${mode}`))
+        failures.push(`${R18.R18_PROGRAM} doesn't class-print in ${mode}`);
+    const neg = await R18.r18Neg(jobs);
+    failures.push(...neg.failures);
+    const tag = await runNative("rc", [accel], jobs, "rc_stack_tag", engines);
+    failures.push(...tag.failures);
+    if (!tag.ok || tag.count === 0)
+      failures.push("corpus/rc/rc_stack_tag.ts didn't run, or failed");
+    report({
+      box: "55. R18 (3.5, D39, D41): rc class printing keeps on the stack what the direct route keeps there: a class every object of which the lowering places on its function's stack, holding numbers, booleans and objects of other such classes and held by nothing counted, prints tagged @tsl.stack, and tslc's expansion leaves it uncounted, its new a plain new that tslc's escape checking places on the stack; corpus/lower/r18/r18_stack.ts (stack objects passed down, chosen on a branch, in every frame of a recursion, alive while counted objects are made, dropped, put in cycles and collected around them; beside classes counted because an object escapes into module state or a counted holder, or is made in a loop) agrees through both routes with class printing forced in rc, leak and manual at -O0 and -O2, and the printed TSL on V8 and JSC with the source; in TIR, which of its classes are tagged and that a tagged class's new makes no counted object at -O1 and -O2; corpus/neg/lowered-rc's tagged objects returned, kept in module state and held by a counted object refused (TSL3001, TSL3002), and a tagged class holding a reference refused (TSL9001); and in a hand-written rc package the tag means nothing (corpus/rc/rc_stack_tag.ts) (tools/r18-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${sh.rows.join("; ")}; ${d.agreed}/${d.cases} cases the same, class-printed: ${d.printed.join(", ")}; ${neg.rows.join("; ")}; rc_stack_tag ${tag.summary}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 56. R18's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("56", async () => {
+    const R18 = timedModule("r18", await import("../r18-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R18.R18_FAULTS) {
+      const x = await R18.r18FaultRun(f, accel, jobs);
+      rows.push(
+        `${f.what}: ${x.answers > 0 ? `${x.answers} (${f.by})` : x.caught > 0 ? "caught by time alone" : 0}`,
+      );
+      if (x.answers === 0) failures.push(`${f.name} wasn't caught (${f.by}): ${x.first}`);
+    }
+    report({
+      box: `56. R18: each of ${R18.R18_FAULTS.length} bugs is caught, with how many cases or builds caught it: an escaping object placed on the stack (the printer tagging every class of numbers: tslc refuses the build; and with tslc's escape checking also not taking a tagged class's new as a stack object: wrong answers), a stack object reachable from a heap object the collector scans (the printer tagging a class a counted holder in a cycle holds: refused; and with the checking off: wrong answers), a stack object released by @tsl/gc (the expansion sharing and dropping a tagged class's references: wrong answers or traps), the escape checking off alone (corpus/neg/lowered-rc's programs not refused), and the expansion taking a tagged class that holds a reference (the same) (tools/r18-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
+  // 57. R19: rc class printing's remaining costs, each where a wrong answer shows.
+  M.unit("57", async () => {
+    const R19 = timedModule("r19", await import("../r19-tests.ts"));
+    const failures: string[] = [];
+    const sh = await R19.r19Shapes();
+    failures.push(...sh.failures);
+    const fl = await R19.r19Fields(accel);
+    failures.push(...fl.failures);
+    if (!fl.skipped && fl.cases === 0) failures.push(`no case of ${R19.R19_FIELDS} ran`);
+    const d = await R19.r19Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of R19's program ran");
+    if (d.agreed !== d.cases)
+      failures.push(`${d.cases - d.agreed} cases differ through the two routes`);
+    if (!d.printed.includes(`${R19.R19_PROGRAM}@rc`))
+      failures.push(`${R19.R19_PROGRAM} doesn't class-print in rc`);
+    report({
+      box: "57. R19 (3.4, 3.5, 4.3, D39, D41, D73): rc class printing's remaining measured costs: a room array's tail of any length made in line, a fresh counted slot cut from a page of its size class, a holder with no slots or one freed without freeSteps' frame, an rc environment's call inlined with its kind and captures invariant by tslc's rule (a lowered rc package's counted class, fields stored by its constructor alone), and a ! left to the load through a reference's address; corpus/lower/r19/r19_rooms.ts (arrays grown to alternating lengths and read back, literals of one and two objects and arrays grown into a room churned past 64 pages, objects of three sizes kept alive and read back, closures of three kinds chosen at run time and called in loops, a map grown and read back) agrees through both routes with class printing forced in rc at -O0 and -O2, and the printed TSL on V8 and JSC with the source; in TIR, the environments' call printed @tsl.inline and the kind loaded invariant at -O1 and -O2; and corpus/lowered-rc/r19_fields.ts (hand-written, lowered rc) gives its pinned answers at -O0, -O1 and -O2, a field a method stores too not invariant, one its constructor alone stores invariant (tools/r19-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${sh.rows.join("; ")}; r19_fields ${fl.agreed}/${fl.cases}; ${d.agreed}/${d.cases} cases the same, class-printed: ${d.printed.join(", ")}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 58. R19's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("58", async () => {
+    const R19 = timedModule("r19", await import("../r19-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R19.R19_FAULTS) {
+      const x = await R19.r19FaultRun(f, accel, jobs);
+      rows.push(`${f.what}: ${caughtText(x)} (${f.by})`);
+      if (x.answers === 0) failures.push(`${f.name} wasn't caught (${f.by}): ${x.first}`);
+    }
+    report({
+      box: `58. R19: each of ${R19.R19_FAULTS.length} bugs is caught by a wrong answer, with how many cases caught it: a room array's growth copying one element short, an rc environment's inlined call switch dispatching to the wrong arm, tslc's invariance rule missing a store a method makes (corpus/lowered-rc/r19_fields.ts's pinned answers), a map table's growth losing an entry, a freed array literal's element not dropped (a holder of two objects given back after visiting one), a tail of a new length made at the last length's size class, and a fresh slot cut half a slot past the last (tools/r19-tests.ts)`,
       ok: failures.length === 0 && hvf.ok,
       detail: `${rows.join("; ")}${skipNote}`,
       failures,

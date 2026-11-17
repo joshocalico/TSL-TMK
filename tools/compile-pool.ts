@@ -62,6 +62,7 @@ function spawnSlot(): Slot {
     (
       m: Built & {
         id: number;
+        heapMb?: number;
         error?: string;
         compileMs: number;
         imageMs: number;
@@ -69,7 +70,9 @@ function spawnSlot(): Slot {
       },
     ) => {
       const t = slot.busy;
-      release(slot);
+      // R16: a worker whose heap has grown past RECYCLE_HEAP_MB goes now, with its garbage, rather than wait for more work
+      if ((m.heapMb ?? 0) > RECYCLE_HEAP_MB) retire(slot);
+      else release(slot);
       if (t === null) return;
       if (m.error !== undefined) t.reject(new Error(m.error));
       else
@@ -93,6 +96,24 @@ function spawnSlot(): Slot {
 }
 
 const IDLE_MS = 10_000;
+
+/**
+ * R16: a worker whose heap is past this after a job is let go at once and a fresh one takes the next job. The 640 MiB limit
+ * above doesn't hold in a job run with `--max-old-space-size` (the gate's nested milestones, MILESTONE_NODE), which Node lets
+ * override a worker's own: there a worker's heap grew past 1 GiB of garbage over a suite (native-e box 3, 2.84 GiB in R15's
+ * gate, two such workers and the test process). Only when it's used: nothing a worker makes depends on which worker it is.
+ */
+export const RECYCLE_HEAP_MB = 512;
+
+/** A worker let go now (R16's recycling): what `release` does, then the worker goes rather than wait. */
+function retire(slot: Slot): void {
+  release(slot);
+  if (slot.timer !== null) clearTimeout(slot.timer);
+  slot.timer = null;
+  const i = slots.indexOf(slot);
+  if (i >= 0) slots.splice(i, 1);
+  void slot.w.terminate();
+}
 
 /** A free worker waits a while for the next job, then goes, with everything it held. */
 function release(slot: Slot): void {

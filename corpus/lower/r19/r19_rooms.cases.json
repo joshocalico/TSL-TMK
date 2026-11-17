@@ -1,0 +1,21 @@
+[
+  { "fn": "alternating", "args": [80] },
+  { "fn": "grown", "args": [3] },
+  { "fn": "grown", "args": [9] },
+  { "fn": "grown", "args": [17] },
+  { "fn": "grown", "args": [300] },
+  { "fn": "grown", "args": [1000] },
+  { "fn": "pairs", "args": [30000] },
+  { "fn": "singles", "args": [30000] },
+  { "fn": "roomed", "args": [30000] },
+  { "fn": "keepMany", "args": [100] },
+  { "fn": "keepMany", "args": [150] },
+  { "fn": "chosen", "args": [0, 50] },
+  { "fn": "chosen", "args": [1, 50] },
+  { "fn": "chosen", "args": [2, 50] },
+  { "fn": "chosen", "args": [0, 0] },
+  { "fn": "chosen", "args": [2, 1] },
+  { "fn": "rotating", "args": [30] },
+  { "fn": "mapGrown", "args": [500] },
+  { "fn": "mapGrown", "args": [4] }
+]

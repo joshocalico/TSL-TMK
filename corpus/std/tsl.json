@@ -6,6 +6,7 @@
     "std_slab_safety.ts",
     "std_gen_adversarial.ts",
     "std_new_safety.ts",
+    "std_js_map_safety.ts",
     "std_replaced.ts",
     "ergo_pages.ts"
   ]

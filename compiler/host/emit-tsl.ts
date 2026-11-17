@@ -15,6 +15,9 @@ import {
   locTy,
   r13Off,
   r14Off,
+  r17Off,
+  r18Off,
+  r19Off,
   r6Off,
   r9Off,
   tyOf,
@@ -421,6 +424,11 @@ export function r12Off(part: string): boolean {
   return (process.env.TMK_R12_OFF ?? "").split(",").includes(part);
 }
 
+/** R16: whether a part of R16 is turned off by TMK_R16_OFF, for computing what it moved (tools/r16-pins.ts). */
+export function r16Off(part: string): boolean {
+  return (process.env.TMK_R16_OFF ?? "").split(",").includes(part);
+}
+
 /**
  * R12: class printing in `strict` (pile item 7) prints a program's objects as TSL classes and nothing else of phase 2: no
  * `JsArray`, `JsString`, `JsMap`, environment class, `Dyn` or layout class for a typed array, as each of those is
@@ -522,6 +530,9 @@ interface ClassPlan {
   // and, for a field another kind's capture has, its zero (`null` for a reference, which then can be null)
   env?: PlanField[];
 }
+
+/** R19: the most lines a closure kind's method body may have to be inlined where its environment's `call` calls it. */
+const SMALL_KIND = 6;
 
 // What isn't a child: shapes, instances, variables, globals, annotations and thunks. `c` is a condition (an `if`'s, a
 // loop's, a `?:`'s) or a class: visited when it's an expression.
@@ -946,7 +957,12 @@ class Emitter {
       return `new JsArenaArray(${desc}, ${n})`;
     }
     // In `leak` an outgrown buffer is kept, as the direct route's leak vectors keep theirs (3.5).
-    return `new JsArray(${desc}, ${len}, ${this.memory === "leak" ? "false" : "true"})`;
+    // R17: an array of numbers (or of bytes) has no holes, as JsRoomArray's says in `rc`: the lowering traps 15 before it
+    // would make one, so the slots a shorter length drops needn't be zeroed (a longer one zeroes what it adds). For tools/r17-pins.ts, TMK_R17_OFF=holes says every array may have them, and =jsrt prints JsArray's
+    // constructor as it was before R17 gave it the flag.
+    const scalar = es.s === "num" || this.byteElem(es) !== null;
+    const holes = r17Off("jsrt") ? "" : scalar && !r17Off("holes") ? ", false" : ", true";
+    return `new JsArray(${desc}, ${len}, ${this.memory === "leak" ? "false" : "true"}${holes})`;
   }
 
   /**
@@ -2749,11 +2765,115 @@ class Emitter {
         laid === undefined
           ? ""
           : `/**\n * Crosses an export: D36's layout (4.5's ABI, R5), ${laid.fields.map((f) => `${f.tsl} at ${f.off}`).join(", ")}.\n * @tsl.size ${laid.size}\n */\nexport `;
-      const text = `${note}${doc}class ${plan.name} {\n${body.join("\n")}\n}`;
+      // R18: kept on the stack in `rc` (planStack), as the direct route keeps it
+      const stack = this.stackPlans.has(n)
+        ? "/** On the stack, as the lowering keeps every object of it (R18). @tsl.stack */\n"
+        : "";
+      const text = `${note}${stack}${doc}class ${plan.name} {\n${body.join("\n")}\n}`;
       this.classText.set(n, text);
       out.push(text, "");
     }
     return out;
+  }
+
+  /**
+   * R18: in `rc`, the classes the lowering keeps on the stack, every object of them, as the direct route does (D39: what
+   * isn't on the stack is counted). A class is one if each `new` of it is an allocation the lowering placed on its
+   * function's stack (`stack()`: it doesn't escape, isn't reachable from module state and isn't made in a loop), its flow
+   * class isn't long, and what it holds is numbers, booleans and objects of other such classes; and nothing else holds it:
+   * no counted class's field, environment's capture, array's element or map's key or value. An environment class (a
+   * closure value, R3) is one on the same terms, its captures as its fields. Such a class prints tagged `@tsl.stack`, and
+   * tslc's expansion leaves it uncounted, its `new` a plain `new`, which tslc's escape checking puts on the stack and
+   * refuses wherever one could outlive its frame (expand-rc.ts, SPEC 3.5's R18). The tag is the lowering's facts handed on;
+   * tslc checks what it relies on, so a wrong tag is a build tslc refuses, not a wrong run.
+   */
+  stackPlans = new Set<HeapNode>();
+  planStack(): void {
+    if (this.memory !== "rc" || r18Off("stack")) return;
+    // the injected bugs (TMK_TEST_EMIT): `r18-stack-any`, every class that holds what one can tagged, wherever its objects
+    // go; `r18-stack-held`, a class a counted object's field holds tagged too
+    const any = this.fault === "r18-stack-any";
+    const anyHeld = this.fault === "r18-stack-held";
+    const made = new Set<HeapNode>();
+    const counted = new Set<HeapNode>();
+    for (const f of this.funcs)
+      eachTE(f.body, (te) => {
+        if (te.k !== "alloc") return;
+        const o = this.objNode(te.sh);
+        if (o === null) return;
+        made.add(o.node);
+        const own = findNode((te.sh as Extract<Shape, { s: "obj" }>).node);
+        if (te.stack() === null || own.long || findNode(o.node).long) counted.add(o.node);
+      });
+    // What each class holds: an object's fields, an environment's captures, of every closure it can be.
+    const holds = (n: HeapNode): Shape[] => {
+      const m = findNode(n);
+      if (m.kind === "fn")
+        return (this.envKinds.get(n) ?? []).flatMap((f) =>
+          (f.cloEnv?.caps ?? []).map((c) => c.sh as Shape),
+        );
+      return [...m.fields.values()];
+    };
+    const target = (sh: Shape): HeapNode | null =>
+      sh.s === "obj" || sh.s === "vec" ? this.canon(findNode(sh.node)) : null;
+    const byField = new Set<HeapNode>();
+    if (anyHeld)
+      for (const [h] of this.plans)
+        for (const sh of holds(h)) {
+          const t = target(sh);
+          if (t !== null && t !== h) byField.add(t);
+        }
+    const cand = new Set<HeapNode>();
+    for (const [n, plan] of this.plans) {
+      const m = findNode(n);
+      if (!made.has(n) || (!any && !byField.has(n) && counted.has(n))) continue;
+      if (m.dyn === true || m.weakOf !== undefined || m.variants.length > 0) continue;
+      if (m.kind !== "obj" && !(m.kind === "fn" && plan.env !== undefined)) continue;
+      if (this.boundaryLaid.has(n) || this.dynNode === n) continue;
+      const ok = holds(n).every(
+        (sh) =>
+          sh.s === "num" ||
+          sh.s === "bool" ||
+          isOptScalar(sh) ||
+          (sh.s === "obj" && this.plans.has(target(sh)!)),
+      );
+      if (ok) cand.add(n);
+    }
+    // Down to a fixed point: a class whose field's class isn't one, or which something not one holds, isn't one.
+    const holders = [...this.plans.keys()];
+    for (let changed = true; changed;) {
+      changed = false;
+      const heldByOther = new Set<HeapNode>();
+      for (const h of holders) {
+        if (cand.has(h)) continue;
+        for (const sh of holds(h)) {
+          const t = target(sh);
+          if (t !== null) heldByOther.add(t);
+        }
+      }
+      for (const [, es] of this.vecs) {
+        const t = target(es);
+        if (t !== null) heldByOther.add(t);
+      }
+      for (const [, mp] of this.mapPlans)
+        for (const sh of [mp.keys, mp.vals]) {
+          const t = target(sh);
+          if (t !== null) heldByOther.add(t);
+        }
+      for (const n of cand) {
+        const bad =
+          (!any && !byField.has(n) && heldByOther.has(n)) ||
+          holds(n).some((sh) => {
+            const t = target(sh);
+            return t !== null && !cand.has(t);
+          });
+        if (bad) {
+          cand.delete(n);
+          changed = true;
+        }
+      }
+    }
+    for (const n of cand) this.stackPlans.add(n);
   }
 
   /** A reference's type in the text: its class, `| null` where the lowering says it can be. */
@@ -2992,6 +3112,7 @@ class Emitter {
       this.planClasses();
       this.planMembers();
       this.findThisCopies();
+      this.planStack();
     }
     const parts: string[] = [];
     // Modules (D65): each part also goes to its own module's list, printed with that module as the one referring.
@@ -3084,7 +3205,8 @@ class Emitter {
         );
       else {
         const list = this.memberText.get(m.node) ?? [];
-        list.push(inMod(this.modOfPlan(m.node), () => this.func(f)));
+        const text = inMod(this.modOfPlan(m.node), () => this.func(f));
+        list.push(this.smallKind(m.node, f, text) ? `/** @tsl.inline */\n${text}` : text);
         this.memberText.set(m.node, list);
       }
     }
@@ -3095,8 +3217,17 @@ class Emitter {
       const sig = this.cloSigs.get(kinds[0]!);
       if (sig === undefined) this.fail("a closure kind that wasn't printed");
       const names = sig!.params.map((p) => p.slice(0, p.indexOf(":"))).join(", ");
-      const call = (k: number): string => `this.${this.members.get(kinds[k]!)!.name}(${names})`;
-      const lines = [`call(${sig!.params.join(", ")}): ${sig!.ret} {`];
+      // the injected `r19-kind-arm` bug (R19): in `rc`'s inlined switch, the first two kinds' calls swapped
+      const swap = this.rc && !r19Off("inline") && this.fault === "r19-kind-arm";
+      const call = (k: number): string =>
+        `this.${this.members.get(kinds[swap && k < 2 ? 1 - k : k]!)!.name}(${names})`;
+      // R19: in `rc`, inlined where it's called, so a call in a loop is the compare chain and the kind's method there, which
+      // tslc's expansion and markInvariantFields let the optimiser take out of the loop: the kind and the captures are
+      // stored by the environment's constructor alone (D73), and an unswitched loop calls the kind's method directly
+      const lines = [
+        ...(this.rc && !r19Off("inline") ? ["/** @tsl.inline */"] : []),
+        `call(${sig!.params.join(", ")}): ${sig!.ret} {`,
+      ];
       const last = kinds.length - 1;
       const kindAt =
         this.fault === "env-wrong-kind"
@@ -4259,9 +4390,18 @@ class Emitter {
         break;
       case "blockexpr": {
         if (this.isEnvBlock(e)) return this.value(e);
+        // R16: a push whose value nothing uses: the lowering's push is a statement-expression whose value is the length read
+        // again after it; where nothing uses it, that read of an array the push just wrote prints as nothing, as it can't
+        // trap or change anything (at -O0 it was a call to the length getter, and at -O1 and -O2 a load kept for it, as the
+        // push's slow path is a call the length can't be known across).
+        if (this.simpleBody(e.body) && !this.rcHoists(e) && this.pushedLength(e))
+          return this.sequence(this.bodyPartFns(e.body));
         if (this.simpleBody(e.body) && !this.rcHoists(e))
           return this.sequence([...this.bodyPartFns(e.body), () => this.effect(e.result)]);
         this.hoistBody(e.body, e.result);
+        // R17: and where `rc` hoists the body (the push a statement of its own), the read after it prints as nothing too,
+        // as R16's does in a comma expression. TMK_R17_OFF=pushlen prints it, for tools/r17-pins.ts.
+        if (this.rc && !r17Off("pushlen") && this.pushedLength(e)) return "";
         return this.effect(e.result);
       }
       case "seq":
@@ -4288,6 +4428,22 @@ class Emitter {
       }
     }
     return this.value(e);
+  }
+
+  /**
+   * R16: a statement-expression whose body ends in a push (`$push`, grouped) and whose value is the same array's length read
+   * again (maybe converted): in a statement, or anywhere its value is unused, that read is nothing.
+   */
+  pushedLength(e: Extract<TE, { k: "blockexpr" }>): boolean {
+    if (!this.classes || this.vecs.size === 0 || r16Off("pushlen")) return false;
+    const body = this.grouped(e.body);
+    const last = body[body.length - 1];
+    if (last?.k !== "expr" || last.e.k !== "rtcall" || last.e.name !== "$push") return false;
+    const v = last.e.args[0];
+    let r: TE = e.result;
+    while (r.k === "conv") r = r.val;
+    if (r.k !== "fload" || !this.isVecLen(r) || v === undefined) return false;
+    return r.base === v || (r.base.k === "var" && v.k === "var" && r.base.v === v.v);
   }
 
   /** A body of lets and expressions only: it can be a comma expression, with its lets declared at the function's top. */
@@ -5212,6 +5368,20 @@ class Emitter {
     const f = (this.envKinds.get(n) ?? [])[0];
     const own = f === undefined ? "" : f.tirName.replace(/\$clo(\$\d+)?$/, "");
     return own === "" || own.includes("<") ? "Closure" : `${sanitize(own)}_Closure`;
+  }
+
+  /**
+   * R19: whether a closure kind's method, in `rc`, is small enough to inline where its environment's `call` (inlined) calls
+   * it: one of several kinds, a body of at most SMALL_KIND lines with no loop. -O1 inlines only what's no bigger than a call
+   * there (or a small leaf in a loop, which a call copied in by inlining isn't always seen to be in), and a closure called
+   * in a loop was its environment's `call`, its compare chain and a call. Only a hint: the optimiser decides.
+   */
+  private smallKind(node: HeapNode, f: unknown, text: string): boolean {
+    if (!this.rc || r19Off("inline")) return false;
+    const kinds = this.envKinds.get(node) ?? [];
+    if (kinds.length < 2 || !kinds.includes(f as never)) return false;
+    const lines = text.split("\n");
+    return lines.length <= SMALL_KIND + 2 && !/\b(for|while|do)\b/.test(text);
   }
 
   /** Whether an environment's class has a kind field (R3): with several kinds. */

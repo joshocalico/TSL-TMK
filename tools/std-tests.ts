@@ -3,13 +3,34 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ROOT, runNative, wrongAnswers, type Engines, type NativeKind } from "./corpus.ts";
+import { faultFailures, patchEnv } from "./faults.ts";
 
 export interface Fault {
   name: string;
   file: string;
   from: string;
   to: string;
+  times?: number; // R19: how many times `from` is in the file, each replaced (test-patch.ts); 1 unless said
 }
+
+// R18 (SPEC 8.3's fault rule): ExactMap and Map share their code's text, so a bug's text there is the same in both, and a
+// patch took ExactMap's alone (the first) from the maps step (D47) to R18. Each now names its class by the text around it, and
+// each of the four has a counterpart in Map.
+const MAP = "packages/tsl-std/ex-std-map.ts";
+const DELETE_FIND =
+  "    if (b === 0) return false;\n    const at = (this.hash(k) & toU32(b - 1)) >>> 0;\n    let i: u32 = this.heads.get(at);\n    let prev = NONE;\n    while (i !== NONE) {\n      const next = this.chain.get(i);\n      // SAFETY: as in find.\n      if (keySame(this.keys.get(i), k)) {\n        if (prev === NONE) this.heads.set(at, next);\n        else this.chain.set(prev, next);\n";
+const EXACT_DELETE = `    if (this.loans > 0) trap(Trap.Loan);\n    const b = this.heads.length;\n${DELETE_FIND}`;
+const JS_DELETE = `  delete(k: K): bool {\n    const b = this.heads.length;\n${DELETE_FIND}`;
+const TOMB_SET = "        this.chain.set(i, TOMB);\n";
+const TRYSET_PUSH =
+  "    if (this.keys.length >= this.heads.length && !this.grow()) return false;\n    if (!this.keys.push(k)) return false;\n    if (!this.vals.push(v)) {\n";
+const EXACT_TRYSET = `    if (this.loans > 0) trap(Trap.Loan);\n${TRYSET_PUSH}`;
+const JS_TRYSET = `      return true;\n    }\n${TRYSET_PUSH}`;
+const COMPACT =
+  "      this.chain.set(i, this.heads.get(b));\n      this.heads.set(b, toU32(i));\n    }\n    return true;\n  }\n\n  private compact(used: usize): void {\n    let to: usize = 0;\n    for (let i: usize = 0; i < used; i++) {\n      if (this.chain.get(i) === TOMB) continue;\n      if (to !== i) {\n        this.keys.set(to, this.keys.get(i));\n";
+const EXACT_COMPACT = `    for (let i: usize = 0; i < n; i++) {\n      const b = (this.hash(this.keys.get(i)) & mask) >>> 0;\n${COMPACT}`;
+const JS_COMPACT = `      if (!compacted && this.chain.get(i) === TOMB) continue;\n      const b = (this.hash(this.keys.get(i)) & mask) >>> 0;\n${COMPACT}`;
+const VALS_MOVE = "        this.vals.set(to, this.vals.get(i));\n";
 
 export const FAULTS: Fault[] = [
   {
@@ -44,9 +65,9 @@ export const FAULTS: Fault[] = [
   },
   {
     name: "a deleted entry left visible",
-    file: "packages/tsl-std/ex-std-map.ts",
-    from: "this.chain.set(i, TOMB);",
-    to: "",
+    file: MAP,
+    from: EXACT_DELETE + TOMB_SET,
+    to: EXACT_DELETE,
   },
   {
     name: "inserting during forEach allowed",
@@ -56,21 +77,46 @@ export const FAULTS: Fault[] = [
   },
   {
     name: "trySet leaving a key behind when out of memory",
-    file: "packages/tsl-std/ex-std-map.ts",
-    from: "if (!this.vals.push(v)) {\n      this.keys.pop();",
-    to: "if (!this.vals.push(v)) {",
+    file: MAP,
+    from: `${EXACT_TRYSET}      this.keys.pop();`,
+    to: EXACT_TRYSET,
   },
   {
     name: "a stale key reaching a closure from a Map",
-    file: "packages/tsl-std/ex-std-map.ts",
-    from: "checkLive(k);",
-    to: "",
+    file: MAP,
+    from: "      checkLive(k);\n      checkLive(v);\n      f(k, v);",
+    to: "      checkLive(v);\n      f(k, v);",
   },
   {
     name: "compaction losing values",
-    file: "packages/tsl-std/ex-std-map.ts",
-    from: "this.vals.set(to, this.vals.get(i));",
-    to: "",
+    file: MAP,
+    from: EXACT_COMPACT + VALS_MOVE,
+    to: EXACT_COMPACT,
+  },
+  // R18: the four above in Map (JS's), whose text they shared and never reached
+  {
+    name: "a deleted entry left visible, in JS's Map",
+    file: MAP,
+    from: JS_DELETE + TOMB_SET,
+    to: JS_DELETE,
+  },
+  {
+    name: "trySet leaving a key behind when out of memory, in JS's Map",
+    file: MAP,
+    from: `${JS_TRYSET}      this.keys.pop();`,
+    to: JS_TRYSET,
+  },
+  {
+    name: "a stale key reaching a closure from forEach, in JS's Map",
+    file: MAP,
+    from: "      checkLive(k);\n      checkLive(v);\n      f(v, k);",
+    to: "      checkLive(v);\n      f(v, k);",
+  },
+  {
+    name: "compaction losing values, in JS's Map",
+    file: MAP,
+    from: JS_COMPACT + VALS_MOVE,
+    to: JS_COMPACT,
   },
   {
     name: "ExactMap not trapping on a missing key",
@@ -146,9 +192,11 @@ export async function faultRun(
   jobs: number,
   engines: Engines,
 ): Promise<{ caught: number; answers: number; first: string; broken: boolean }> {
-  process.env.TSL_TEST_PATCH = JSON.stringify({ file: f.file, from: f.from, to: f.to });
+  // checked against the source first (SPEC 8.3): a patch that doesn't apply throws, failing the box, never caught
+  process.env.TSL_TEST_PATCH = patchEnv({ file: f.file, from: f.from, to: f.to });
   try {
     const r = await runNative("std" as NativeKind, [accel], jobs, undefined, engines);
+    faultFailures(r.failures, f.name);
     const seen = r.failures.filter((x) => x.includes(` on ${accel}:`));
     // A case that never finished, or an image that ran out of time, depends on the host's load and the level: with the
     // named allocator ignored, std_new_safety.ts's trySetFailsPartWayKeys exhausts the whole guest instead of its pool,

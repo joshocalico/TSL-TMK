@@ -11,6 +11,7 @@ import { Ranges } from "../range.ts";
 import type { Loop } from "./loops.ts";
 import { cfgFunc, type CfgStats } from "./cfg.ts";
 import { checksFunc, type ChecksStats } from "./checks.ts";
+import { condsFunc, type CondsStats } from "./conds.ts";
 import { dceFunc, type DceStats } from "./dce.ts";
 import { gvnFunc, type GvnStats } from "./gvn.ts";
 import {
@@ -25,6 +26,7 @@ import { licmFunc, type LicmStats } from "./licm.ts";
 import { loopBoundsFunc, type LoopBoundsStats } from "./loopbounds.ts";
 import { readonlyFunctions } from "./memory.ts";
 import { unswitchFunc, type UnswitchStats } from "./unswitch.ts";
+import { versionFunc, type VersionStats } from "./version.ts";
 import { simplifyFunc, type FoldFaults, type SimplifyStats } from "./simplify.ts";
 import { sroaFunc, type SroaStats } from "./sroa.ts";
 import { removeUnreached, type UnreachedStats } from "./unreached.ts";
@@ -47,6 +49,8 @@ export const PASSES = [
   "peel",
   "checks",
   "loopbounds", // R7: -O1's bounds checks its loops' own tests prove (loopbounds.ts); -O2's `checks` proves them and more
+  "conds", // R15: a test a test above it answered (conds.ts), at -O1 and -O2
+  "version", // R15: loop versioning, -O2's (version.ts)
   "keep",
   "invariant",
   "unreached",
@@ -80,6 +84,10 @@ export const OPT_FAULTS = [
   "checks-drop-bounds", // check elimination removes a bounds check whose index may equal the length (D73)
   "checks-off-by-one", // check elimination removes an overflow check whose result may be one past its limit (D73)
   "loopbounds-inclusive", // -O1's loop bounds proof takes a test `k <= m` for `k < m`, so a check that fires on the last turn goes (R7)
+  "conds-not-dominating", // a fact from a branch's edge is used where that edge's block is reached from elsewhere too (R15)
+  "version-off-by-one", // loop versioning's guard lets the fast copy run one turn more than its checks allow (R15)
+  "version-bound-in-loop", // loop versioning reads a length the loop can change once before it, for its guard (R15)
+  "version-wrong-length", // loop versioning's guard checks every index against the first check's length (R15)
   "clsid-ignore-store", // tslc's rule for fields nothing writes after construction misses a store after it (D73, 3.4)
   "unreached-drop-runtime", // the unreached-function pass takes only exports as roots, not what the runtime calls by name (R1d)
   // The AArch64 backend's -O1 and -O2 code shape (B3, D75): read by the backend from the same variable.
@@ -124,6 +132,8 @@ export interface OptReport {
   unswitch: UnswitchStats;
   checks: ChecksStats;
   loopBounds: LoopBoundsStats;
+  conds: CondsStats;
+  version: VersionStats;
   keptLoads: number;
   unreached: UnreachedStats;
   callsBefore: number; // call and call.indirect instructions in the module, before and after
@@ -209,6 +219,8 @@ export function optimizeModule(
     unswitch: { loops: 0, peeled: 0, cost: 0 },
     checks: { overflow: 0, ranges: 0, bounds: 0, compares: 0 },
     loopBounds: { bounds: 0, branches: 0 },
+    conds: { branches: 0, compares: 0, bounds: 0 },
+    version: { loops: 0, checks: 0, overflow: 0, cost: 0 },
     keptLoads: 0,
     unreached: { funcs: 0, globals: 0 },
     callsBefore: countCalls(input),
@@ -338,7 +350,14 @@ export function optimizeModule(
   }
   // Phase B (D73): value numbering and loop-invariant code motion, one function at a time, after inlining has made the
   // functions they look at. A call writes nothing where its callee provably writes nothing.
-  if (!off.has("gvn") || !off.has("licm") || !off.has("checks") || !off.has("loopbounds")) {
+  if (
+    !off.has("gvn") ||
+    !off.has("licm") ||
+    !off.has("checks") ||
+    !off.has("loopbounds") ||
+    !off.has("conds") ||
+    !off.has("version")
+  ) {
     const readonly = readonlyFunctions(m);
     const gvnFaults = { acrossStore: faults.has("gvn-across-store") };
     const licmFaults = {
@@ -371,6 +390,21 @@ export function optimizeModule(
       const c = loopBoundsFunc(f, report.loopBounds, loopBoundsFaults);
       if (c) verify("loopbounds", f);
       return c;
+    };
+    // R15: a test a test above it answered, at -O1 and -O2: one walk down the dominator tree (conds.ts).
+    const condsFaults = { notDominating: faults.has("conds-not-dominating") };
+    const conds = (f: Func): boolean => {
+      if (off.has("conds")) return false;
+      const c = condsFunc(f, report.conds, condsFaults);
+      if (c) verify("conds", f);
+      return c;
+    };
+    // R15: -O2's loop versioning (version.ts): a fast copy without the checks a guard before it proves, the loop as it was
+    // the fallback.
+    const versionFaults = {
+      offByOne: faults.has("version-off-by-one"),
+      boundInLoop: faults.has("version-bound-in-loop"),
+      wrongLength: faults.has("version-wrong-length"),
     };
     // -O2: which way a loop's first turn goes, proved from the function as it is at that moment (range.ts), so a check or
     // a load past the loop's test can move out. -O1 doesn't spend the time.
@@ -411,6 +445,10 @@ export function optimizeModule(
           c = true;
           folded = true;
         }
+        if (conds(f)) {
+          c = true;
+          folded = true;
+        }
         // -O1 removes what's left dead only (merged parameters); -O2 cleans up in full.
         if (c && o.level >= 2) local(f);
         else if (c) {
@@ -419,6 +457,30 @@ export function optimizeModule(
         }
         // -O2: a loop that branches on what it doesn't change becomes one loop for each way, and what each way's copy
         // doesn't change moves out of it in turn.
+        // -O2 (R15): a loop with checks a guard before it can prove gets a fast copy without them, the loop as it was the
+        // fallback; then what the copy no longer checks is shared and moved as anywhere else.
+        if (o.level >= 2 && !off.has("version")) {
+          const before = process.env.TMK_OPT_DEBUG === "1" ? printFunc(f) : "";
+          const copied = versionFunc(
+            f,
+            { deadAtO0, stats: report.version, limits: VERSION_O2, faults: versionFaults },
+            new Set(),
+          );
+          if (copied) {
+            try {
+              verify("version", f);
+            } catch (e) {
+              if (before !== "") console.error(`${before}\n--- became ---\n${printFunc(f)}`);
+              throw e;
+            }
+            local(f);
+            gvn(f);
+            if (licm(f)) gvn(f);
+            if (checks(f)) gvn(f);
+            conds(f);
+            local(f);
+          }
+        }
         if (o.level >= 2 && (!off.has("unswitch") || !off.has("peel"))) {
           const before = process.env.TMK_OPT_DEBUG === "1" ? printFunc(f) : "";
           const copied = unswitchFunc(f, {
@@ -481,6 +543,9 @@ function markInvariantLoads(m: Module): void {
 
 /** How big a loop -O2 copies, and how much copies may add to one function (D73, measured in M5's phase B record). */
 const UNSWITCH_O2 = { loopCost: 160, peelCost: 64, funcGrowth: 640 };
+
+/** How big a loop -O2 versions, how much the copies may add to a function, and how many guards one loop's test may hold (R15). */
+const VERSION_O2 = { loopCost: 160, funcGrowth: 640, guards: 8 };
 
 export const CALL_COUNTER = "__rc_s_calls";
 

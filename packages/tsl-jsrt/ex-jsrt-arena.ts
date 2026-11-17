@@ -27,11 +27,22 @@ export class JsArenaArray<T> {
   private cap: usize = 0;
 
   /** `length` elements, each zero: JS's `new Array(length)` with its holes, or `[]`. */
+  // R16: made at its final size in one step, as the direct route's `__vec_new` makes a vector: one block of max(length, 4)
+  // elements from the arena, zeroed, and no growth path. Inlined at every level that inlines, so a constant length folds.
+  /** @tsl.inline */
+  // SAFETY: the block is ncap elements of the call arena, at least length, which traps 14 where it has no room, so it's
+  // never 0; nothing else has it.
   constructor(
     private elem: ElemOf<T>,
     length: usize,
   ) {
-    this.grow(length < 4 ? 4 : length);
+    const ncap = length < 4 ? 4 : length;
+    const bytes = ncap * elemSize(elem);
+    const block = callRegionBytes(bytes);
+    if (block === 0n) trap(Trap.OutOfMemory);
+    bytesAt(block, bytes).fill(0);
+    this.data = block;
+    this.cap = ncap;
     this.len = length;
   }
 
@@ -74,11 +85,27 @@ export class JsArenaArray<T> {
     return v;
   }
 
-  /** Appends v and gives the new length, as JS's `push` does. */
-  // SAFETY: grow left room for one more, so the slot at len is in the buffer.
+  /**
+   * Appends v and gives the new length, as JS's `push` does. R16: inlined at every level that inlines, as the direct
+   * route's push is: with room left, a store and the length bumped; full, `pushGrow`, out of line.
+   */
+  /** @tsl.inline */
+  // SAFETY: n is below cap, so the slot at n is in the buffer.
   push(v: T): usize {
     const n = this.len;
-    if (n === this.cap) this.grow(n + 1);
+    if (n >= this.cap) return this.pushGrow(v);
+    this.slot(n).write(v);
+    const m = n + 1;
+    this.len = m;
+    return m;
+  }
+
+  /** `push` on a full array: the buffer doubled (`grow`), then the store. Out of line, so `push` stays small. */
+  /** @tsl.noinline */
+  // SAFETY: grow left room for one more, so the slot at len is in the buffer.
+  private pushGrow(v: T): usize {
+    const n = this.len;
+    this.grow(n + 1);
     this.slot(n).write(v);
     const m = n + 1;
     this.len = m;
@@ -111,7 +138,8 @@ export class JsArenaArray<T> {
     if (n > this.cap) this.grow(n);
   }
 
-  /** JS's `a.length = n` within what's reserved: shorter drops elements, longer adds holes. Gives n. */
+  /** JS's `a.length = n` within what's reserved: shorter drops elements, longer adds holes. Gives n. R16: inlined. */
+  /** @tsl.inline */
   // SAFETY: the slots from n to len are below cap.
   setLength(n: usize): usize {
     if (n > this.cap) trap(Trap.Bounds);
@@ -126,6 +154,7 @@ export class JsArenaArray<T> {
     this.clear(i, i + 1);
   }
 
+  /** @tsl.inline */
   // SAFETY: the slots from `from` to `to` are below cap, so these are the buffer's, a whole element at a time; an
   // element's size is a constant, so one arm is left.
   private clear(from: usize, to: usize): void {
@@ -142,8 +171,11 @@ export class JsArenaArray<T> {
   // SAFETY: the new block is ncap elements of the call arena, at least len; the first len are copied from the old one and
   // the rest zeroed, as the arena's memory is reused. The old block stays in the arena, which the caller resets whole, so
   // nothing reads it after: `data` is the new one. The arena traps 14 where it has no room left, so `next` is never 0.
+  // R16: only `push`'s slow path and `reserve` grow (not the constructor): inlined into those, which are out of line.
+  /** @tsl.inline */
   private grow(need: usize): void {
-    const dbl = this.cap * 2;
+    const cap = this.cap;
+    const dbl = cap + cap;
     const ncap = dbl < need ? need : dbl;
     const size = elemSize(this.elem);
     const bytes = ncap * size;

@@ -1,0 +1,40 @@
+[
+  { "fn": "sumFrom", "args": [{ "f64s": [1, 2, 3, 4, 5] }, 1, 3], "expect": 9 },
+  { "fn": "sumFrom", "args": [{ "f64s": [1, 2, 3, 4, 5] }, 0, 5], "expect": 15 },
+  { "fn": "sumFrom", "args": [{ "f64s": [1, 2, 3, 4, 5] }, 0, 6], "trap": 2 },
+  { "fn": "sumFrom", "args": [{ "f64s": [1, 2, 3, 4, 5] }, 3, 3], "trap": 2 },
+  { "fn": "sumFrom", "args": [{ "f64s": [1, 2, 3, 4, 5] }, 6, 0], "expect": 0 },
+  { "fn": "sumFrom", "args": [{ "f64s": [] }, 0, 0], "expect": 0 },
+  { "fn": "sumFrom", "args": [{ "f64s": [] }, 0, 1], "trap": 2 },
+  { "fn": "sumStrided", "args": [{ "f64s": [1, 2, 3, 4, 5, 6, 7, 8, 9] }, 3, 1, 3], "expect": 15 },
+  { "fn": "sumStrided", "args": [{ "f64s": [1, 2, 3, 4, 5, 6, 7, 8, 9] }, 3, 2, 4], "trap": 2 },
+  { "fn": "sumStrided", "args": [{ "f64s": [1, 2, 3, 4, 5, 6, 7, 8, 9] }, 0, 4, 5], "expect": 25 },
+  { "fn": "sumStrided", "args": [{ "f64s": [1, 2, 3, 4, 5, 6, 7, 8, 9] }, 0, 9, 1], "trap": 2 },
+  { "fn": "sumStrided", "args": [{ "f64s": [1, 2, 3, 4, 5, 6, 7, 8, 9] }, 4, 0, 3], "expect": 15 },
+  { "fn": "sumStrided", "args": [{ "f64s": [1, 2, 3, 4, 5, 6, 7, 8, 9] }, 4, 1, 3], "trap": 2 },
+  { "fn": "sumStrided", "args": [{ "f64s": [1, 2, 3, 4, 5, 6, 7, 8, 9] }, 4, 9, 0], "expect": 0 },
+  { "fn": "dot", "args": [{ "f64s": [1, 2, 3] }, { "f64s": [4, 5, 6] }, 3], "expect": 32 },
+  { "fn": "dot", "args": [{ "f64s": [1, 2, 3] }, { "f64s": [4, 5] }, 3], "trap": 2 },
+  { "fn": "dot", "args": [{ "f64s": [1, 2] }, { "f64s": [4, 5, 6] }, 3], "trap": 2 },
+  { "fn": "dot", "args": [{ "f64s": [1, 2, 3] }, { "f64s": [4, 5] }, 2], "expect": 14 },
+  {
+    "fn": "shiftSelf",
+    "args": [{ "f64s": [1, 0, 0, 0] }, 3],
+    "expect": { "args": [{ "f64s": [1, 2, 3, 4] }, null] }
+  },
+  { "fn": "shiftSelf", "args": [{ "f64s": [1, 0, 0, 0] }, 4], "trap": 2 },
+  {
+    "fn": "shiftAdd",
+    "args": [{ "f64s": [1, 2, 3] }, { "f64s": [0, 0, 0, 0] }, 3],
+    "expect": { "args": [null, { "f64s": [0, 2, 3, 4] }, null] }
+  },
+  { "fn": "shiftAdd", "args": [{ "f64s": [1, 2, 3] }, { "f64s": [0, 0, 0] }, 3], "trap": 2 },
+  { "fn": "drain", "args": [{ "f64s": [1, 2, 3, 4, 5, 6] }, { "u32s": [6] }, 4], "expect": 10 },
+  { "fn": "drain", "args": [{ "f64s": [1, 2, 3, 4, 5, 6] }, { "u32s": [6] }, 6], "trap": 2 },
+  { "fn": "drain", "args": [{ "f64s": [1, 2, 3, 4, 5, 6] }, { "u32s": [9] }, 2], "expect": 3 },
+  { "fn": "grow", "args": [{ "f64s": [1, 2, 3, 4, 5, 6] }, { "u32s": [3] }], "expect": 10 },
+  { "fn": "grow", "args": [{ "f64s": [1, 2, 3, 4] }, { "u32s": [3] }], "expect": 10 },
+  { "fn": "grow", "args": [{ "f64s": [1, 2, 3] }, { "u32s": [3] }], "trap": 2 },
+  { "fn": "afterJoin", "args": [{ "f64s": [1, 2, 3] }, 1, 5], "expect": 2 },
+  { "fn": "afterJoin", "args": [{ "f64s": [1, 2, 3] }, 3, 5], "trap": 2 }
+]

@@ -1,6 +1,7 @@
 // What `tmk milestone pipe-b` asks of @tsl/gc (SPEC 3.5, D63): each bug put into it has to be caught by its corpus,
 // corpus/std/rc_gc.ts, which runs on V8 and JSC unpatched and natively patched, so a patched result that differs is caught.
 import { runNative, wrongAnswers, type Engines } from "./corpus.ts";
+import { faultFailures, patchEnv } from "./faults.ts";
 import type { Fault } from "./std-tests.ts";
 
 const RC = "packages/tsl-gc/ex-gc-rc.ts";
@@ -24,9 +25,13 @@ export const GC_FAULTS: Fault[] = [
   {
     name: "release not called, so what a freed object held leaks",
     file: RC,
-    // R4: runSteps finds the release function once an object, as rel
-    from: "const k = callRelease(rel, item, a, Visit.Drop);",
-    to: "const k: usize = 0;",
+    // R4: runSteps finds the release function once an object, as rel. R17: freeSteps' first visit of an object, which says
+    // how many slots it has, made to say none without the call, so the object is given back with what it holds unvisited.
+    // R19: and freeFlat's, the same visit in the same words, which takes an object freeing starts with the cursor idle
+    // (freeSteps then takes only an object part freed, or one a scan gave up): both, or the bug wouldn't be where freeing is
+    times: 2,
+    from: "s = callRelease(rel, item, 0, Visit.Drop);",
+    to: "s = 0;",
   },
   {
     name: "freeing not bounded: a make frees everything waiting",
@@ -34,8 +39,9 @@ export const GC_FAULTS: Fault[] = [
     // every freeing call runs until nothing waits, on the path a make with the collector linked takes (R1c added the
     // collector's): since R1f that's freeOne, whose usual object quickFree frees outside runSteps' loop, so the bug is put
     // there, where it was caught before (corpus/std/rc_gc.ts's bounded freeing, whose Node can be in a cycle)
-    from: "  if (!(cur === 0n && slot !== 0n && b >= FREES_STEPS && quickFree(slot))) runSteps(b < FREES_STEPS ? b : FREES_STEPS);",
-    to: "  while (waiting !== 0n || cur !== 0n) runSteps(0x10_0000);",
+    // (R17: freeOne counts the steps it takes from what quickFree and runSteps give back)
+    from: "  let took: u64 = cur === 0n && slot !== 0n && b >= FREES_STEPS ? quickFree(slot) : 0n;\n  if (took === 0n) took = runSteps(b < FREES_STEPS ? b : FREES_STEPS);",
+    to: "  let took: u64 = 0n;\n  while (waiting !== 0n || cur !== 0n) took = BigInt.asUintN(64, took + runSteps(0x10_0000));",
   },
   {
     name: "a freed slot's generation left as it was, so a stale handle reads its next object",
@@ -74,16 +80,21 @@ export const RC_TSL_FAULTS: (Fault & {
   {
     name: "a freeing step that visits every slot of an object at once",
     file: RC,
-    from: "      if (a < s) {\n        a++;\n        continue;\n      }",
-    to: "      for (let j = a + 1; j < s; j++) callRelease(ptrAt(u32, entry).read(), item, j, Visit.Drop);\n      if (a < s) {\n        a = s;\n        continue;\n      }",
+    // R17: put into freeSteps' loop over an object's slots after its first. (From R4 to R16 its text was runSteps' before R4,
+    // which TSL_TEST_PATCH couldn't find, so the patch threw, and the box counted the thrown build as caught.) R19: and into
+    // freeFlat's, the same loop in the same words (see the bug above)
+    times: 2,
+    from: "        callRelease(rel, item, a, Visit.Drop);\n        left = spare;\n        spare = 0n;\n        a++;\n      }",
+    to: "        callRelease(rel, item, a, Visit.Drop);\n        for (let j = a + 1; j < s; j++) callRelease(rel, item, j, Visit.Drop);\n        left = spare;\n        spare = 0n;\n        a = s;\n      }",
   },
   {
     // B3: with no collector linked (every class in no cycle), an allocation frees everything waiting at once, not
     // RC_BUDGET steps of it. Results don't change, only the bound, so nothing caught it until corpus/rc/rc_steps_nocc.ts.
     name: "unbounded freeing at an allocation with no collector linked",
     file: RC,
-    from: "    } else if (waiting !== 0n || cur !== 0n) runSteps(budget);\n    // the common case first",
-    to: "    } else if (waiting !== 0n || cur !== 0n) runSteps(0x10_0000);\n    // the common case first",
+    // R17: on the path `make` takes, which is inlined and takes its slot in line, so tryMake's own isn't on it
+    from: "      else if (waiting !== 0n || cur !== 0n) runSteps(budget);\n      const head = ptrAt(u64, heads).add(this.k);",
+    to: "      else if (waiting !== 0n || cur !== 0n) runSteps(0x10_0000);\n      const head = ptrAt(u64, heads).add(this.k);",
   },
   {
     // what a WeakRef that resurrects does: deref hands out an object whose count already reached zero
@@ -236,7 +247,14 @@ export async function rcTslFaultRun(
   if (f.env !== undefined) process.env.TMK_TEST_RC_TSL = f.env;
   else if (f.tslEnv !== undefined) process.env.TMK_TEST_TSL = f.tslEnv;
   else if (f.optFault !== undefined) process.env.TMK_OPT_FAULT = f.optFault;
-  else process.env.TSL_TEST_PATCH = JSON.stringify({ file: f.file, from: f.from, to: f.to });
+  // a patch checked against the source first (SPEC 8.3): one that doesn't apply throws, failing the box, never caught
+  else
+    process.env.TSL_TEST_PATCH = patchEnv({
+      file: f.file,
+      from: f.from,
+      to: f.to,
+      ...(f.times !== undefined ? { times: f.times } : {}),
+    });
   try {
     const r = await runNative("rc", [accel], jobs, undefined, engines);
     const failures = [...r.failures];
@@ -245,6 +263,7 @@ export async function rcTslFaultRun(
       const kind = f.also === "fnval_mem" ? "mem" : "std";
       failures.push(...(await runNative(kind, [accel], jobs, f.also, engines)).failures);
     }
+    faultFailures(failures, f.name);
     // the function-value fault is caught by the TIR verifier, which is a compile failure by design
     const verifier = f.tslEnv === "fnval-i64";
     const counted = verifier ? failures.filter((x) => x.includes("TIR verifier")) : failures;
@@ -275,9 +294,15 @@ export async function gcFaultRun(
   jobs: number,
   engines: Engines,
 ): Promise<{ caught: number; answers: number; first: string; broken: boolean }> {
-  process.env.TSL_TEST_PATCH = JSON.stringify({ file: f.file, from: f.from, to: f.to });
+  process.env.TSL_TEST_PATCH = patchEnv({
+    file: f.file,
+    from: f.from,
+    to: f.to,
+    ...(f.times !== undefined ? { times: f.times } : {}),
+  });
   try {
     const r = await runNative("std", [accel], jobs, "rc_gc", engines);
+    faultFailures(r.failures, f.name);
     const seen = r.failures.filter((x) => x.includes(` on ${accel}:`));
     return {
       caught: seen.length,

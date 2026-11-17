@@ -382,6 +382,15 @@ async function faultSteps(
   const engines = defaultEngines();
   return [
     {
+      // R15: the loops conds.ts and versioning touch, natively at the bug's level, -O2 (seconds, so first: R15's bugs are
+      // caught here, and so may an earlier bug be, which changes only which step names it).
+      name: "R15's loops natively at -O2 (corpus/trap/loop_versions.ts, tools/r15-tests.ts)",
+      run: async () => {
+        const R15 = await import("./r15-tests.ts");
+        return (await R15.r15Native(accel, jobs, 2, process.env.TMK_OPT_FAULT)).ok;
+      },
+    },
+    {
       name: "random TIR at -O0, -O1 and -O2, 30 seeds",
       run: async () => (await tirFuzz(100, 30, accel, jobs)).failures.length === 0,
     },

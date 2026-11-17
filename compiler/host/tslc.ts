@@ -34,7 +34,13 @@ import {
 import { checkEscapes } from "./escape.ts";
 import { bangSites, EmitUnsupported, emitTsl, r12Off, type TslEmit } from "./emit-tsl.ts";
 import { checkConsumes } from "./consume.ts";
-import { expandRcProgram, isRcModule, untaggedCounted, type RcExpansion } from "./expand-rc.ts";
+import {
+  expandRcProgram,
+  isRcModule,
+  loweredRcHeapClass,
+  untaggedCounted,
+  type RcExpansion,
+} from "./expand-rc.ts";
 import {
   isLoweredFile,
   LOWERED_TRAPS,
@@ -580,6 +586,15 @@ export function markPlainClasses(typed: TypedModule): void {
  * arena has one), never built in place inside another object, and never given to `unsafeFree`: so no object of it is ever
  * where another was, and none is ever where one will be while it can be read. What's left that could write one is unsafe
  * code writing a live object's class id, which @tsl/unsafe's rules forbid (3.8).
+ *
+ * R19 (3.4, D73): and a field of a class declared in a lowered `rc` package whose objects are all counted slots
+ * (`loweredRcHeapClass`: counted exactly by tslc's expansion, not `@tsl.stack`), stored only by its class's own constructor
+ * on `this`, with no closure in that constructor: an environment's kind and captures (R3), say. Such an object is made only
+ * by a store's `make`, its constructor run on the object `make` copies into the slot, so every store to the field is before
+ * a reference to the object exists; @tsl/gc reuses the slot only once no reference to it is left, counted or borrowed (3.5's
+ * proof, which already stands behind no check on such a reference); and nothing else writes the package's objects' fields,
+ * as a lowered package can't import @tsl/unsafe (TSL1023). A frame slot a constructor call could write again, which a
+ * class kept on the stack would have, is why the class must have no stack objects.
  */
 export function markInvariantFields(typed: TypedModule): void {
   if (tslOptOff("clsid")) return;
@@ -659,12 +674,69 @@ export function markInvariantFields(typed: TypedModule): void {
     c.plain === true &&
     !notOk.has(c.key) &&
     (c.iface === undefined || c.iface.set.every((x) => x.plain === true && !notOk.has(x.key)));
+  // R19: a lowered `rc` package's heap-only class (loweredRcHeapClass), and the fields its own constructor stores on `this`
+  // (that constructor holding no closure), every other store to them being `written`
+  const heapCls = new Map<string, boolean>();
+  const rcHeap = (c: ClassInst): boolean => {
+    if (tslOptOff("ctorfields")) return false;
+    let hit = heapCls.get(c.key);
+    if (hit === undefined) {
+      hit = c.iface === undefined && c.tail === undefined && loweredRcHeapClass(c.decl);
+      heapCls.set(c.key, hit);
+    }
+    return hit;
+  };
+  const inCtor = new Set<string>(); // `class|field` stored on `this` by the class's own constructor
+  const ctorWritten = new Set<string>(); // `class|field` stored anywhere else
+  const builtIn = new Set<string>(); // classes built in place inside another object, or given to `unsafeFree`
+  for (const f of typed.funcs) {
+    const c = f.owner;
+    let self: unknown = null;
+    if (c !== undefined && c.ctor === f && rcHeap(c)) {
+      let closure = false;
+      walkTE(
+        f.body,
+        (te) => {
+          if (te.k === "closure") closure = true;
+        },
+        true,
+      );
+      if (!closure) self = f.params[0];
+    }
+    walkTE(
+      f.body,
+      (te) => {
+        if (te.k === "new" && te.into !== null) builtIn.add(te.c.key);
+        if (te.k === "builtin" && te.name === "unsafe.free" && te.info?.c !== undefined)
+          builtIn.add(te.info.c.key);
+        if (te.k !== "osetfield") return;
+        const k = `${te.c.key}|${te.f.name}`;
+        if (self !== null && te.c.key === c!.key && te.obj.k === "var" && te.obj.v === self)
+          inCtor.add(k);
+        // the bug put into R19's part of this rule (tools/r19-tests.ts): a store outside the constructor isn't seen
+        else if (!ignoreStores && process.env.TMK_TEST_TSL !== "r19-ctor-store") ctorWritten.add(k);
+      },
+      true,
+    );
+  }
   for (const f of typed.funcs)
     walkTE(
       f.body,
       (te) => {
-        if (te.k !== "ofield" || te.check !== false || !ok(te.c)) return;
+        if (te.k !== "ofield" || te.check !== false) return;
         const k = `${te.c.key}|${te.f.name}`;
+        if (!ok(te.c)) {
+          // R19: a constructor's store on `this` is construction; any other is `written`
+          if (
+            rcHeap(te.c) &&
+            !builtIn.has(te.c.key) &&
+            inCtor.has(k) &&
+            !ctorWritten.has(k) &&
+            te.f.store === "value"
+          )
+            te.inv = true;
+          return;
+        }
         const hidden = te.f.name === " cid" && te.c.iface !== undefined && te.f.off === 0;
         const once =
           atNew.has(k) && !written.has(k) && !withCtor.has(te.c.key) && te.f.ty.k === "int";
@@ -1150,7 +1222,10 @@ export function untrustedReshapes(
 ): string[] {
   if (stats.restructured === 0) return [];
   const where = stats.classes === true ? "classes" : "phase1";
-  if (TRUSTED_IN[memory]?.[where] !== true)
+  // R15, measurement only: TMK_TRUST_IN, a list of `mode:printing` (`rc:classes`), trusts the kinds there too, so
+  // tools/r14-time.ts can time what `auto` would take.
+  const extra = (process.env.TMK_TRUST_IN ?? "").split(",").includes(`${memory}:${where}`);
+  if (TRUSTED_IN[memory]?.[where] !== true && !extra)
     return [
       `a reshape in ${memory}'s ${where === "classes" ? "class printing" : "phase 1 printing"} (TRUSTED_IN)`,
     ];

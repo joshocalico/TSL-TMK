@@ -29,14 +29,33 @@ export class JsArray<T> {
 
   /**
    * `length` elements, each zero: JS's `new Array(length)` with its holes, or `[]`. `giveBack` false keeps each buffer
-   * the array outgrows, as a `leak` package's lowered arrays always have (3.5), where true gives it back.
+   * the array outgrows, as a `leak` package's lowered arrays always have (3.5), where true gives it back. R17: `holes`
+   * says where the zeroing is done. True keeps every slot past the length zero: a shorter length (`pop`, `shift`,
+   * `setLength`) zeroes what it drops, and growth what it doesn't copy, so a longer length finds holes there. False, a
+   * lowered array of numbers (which can't have a hole: the lowering traps 15 first), zeroes only what a longer length
+   * adds, as `setLength` does then: a shorter length leaves what it drops, and growth nothing past what it copies. Every
+   * slot below the length reads the same either way; only where the zeroing is paid differs, and a pop, a store of the
+   * length, pays none.
    */
+  // R16: made at its final size in one step, as the direct route's `__vec_new` makes a vector: one block of max(length, 4)
+  // elements, zeroed, and no growth path (an array literal is made at its length and then written, never grown). Inlined
+  // at every level that inlines, so a constant length folds.
+  /** @tsl.inline */
+  // SAFETY: the block holds ncap elements, at least length, from the call region where tslc placed the array there (R6),
+  // or the global allocator; nothing else has it.
   constructor(
     private elem: ElemOf<T>,
     length: usize,
     private giveBack: bool,
+    private holes: bool,
   ) {
-    this.grow(length < 4 ? 4 : length);
+    const ncap = length < 4 ? 4 : length;
+    const bytes = ncap * elemSize(elem);
+    const block = inCallRegion(this) ? callRegionBytes(bytes) : heap.allocBytes(bytes);
+    if (block === 0n) trap(Trap.OutOfMemory);
+    bytesAt(block, bytes).fill(0);
+    this.data = block;
+    this.cap = ncap;
     this.len = length;
   }
 
@@ -80,24 +99,46 @@ export class JsArray<T> {
     return v;
   }
 
-  /** Appends v and gives the new length, as JS's `push` does. */
-  // SAFETY: grow left room for one more, so the slot at len is in the buffer.
+  /**
+   * Appends v and gives the new length, as JS's `push` does. R16: inlined at every level that inlines, as the direct
+   * route's push is: with room left, a store and the length bumped; full, `pushGrow`, out of line.
+   */
+  /** @tsl.inline */
+  // SAFETY: n is below cap, so the slot at n is in the buffer.
   push(v: T): usize {
     const n = this.len;
-    if (n === this.cap) this.grow(n + 1);
+    if (n >= this.cap) return this.pushGrow(v);
     this.slot(n).write(v);
     const m = n + 1;
     this.len = m;
     return m;
   }
 
-  /** The last element, removed; on an empty array, `none`, and the array stays empty, as JS's `pop` gives `undefined`. */
+  /** `push` on a full array: the buffer doubled (`grow`), then the store. Out of line, so `push` stays small. */
+  /** @tsl.noinline */
+  // SAFETY: grow left room for one more, so the slot at len is in the buffer.
+  private pushGrow(v: T): usize {
+    const n = this.len;
+    this.grow(n + 1);
+    this.slot(n).write(v);
+    const m = n + 1;
+    this.len = m;
+    return m;
+  }
+
+  /**
+   * The last element, removed; on an empty array, `none`, and the array stays empty, as JS's `pop` gives `undefined`.
+   * R17: inlined at every level that inlines, as `push` is; an array with no holes (`holes` false) only lowers its length,
+   * as the direct route's pop is a store of it: n - 1 is below the room, and the slot it drops needn't be zeroed.
+   */
+  /** @tsl.inline */
   // SAFETY: n is above zero, so the slot at n - 1 is in the buffer.
   pop(none: T): T {
     const n = this.len;
     if (n === 0) return none;
     const v = this.slot(n - 1).read();
-    this.setLength(n - 1);
+    if (this.holes) this.setLength(n - 1);
+    else this.len = n - 1;
     return v;
   }
 
@@ -137,11 +178,24 @@ export class JsArray<T> {
     return true;
   }
 
-  /** JS's `a.length = n` within what's reserved: shorter drops elements, longer adds holes. Gives n. */
+  /**
+   * JS's `a.length = n` within what's reserved: shorter drops elements, longer adds holes. Gives n. R16: inlined, with
+   * `clear`, as a lowered `pop` is a read and this (the direct route's is a store of the length).
+   */
+  // R17: shorter is tested first, and needs no test of the room, as the length is never above it; so the lowering's pop
+  // (the length one less, once it's above zero) is that test alone, and, with no holes, the store. Longer, with no holes,
+  // zeroes what it adds (`holes`).
+  /** @tsl.inline */
   // SAFETY: the slots from n to len are below cap.
   setLength(n: usize): usize {
-    if (n > this.cap) trap(Trap.Bounds);
-    if (n < this.len) this.clear(n, this.len);
+    const len = this.len;
+    if (n < len) {
+      if (this.holes) this.clear(n, len);
+    } else {
+      if (n > this.cap) trap(Trap.Bounds);
+      // with no holes, what's past the length wasn't kept zero, so a longer length zeroes what it adds (R17)
+      if (!this.holes) this.clear(len, n);
+    }
     this.len = n;
     return n;
   }
@@ -204,6 +258,7 @@ export class JsArray<T> {
     for (let i: usize = 0; i < n; i++) f(this.get(i), i);
   }
 
+  /** @tsl.inline */
   // SAFETY: the slots from `from` to `to` are below cap, so these are the buffer's, a whole element at a time; an
   // element's size is a constant, so one arm is left.
   private clear(from: usize, to: usize): void {
@@ -219,20 +274,28 @@ export class JsArray<T> {
 
   // SAFETY: the new block holds ncap elements, at least len; the first len are copied from the old one and the rest
   // zeroed, and the old block goes back to the allocator with the size it was taken with, unless it's the per-call
-  // region's (R6), which gives back nothing a block at a time. An array in the region grows in it.
+  // region's (R6), which gives back nothing a block at a time. An array in the region grows in it. R16: an array in the
+  // region gives nothing back at all, so only one outside it asks where its old buffer is: what it gives back is a subset
+  // of what it gave back before (a region array's buffers are the region's, but for one `adopt` or `swap` brought in, which
+  // then stays where it is, as every buffer an array holds at the region's end does). Only `push`'s slow path, `reserve`
+  // and `tryReserve` grow (not the constructor): inlined into those, which are out of line.
+  /** @tsl.inline */
   private grow(need: usize): void {
-    const dbl = this.cap * 2;
+    const cap = this.cap;
+    const dbl = cap + cap;
     const ncap = dbl < need ? need : dbl;
     const size = elemSize(this.elem);
     const bytes = ncap * size;
-    const next = inCallRegion(this) ? callRegionBytes(bytes) : heap.allocBytes(bytes);
+    const region = inCallRegion(this);
+    const next = region ? callRegionBytes(bytes) : heap.allocBytes(bytes);
     if (next === 0n) trap(Trap.OutOfMemory);
+    const old = this.data;
     const kept = this.len * size;
-    if (this.data !== 0n) {
-      copyBytes(next, this.data, kept);
-      if (this.giveBack && !addrInCallRegion(this.data)) heap.freeBytes(this.data, this.cap * size);
+    if (old !== 0n) {
+      copyBytes(next, old, kept);
+      if (this.giveBack && !region && !addrInCallRegion(old)) heap.freeBytes(old, cap * size);
     }
-    bytesAt(next + toU64(kept), bytes - kept).fill(0);
+    if (this.holes) bytesAt(next + toU64(kept), bytes - kept).fill(0);
     this.data = next;
     this.cap = ncap;
   }
