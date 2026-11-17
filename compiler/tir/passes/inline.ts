@@ -57,6 +57,7 @@ export interface InlineFaults {
   retOrder?: boolean; // a callee's results reversed
   impurePrefix?: boolean; // partial inlining treats stores as free of effects, so a bail runs them twice
   dropRcStore?: boolean; // the first store of an inlined `__rc_` function is left out: a count missed
+  allocaPure?: boolean; // R20: a block with a frame slot taken as free of effects whatever comes after the slot
 }
 
 export interface InlineContext {
@@ -288,9 +289,24 @@ interface PartialPlan {
   cost: number;
 }
 
+/**
+ * R20: whether partial inlining may take a callee whose entry gives a frame slot (`alloca`) that the paths it copies never
+ * use: the slot is the slow path's (a counted object built on the stack before it's placed, in an `rc` class printing's
+ * `make`), and a slot does nothing when it runs, so the copy leaves it out and the call that bails has its own. Off by
+ * TMK_R20_OFF=alloca, for tools/r20-pins.ts: then a slot in the entry refuses partial inlining, as before R20.
+ */
+function allocaPrefix(): boolean {
+  return !(process.env.TMK_R20_OFF ?? "").split(",").includes("alloca");
+}
+
 function blockIsPure(b: Block, faults: InlineFaults): boolean {
   for (const ins of b.instrs) {
-    if (ins.op === "alloca") return false;
+    if (ins.op === "alloca") {
+      if (!allocaPrefix()) return false;
+      // R20's injected bug (manager.ts OPT_FAULTS): the block taken as free of effects at its first slot
+      if (faults.allocaPure === true) return true;
+      continue;
+    }
     const e = effectOf(ins);
     if (e === "effect" && !(faults.impurePrefix === true && ins.op.startsWith("store.")))
       return false;
@@ -396,6 +412,22 @@ export function partialPlan(g: Func, faults: InlineFaults = {}): PartialPlan | n
   if (kept.size === frontier.length) return null; // nothing calls: it's whole inlining
   const keep = new Set(prefix);
   for (const x of kept) for (const id of closures.get(x)!) keep.add(id);
+  // R20: a frame slot in what's copied is left out of the copy, so nothing copied may use it
+  const slots = new Set<number>();
+  for (const id of keep)
+    for (const ins of byId.get(id)!.instrs)
+      if (ins.op === "alloca") for (const r of ins.res) slots.add(r);
+  if (slots.size > 0 && allocaPrefix())
+    for (const id of keep) {
+      const b = byId.get(id)!;
+      for (const ins of b.instrs)
+        for (const o of ins.ops) if (o.t === "v" && slots.has(o.id)) return null;
+      const t = b.term;
+      if (t.k === "ret" && t.vals.some((v) => slots.has(v))) return null;
+      if (t.k === "brif" && slots.has(t.cond)) return null;
+      if (t.k === "switch" && slots.has(t.val)) return null;
+      for (const e of edgesOf(t)) if (e.args.some((v) => slots.has(v))) return null;
+    }
   // It has to be a fast path: some way out of the function that doesn't call it after all.
   let returns = false;
   for (const id of keep) if (byId.get(id)!.term.k === "ret") returns = true;
@@ -509,8 +541,10 @@ export function inlineAt(
         droppedRcStore = true;
         continue;
       }
-      if (c.op === "alloca") entryAllocas.push(c);
-      else nb.instrs.push(c);
+      // R20: a partial copy's frame slots are the slow path's, which the plan checked nothing copied uses: left out
+      if (c.op === "alloca") {
+        if (plan === null || !allocaPrefix()) entryAllocas.push(c);
+      } else nb.instrs.push(c);
     }
     const t = cloneTerm(gb.term);
     if (t.k === "ret") {

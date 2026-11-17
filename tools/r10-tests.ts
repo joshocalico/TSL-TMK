@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { ROOT, wrongAnswers } from "./corpus.ts";
 import { buildDownImage, bulkFor, downResults } from "./native-exec.ts";
 import { type Accel, qemuRun } from "./qemu-run.ts";
+import { firstInOrder } from "./stable.ts";
 
 /**
  * R10's own program, and every program its strings brought onto the TSL route in `rc` (tools/route-blockers.ts, before and
@@ -302,7 +303,7 @@ export async function r10FaultRun(
     return {
       caught: failures.length,
       answers: wrongAnswers(failures),
-      first: (failures[0] ?? "").slice(0, 200),
+      first: (firstInOrder(failures) ?? "").slice(0, 200),
       broken:
         failures.length > 0 &&
         failures.every((x) => /FAILED: tslc rejected|"code":"(TS|TSL)\d+"/.test(x)),

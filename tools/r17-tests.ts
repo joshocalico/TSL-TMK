@@ -18,6 +18,7 @@ import { join, relative } from "node:path";
 import { defaultEngines, ROOT, runNative, wrongAnswers } from "./corpus.ts";
 import { faultFailures, patchEnv } from "./faults.ts";
 import type { Accel } from "./qemu-run.ts";
+import { firstInOrder } from "./stable.ts";
 
 export const R17_PROGRAM = "corpus/lower/r17/r17_free.ts";
 export const R17_STEPS = "rc_steps_leaves";
@@ -138,7 +139,7 @@ export async function r17FaultRun(
     return {
       caught: counted.length,
       answers: wrongAnswers(counted),
-      first: (r.failures[0] ?? "").slice(0, 200),
+      first: (firstInOrder(r.failures) ?? "").slice(0, 200),
     };
   } finally {
     if (saved.patch === undefined) delete process.env.TSL_TEST_PATCH;

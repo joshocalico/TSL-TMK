@@ -19,6 +19,7 @@ import {
 import { buildPath } from "./build-dir.ts";
 import { guardedRun, pool } from "./guarded-run.ts";
 import type { Accel } from "./qemu-run.ts";
+import { firstInOrder } from "./stable.ts";
 
 /** The programs that show R12's placing: helpers' results in the call arena, objects held by others, and the stack. */
 export const R12_PROGRAMS = [
@@ -254,7 +255,7 @@ export async function r12FaultRun(
   return {
     caught: failures.length,
     answers: wrongAnswers(failures),
-    first: (failures[0] ?? "").slice(0, 200),
+    first: (firstInOrder(failures) ?? "").slice(0, 200),
   };
 }
 

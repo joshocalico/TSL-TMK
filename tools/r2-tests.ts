@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { ROOT, wrongAnswers, type Engines } from "./corpus.ts";
 import { faultFailures, patchEnv } from "./faults.ts";
 import type { Accel } from "./qemu-run.ts";
+import { firstInOrder } from "./stable.ts";
 
 /**
  * Where a bug is put: the printer (TMK_TEST_EMIT), tslc's expansion (TMK_TEST_RC_TSL), @tsl/jsrt's or @tsl/gc's source (a
@@ -214,7 +215,7 @@ export async function r2FaultRun(
       caught: failures.length,
       // R7: the failures that are wrong answers, not cases out of time, whose number depends on the host's load
       answers: wrongAnswers(failures),
-      first: (failures[0] ?? "").slice(0, 200),
+      first: (firstInOrder(failures) ?? "").slice(0, 200),
       // a bug that only stopped things compiling shows nothing running
       broken:
         failures.length > 0 &&

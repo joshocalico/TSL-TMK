@@ -12,6 +12,7 @@ import { ROOT, wrongAnswers } from "./corpus.ts";
 import { faultFailures, patchEnv } from "./faults.ts";
 import { buildDownImage, bulkFor, downResults } from "./native-exec.ts";
 import { type Accel, qemuRun } from "./qemu-run.ts";
+import { firstInOrder } from "./stable.ts";
 
 /** R11's churn programs, each built through both routes in `rc` by the differential, and through `auto`. */
 export const R11_PROGRAMS = [
@@ -346,7 +347,7 @@ export async function r11ExcFaultRun(
     return {
       caught: failures.length,
       answers: wrongAnswers(failures),
-      first: (failures[0] ?? "").slice(0, 200),
+      first: (firstInOrder(failures) ?? "").slice(0, 200),
       broken:
         failures.length > 0 &&
         failures.every((x) => /FAILED: tslc rejected|"code":"(TS|TSL)\d+"/.test(x)),
@@ -383,7 +384,7 @@ export async function r11FaultRun(
     return {
       caught: failures.length,
       answers: wrongAnswers(failures),
-      first: (failures[0] ?? "").slice(0, 200),
+      first: (firstInOrder(failures) ?? "").slice(0, 200),
       broken:
         failures.length > 0 &&
         failures.every((x) => /FAILED: tslc rejected|"code":"(TS|TSL)\d+"/.test(x)),

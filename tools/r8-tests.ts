@@ -11,6 +11,7 @@ import { ROOT, wrongAnswers } from "./corpus.ts";
 import { buildDownImage, bulkFor, downResults } from "./native-exec.ts";
 import { type Accel, qemuRun } from "./qemu-run.ts";
 import type { R2Fault } from "./r2-tests.ts";
+import { firstInOrder } from "./stable.ts";
 
 /** R8's own program, and every program its change brought onto the TSL route in `rc` (route-blockers.ts). */
 export const R8_PROGRAMS = [
@@ -254,7 +255,7 @@ export async function r8FaultRun(
     return {
       caught: failures.length,
       answers: wrongAnswers(failures),
-      first: (failures[0] ?? "").slice(0, 200),
+      first: (firstInOrder(failures) ?? "").slice(0, 200),
       broken:
         failures.length > 0 &&
         failures.every((x) => /FAILED: tslc rejected|"code":"(TS|TSL)\d+"/.test(x)),

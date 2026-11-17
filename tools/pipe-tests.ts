@@ -8,6 +8,7 @@ import { defaultEngines, listPrograms, lowerCommand, ROOT } from "./corpus.ts";
 import { afterExhaustion } from "./r9-tests.ts";
 import { buildPath } from "./build-dir.ts";
 import { guardedRun, pool } from "./guarded-run.ts";
+import { inStableOrder, naturalCompare, sortedCounts } from "./stable.ts";
 import { bothRoutesOnWorker } from "./compile-pool.ts";
 import { bothRoutes, type BuiltImages } from "./dual-build.ts";
 import type { LowerCase } from "./lower-exec.ts";
@@ -555,6 +556,14 @@ export async function dualRoute(o: {
       }
     },
   );
+  // In a stable order, not the order the pool's jobs finished (R20): a box quotes these lists and prints the counts.
+  const at = (x: { file: string; mode: string; level: number }): string =>
+    `${x.file} ${x.mode} ${x.level}`;
+  programs.sort((a, b) => naturalCompare(at(a), at(b)));
+  rows.sort((a, b) => naturalCompare(`${at(a)} ${a.accel}`, `${at(b)} ${b.accel}`));
+  inStableOrder(failures);
+  inStableOrder(allowed);
+  tally.divergences = sortedCounts(tally.divergences);
   return { programs, rows, failures, allowed, hvfSkipped, printed: tally };
 }
 

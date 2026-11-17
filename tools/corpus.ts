@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { guardedRun, pool, type GuardResult } from "./guarded-run.ts";
+import { inStableOrder } from "./stable.ts";
 import { qemuRun, reapOrphans, type Accel, type BulkLayout } from "./qemu-run.ts";
 import type { BuildResult } from "./corpus-compile.ts";
 import type { CaseResult } from "./corpus-exec.ts";
@@ -264,7 +265,7 @@ export async function runPositive(
     name: "corpus",
     ok: failures.length === 0 && files.length > 0,
     summary: `${passedPrograms}/${files.length} programs, ${caseCount} cases, 4 configurations plus js-checked`,
-    failures,
+    failures: inStableOrder(failures),
     count: passedPrograms,
   };
 }
@@ -313,7 +314,7 @@ export async function runNegative(
     name: "corpus --neg",
     ok: failures.length === 0 && files.length > 0,
     summary: `${passed}/${files.length} must-fail programs, exact code and position`,
-    failures,
+    failures: inStableOrder(failures),
     count: passed,
   };
 }
@@ -374,7 +375,7 @@ export async function runTrap(
     name: "corpus --trap",
     ok: failures.length === 0 && files.length > 0,
     summary: `${files.length - failedPrograms.size}/${files.length} programs, ${caseCount} cases, ${configs.length} configurations`,
-    failures,
+    failures: inStableOrder(failures),
     count: files.length - failedPrograms.size,
   };
 }
@@ -411,7 +412,7 @@ export async function runNoBuild(jobs: number, engines: Engines): Promise<SuiteR
     name: "no-build",
     ok: failures.length === 0 && files.length > 0,
     summary: `${files.length} programs under Node with ts-hook.mjs and under Bun directly`,
-    failures,
+    failures: inStableOrder(failures),
     count: files.length,
   };
 }
@@ -656,7 +657,7 @@ export async function runLower(
     name: "corpus --lower",
     ok: failures.length === 0 && files.length > 0,
     summary: `${passed}/${files.length} programs, ${caseCount} cases (${trapCount} declared trap divergences), V8, JSC, Wasm on V8, Wasm on JSC`,
-    failures,
+    failures: inStableOrder(failures),
     count: passed,
   };
 }
@@ -1047,6 +1048,8 @@ export async function runNative(
     for (const p of problems) failures.push(`${rel(file)} on ${accel}: ${p}`);
   });
   const agreement = accels.map((accel) => ({ accel, ...tally.get(accel)! }));
+  // In a stable order, not the order the pool's jobs finished (R20): the summary lists these, and boxes quote failures.
+  inStableOrder(skippedPrograms);
   const text = agreement
     .map((a) =>
       a.skipped
@@ -1065,7 +1068,7 @@ export async function runNative(
       agreement.some((a) => a.programs > 0) &&
       agreement.every((a) => a.agreed === a.cases),
     summary: `${text}${skipNote}`,
-    failures,
+    failures: inStableOrder(failures),
     count: agreement.reduce((n, a) => n + a.agreed, 0),
     agreement,
     skippedPrograms,

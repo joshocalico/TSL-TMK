@@ -3,6 +3,7 @@
 import { runNative, wrongAnswers, type Engines } from "./corpus.ts";
 import { faultFailures, patchEnv } from "./faults.ts";
 import type { Fault } from "./std-tests.ts";
+import { firstInOrder } from "./stable.ts";
 
 const RC = "packages/tsl-gc/ex-gc-rc.ts";
 
@@ -273,7 +274,7 @@ export async function rcTslFaultRun(
       // time out, and how many do depends on the host's load (box 21 saw 410 under load where a quiet run gave 223), so the
       // sampler compares this exactly and `caught` only as above zero (gate.ts's loadFreeCounts).
       answers: wrongAnswers(counted),
-      first: (failures[0] ?? "").slice(0, 200),
+      first: (firstInOrder(failures) ?? "").slice(0, 200),
       // broken: the bug only ever stopped compiling, so nothing ran to show it. A bug whose expansion one program's checks
       // refuse (R1c: a share left out makes cyc_shapes.ts read a moved local, TSL3009) and others catch running is caught.
       broken:
@@ -307,7 +308,7 @@ export async function gcFaultRun(
     return {
       caught: seen.length,
       answers: wrongAnswers(seen), // R7: as rcTslFaultRun's
-      first: (seen[0] ?? r.failures[0] ?? "").slice(0, 200),
+      first: (firstInOrder(seen) ?? firstInOrder(r.failures) ?? "").slice(0, 200),
       broken: r.failures.some((x) => /"code":"TS\d+"/.test(x)),
     };
   } finally {

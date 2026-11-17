@@ -19,6 +19,7 @@ import { relative } from "node:path";
 import { ROOT, wrongAnswers } from "./corpus.ts";
 import { faultFailures } from "./faults.ts";
 import type { Accel } from "./qemu-run.ts";
+import { firstInOrder } from "./stable.ts";
 
 export const R18_PROGRAM = "corpus/lower/r18/r18_stack.ts";
 
@@ -208,7 +209,7 @@ export async function r18FaultRun(
       caught: counted.length,
       answers:
         f.by === "dual" ? wrongAnswers(counted.filter((x) => !/TSL\d{4}/.test(x))) : counted.length,
-      first: (failures[0] ?? "").slice(0, 200),
+      first: (firstInOrder(failures) ?? "").slice(0, 200),
     };
   } finally {
     keys.forEach((k, i) => {

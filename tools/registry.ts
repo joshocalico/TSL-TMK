@@ -237,6 +237,8 @@ export const EST: Record<string, number> = {
   "pipe-d/56@unset": 400,
   "pipe-d/57@unset": 300,
   "pipe-d/58@unset": 500,
+  "pipe-d/59@unset": 300,
+  "pipe-d/60@unset": 300,
   "maps/2@unset": 700,
   "maps/3@unset": 150,
   "maps/4@unset": 90,

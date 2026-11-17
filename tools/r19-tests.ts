@@ -19,6 +19,7 @@ import { join, relative } from "node:path";
 import { ROOT, wrongAnswers } from "./corpus.ts";
 import { faultFailures, patchEnv, type TestPatch } from "./faults.ts";
 import type { Accel } from "./qemu-run.ts";
+import { firstInOrder } from "./stable.ts";
 
 export const R19_PROGRAM = "corpus/lower/r19/r19_rooms.ts";
 export const R19_FIELDS = "corpus/lowered-rc/r19_fields.ts";
@@ -262,7 +263,7 @@ export async function r19FaultRun(
     return {
       caught: failures.length,
       answers: wrongAnswers(failures),
-      first: (failures[0] ?? "").slice(0, 200),
+      first: (firstInOrder(failures) ?? "").slice(0, 200),
     };
   } finally {
     if (saved.patch === undefined) delete process.env.TSL_TEST_PATCH;

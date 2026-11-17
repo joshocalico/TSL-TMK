@@ -19,6 +19,7 @@ import { Driver } from "./native-driver.ts";
 import { buildImage } from "../compiler/backend-aarch64/image.ts";
 import { hvfAvailable, qemuRun, type Accel } from "./qemu-run.ts";
 import { buildPath } from "./build-dir.ts";
+import { firstInOrder } from "./stable.ts";
 
 const RUN_TIMEOUT_MS = 180_000;
 const pagesOf = (file: string): number | undefined => {
@@ -944,7 +945,7 @@ export async function collectorFaults(
     rows.push({
       fault: f.name,
       failures: r.failures.length,
-      first: r.failures[0]?.slice(0, 160) ?? "",
+      first: firstInOrder(r.failures)?.slice(0, 160) ?? "",
     });
   }
   return { rows, skipped };

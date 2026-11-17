@@ -382,6 +382,16 @@ async function faultSteps(
   const engines = defaultEngines();
   return [
     {
+      // R20: partial inlining past a frame slot in the callee's entry, on R20's program through both routes in rc and leak
+      // at -O2, against V8 (seconds, so first: R20's bug is caught here, and so may an earlier bug be).
+      name: "R20's program through both routes at -O2 (corpus/lower/r20/r20_copies.ts, tools/r20-tests.ts)",
+      run: async () => {
+        const R20 = await import("./r20-tests.ts");
+        const d = await R20.r20Dual([accel], jobs, [2], false);
+        return d.failures.length === 0 && d.cases > 0;
+      },
+    },
+    {
       // R15: the loops conds.ts and versioning touch, natively at the bug's level, -O2 (seconds, so first: R15's bugs are
       // caught here, and so may an earlier bug be, which changes only which step names it).
       name: "R15's loops natively at -O2 (corpus/trap/loop_versions.ts, tools/r15-tests.ts)",

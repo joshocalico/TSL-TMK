@@ -12,6 +12,7 @@ import { defaultEngines, ROOT, wrongAnswers, type Engines } from "./corpus.ts";
 import { buildPath } from "./build-dir.ts";
 import { guardedRun, pool } from "./guarded-run.ts";
 import type { Accel } from "./qemu-run.ts";
+import { firstInOrder } from "./stable.ts";
 
 /** The program that shows R13's printing: growth, holes, arrays of objects, of arrays and of typed arrays, module state. */
 export const R13_PROGRAMS = ["corpus/lower/pipe/strict_arrays.ts"];
@@ -374,7 +375,7 @@ export async function r13FaultRun(
   return {
     caught: failures.length,
     answers: wrongAnswers(failures),
-    first: (failures[0] ?? "").slice(0, 200),
+    first: (firstInOrder(failures) ?? "").slice(0, 200),
   };
 }
 

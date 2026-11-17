@@ -428,13 +428,24 @@ export function emitPortableRoutines(a: A): void {
     a.bind(tail);
     a.e(E.memPair("stpx", "offset", 1, 1, 4, -16));
     a.e(E.RET);
+    // R20: under 16 bytes, by the bits of the count, an 8, 4, 2 and 1-byte store each (a byte at a time was 4
+    // instructions a byte: a short string's tail zeroed when made).
     a.bind(small);
     a.bind(smallLoop);
-    a.e(E.arithReg("subs", true, XZR, 0, 4));
-    a.bc(Cond.HS, done);
-    a.e(E.memImm("strb", 1, 0, 0));
-    a.e(E.arithImm("add", true, 0, 0, 1));
-    a.b(smallLoop);
+    for (const [n, op] of [
+      [8, "strx"],
+      [4, "strw"],
+      [2, "strh"],
+      [1, "strb"],
+    ] as const) {
+      const next = a.label();
+      a.e(E.logicImm("and", true, 5, 2, E.bitmask(BigInt(n), true)!));
+      a.cbz(true, 5, next);
+      // R20's injected bug (tools/r20-tests.ts): the 2-byte store left out. Never set otherwise.
+      if (!(n === 2 && process.env.TMK_TEST_TSL === "memset-skip2")) a.e(E.memImm(op, 1, 0, 0));
+      a.e(E.arithImm("add", true, 0, 0, n));
+      a.bind(next);
+    }
     a.bind(done);
     a.e(E.RET);
   }
@@ -467,14 +478,11 @@ export function emitPortableRoutines(a: A): void {
       a.e(E.arithImm("sub", true, 2, 2, 32));
       a.b(big);
     }
+    // R20: what's left, under 32 bytes, by its bits, a 16, 8, 4, 2 and 1-byte step each, each loaded before it's stored
+    // (a byte at a time was 7 instructions a byte, most of a short string's copy and of a 72-byte object's placing).
+    // Forward, each step's bytes lie at or below the source's next, so a destination below the source is safe as before.
     a.bind(fwdBytes);
-    a.cbz(true, 2, done);
-    a.e(E.memImm("ldrb", 3, 1, 0));
-    a.e(E.memImm("strb", 3, 0, 0));
-    a.e(E.arithImm("add", true, 1, 1, 1));
-    a.e(E.arithImm("add", true, 0, 0, 1));
-    a.e(E.arithImm("sub", true, 2, 2, 1));
-    a.b(fwdBytes);
+    tailSteps(a, false, done);
     a.bind(back);
     a.e(E.arithReg("add", true, 0, 0, 2));
     a.e(E.arithReg("add", true, 1, 1, 2));
@@ -490,15 +498,54 @@ export function emitPortableRoutines(a: A): void {
       a.e(E.arithImm("sub", true, 2, 2, 32));
       a.b(big);
     }
+    // Backward, the same steps from the top of what's left down, so a destination above the source is safe as before.
     a.bind(backBytes);
-    a.cbz(true, 2, done);
-    a.e(E.arithImm("sub", true, 1, 1, 1));
-    a.e(E.arithImm("sub", true, 0, 0, 1));
-    a.e(E.memImm("ldrb", 3, 1, 0));
-    a.e(E.memImm("strb", 3, 0, 0));
-    a.e(E.arithImm("sub", true, 2, 2, 1));
-    a.b(backBytes);
+    tailSteps(a, true, done);
     a.bind(done);
     a.e(E.RET);
   }
+}
+
+/**
+ * R20: __rt_memmove's last bytes, under 32 (x2), as at most five steps by the bits of the count: 16 bytes through q0, then
+ * 8, 4, 2 and 1 through x3, each step's bytes all loaded before any is stored. Forward, x0 and x1 point at the next bytes
+ * and move up past each step; `back`, they point just past the last bytes left and move down before each. Ends at `done`.
+ */
+function tailSteps(a: A, back: boolean, done: number): void {
+  const steps: [number, "q" | "x" | "w" | "h" | "b"][] = [
+    [16, "q"],
+    [8, "x"],
+    [4, "w"],
+    [2, "h"],
+    [1, "b"],
+  ];
+  const ld = { q: "ldrq", x: "ldrx", w: "ldrw", h: "ldrh", b: "ldrb" } as const;
+  const st = { q: "strq", x: "strx", w: "strw", h: "strh", b: "strb" } as const;
+  // R20's injected bugs (tools/r20-tests.ts): the 4-byte step skipped either way, or the 1-byte step skipped copying up.
+  // Never set otherwise.
+  const fault = process.env.TMK_TEST_TSL;
+  for (const [n, k] of steps) {
+    const next = a.label();
+    a.e(E.logicImm("and", true, 4, 2, E.bitmask(BigInt(n), true)!));
+    a.cbz(true, 4, next);
+    if (
+      !(
+        (fault === "memmove-skip4" && n === 4) ||
+        (fault === "memmove-back-skip1" && back && n === 1)
+      )
+    ) {
+      if (back) {
+        a.e(E.arithImm("sub", true, 1, 1, n));
+        a.e(E.arithImm("sub", true, 0, 0, n));
+      }
+      a.e(E.memImm(ld[k], 3, 1, 0));
+      a.e(E.memImm(st[k], 3, 0, 0));
+      if (!back) {
+        a.e(E.arithImm("add", true, 1, 1, n));
+        a.e(E.arithImm("add", true, 0, 0, n));
+      }
+    }
+    a.bind(next);
+  }
+  a.b(done);
 }

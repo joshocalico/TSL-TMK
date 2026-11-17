@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ROOT, runNative, wrongAnswers, type Engines, type NativeKind } from "./corpus.ts";
 import { faultFailures, patchEnv } from "./faults.ts";
+import { firstInOrder } from "./stable.ts";
 
 export interface Fault {
   name: string;
@@ -205,7 +206,7 @@ export async function faultRun(
     return {
       caught: seen.length,
       answers: wrongAnswers(seen),
-      first: (seen[0] ?? r.failures[0] ?? "").slice(0, 200),
+      first: (firstInOrder(seen) ?? firstInOrder(r.failures) ?? "").slice(0, 200),
       // If it didn't even compile, it shows nothing.
       broken: r.failures.some((x) => /"code":"TS\d+"/.test(x)),
     };

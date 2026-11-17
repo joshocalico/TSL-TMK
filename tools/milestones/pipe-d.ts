@@ -2540,6 +2540,44 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     });
   });
 
+  // 59. R20: the runtime's copy and fill of short sizes, each where a wrong answer shows.
+  M.unit("59", async () => {
+    const R20 = timedModule("r20", await import("../r20-tests.ts"));
+    const failures: string[] = [];
+    const st = await R20.r20Steps(accel);
+    failures.push(...st.failures);
+    if (!st.skipped && st.cases === 0) failures.push(`no case of ${R20.R20_STEPS} ran`);
+    const d = await R20.r20Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of R20's program ran");
+    if (d.agreed !== d.cases)
+      failures.push(`${d.cases - d.agreed} cases differ through the two routes`);
+    report({
+      box: "59. R20 (4.3, 5.10, D42, D46, D49): the runtime's copy and fill, their last bytes (under 32 for a copy, under 16 for a fill) steps by the bits of the count where they were a byte at a time, and partial inlining taking a callee whose entry gives a frame slot the copied paths don't use; corpus/r20/r20_steps.ts (TSL proper: a byte array's set from a run of itself, a copy over itself down and up, of every length to 40 and distance to 9, and fill of every length to 24 at every start to 8, each against a byte loop) gives its pinned answers at -O0 and -O2, and corpus/lower/r20/r20_copies.ts (strings of every length to 70 joined and cut, arrays of booleans and of numbers shifted and spliced at every length to 40, each read back weighted by position, and a function whose entry moves a count and keeps a frame slot for a rare path's object, called in a loop) agrees with V8 natively and through both routes with class printing forced in rc and leak at -O0 and -O2, and the printed TSL on V8 and JSC with the source (tools/r20-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `r20_steps ${st.agreed}/${st.cases}; ${d.agreed}/${d.cases} cases the same as V8 and through both routes${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 60. R20's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("60", async () => {
+    const R20 = timedModule("r20", await import("../r20-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R20.R20_FAULTS) {
+      const x = await R20.r20Fault(f, accel, jobs);
+      rows.push(`${f.what}: ${caughtText(x)}`);
+      if (x.answers === 0) failures.push(`${f.name} wasn't caught: ${x.first}`);
+    }
+    report({
+      box: `60. R20: each of ${R20.R20_FAULTS.length} bugs in the runtime's copy and fill and in partial inlining is caught by a wrong answer, with how many cases caught it: a copy's last bytes missing their 4-byte step, a copy up over itself missing its last byte, a short fill missing its 2-byte store, and partial inlining taking a callee's entry with a frame slot as free of effects (tools/r20-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
   M.vms(
     "8",
     "8. No QEMU process of this run is left, and the owner's UTM and QEMU processes were only observed",

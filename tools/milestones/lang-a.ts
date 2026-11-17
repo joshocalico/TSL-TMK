@@ -15,6 +15,7 @@ import {
 } from "../tmk-common.ts";
 import { timedModule } from "../timing.ts";
 import { seedSlice, sliceGenerated } from "../sweep.ts";
+import { firstInOrder } from "../stable.ts";
 
 export async function defineLangA(M: MilestoneDef): Promise<void> {
   needInstall();
@@ -268,7 +269,7 @@ export async function defineLangA(M: MilestoneDef): Promise<void> {
         } else {
           const r = await runNative("exc", [accel], jobs, undefined, engines, "rc");
           caught = !r.ok;
-          by = `${faultCount(r.failures)} failures, first ${r.failures[0]?.slice(0, 80) ?? "-"}`;
+          by = `${faultCount(r.failures)} failures, first ${firstInOrder(r.failures)?.slice(0, 80) ?? "-"}`;
         }
       } finally {
         if (was === undefined) delete process.env.TMK_TEST_EXC;

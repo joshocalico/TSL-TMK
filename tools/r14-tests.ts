@@ -10,6 +10,7 @@ import { join, relative } from "node:path";
 import { listPrograms, ROOT, wrongAnswers } from "./corpus.ts";
 import type { Accel } from "./qemu-run.ts";
 import type { PipeMode } from "./pipe-tests.ts";
+import { firstInOrder } from "./stable.ts";
 
 /** Where R14's programs are: the differential's directories and rc-tsl's (R2 to R11's own). */
 export const R14_DIRS = (dirs: readonly string[]): string[] => [...dirs, "corpus/lower/rc-tsl"];
@@ -152,7 +153,7 @@ export async function r14FaultRun(
   return {
     caught: r.failures.length,
     answers: wrongAnswers(r.failures),
-    first: (r.failures[0] ?? "").slice(0, 200),
+    first: (firstInOrder(r.failures) ?? "").slice(0, 200),
   };
 }
 

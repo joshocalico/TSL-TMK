@@ -76,6 +76,7 @@ export const OPT_FAULTS = [
   "inline-ret-order", // a callee's results come back reversed
   "inline-impure-prefix", // partial inlining counts stores as free of effects, so a slow path runs them twice
   "inline-drop-rc-store", // a store in an inlined `rc` runtime function is left out: a count missed
+  "inline-alloca-pure-block", // R20: partial inlining takes a block with a frame slot as free of effects, whatever follows it
   "keep-off", // a load the optimiser left unused isn't kept, so a fault it would have taken doesn't happen
   "dce-drop-live", // dead code removal takes a value something still uses: TIR the verifier rejects, naming the pass
   "gvn-across-store", // value numbering merges two loads either side of a store that changes what they read (D73)
@@ -260,6 +261,7 @@ export function optimizeModule(
     retOrder: faults.has("inline-ret-order"),
     impurePrefix: faults.has("inline-impure-prefix"),
     dropRcStore: faults.has("inline-drop-rc-store"),
+    allocaPure: faults.has("inline-alloca-pure-block"),
   };
   const dceFaults = {
     dropEffect: faults.has("dce-drop-store"),

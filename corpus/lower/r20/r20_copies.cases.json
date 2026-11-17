@@ -1,0 +1,12 @@
+[
+  { "fn": "joins", "args": [70] },
+  { "fn": "joins", "args": [9] },
+  { "fn": "cuts", "args": [100] },
+  { "fn": "cuts", "args": [40] },
+  { "fn": "boolMoves", "args": [40] },
+  { "fn": "boolMoves", "args": [3] },
+  { "fn": "numMoves", "args": [40] },
+  { "fn": "numMoves", "args": [2] },
+  { "fn": "slowPaths", "args": [500] },
+  { "fn": "slowPaths", "args": [3] }
+]

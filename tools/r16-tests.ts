@@ -15,6 +15,7 @@ import { dirname, join, relative } from "node:path";
 import { ROOT, wrongAnswers } from "./corpus.ts";
 import { faultFailures, patchEnv } from "./faults.ts";
 import type { Accel } from "./qemu-run.ts";
+import { firstInOrder } from "./stable.ts";
 
 export const R16_PROGRAMS = ["corpus/lower/r16/r16_arrays.ts"];
 
@@ -121,7 +122,7 @@ export async function r16FaultRun(
     return {
       caught: failures.length,
       answers: wrongAnswers(failures),
-      first: (failures[0] ?? "").slice(0, 200),
+      first: (firstInOrder(failures) ?? "").slice(0, 200),
     };
   } finally {
     if (was === undefined) delete process.env.TSL_TEST_PATCH;
