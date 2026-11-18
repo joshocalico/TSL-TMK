@@ -253,7 +253,7 @@
   "corpus/lower/fallback/closure_outlives.ts@strict": "1bc223e9f8933343fe7a3aa269351bf0591acd606d4600022f361bd60b074de4",
   "corpus/lower/fallback/closure_outlives.ts@leak": "d1aef2ca59091bf282b1da833475dedad5944588a0b77490af1e6f9944759ab6",
   "corpus/lower/fallback/closure_outlives.ts@manual": "d1aef2ca59091bf282b1da833475dedad5944588a0b77490af1e6f9944759ab6",
-  "corpus/lower/fallback/closure_outlives.ts@rc": "21d58b0ef3b7494dbd2175038176743ed8778402bfdc5a585be9b70fe727d4ac",
+  "corpus/lower/fallback/closure_outlives.ts@rc": "86f7569471a5ec779291797476a90d62b21006658893d8ce7729064d55d9431c",
   "corpus/lower/fallback/closure_outlives.ts@rc+check": "641ccc229883895e58de470ef3fb66b996c574c8baf16a5d9551cf2aed6bb956",
   "corpus/lower/fallback/closure_outlives.ts@rc+off": "4b881b6262aebe4265104a6174cc4f364c8c5c7d957ea1d09c43d8b0943a75df",
   "corpus/lower/fallback/computed_key.ts@strict": "afac50e9548c2f2a516c26acf4f2f8e66af825bf0692644facc389e19f489919",
@@ -271,7 +271,7 @@
   "corpus/lower/fallback/escape_global.ts@strict": "618ac416ba6c64049dff51b11591e4e727f4a829d8fba2fd1c5ad44839fb9e0d",
   "corpus/lower/fallback/escape_global.ts@leak": "493946821940571b680ec565830f63676b038c13bc75b7406117714b416cc034",
   "corpus/lower/fallback/escape_global.ts@manual": "88847bc1481acf6c0ed9c684c5b6d9cd6cd7cef87865c36e2148df675d8f465c",
-  "corpus/lower/fallback/escape_global.ts@rc": "f00f6e65b0925593dce3365cfdbe2f8fd4eccb8d54162d6eff3128565eb3edc8",
+  "corpus/lower/fallback/escape_global.ts@rc": "0eac0888f1d77d725156d78db60b0f9eecca4580b416fdb0e1d6ea25f24ee3c5",
   "corpus/lower/fallback/escape_global.ts@rc+check": "519ed12ad9d2fc355eaf54c6b4987f0bec2b831a298a36c2671dc48dddf6e91f",
   "corpus/lower/fallback/escape_global.ts@rc+off": "e4d3e0936f30e09158d2af30fc57a844affd4d8bbd29ba71349bd39f54d0563a",
   "corpus/lower/fallback/export_forms.ts@strict": "f78cefadb27a93f9e176991de3131fcda4e35aceda4f07508db16a344e632bbf",
@@ -427,7 +427,7 @@
   "corpus/lower/memory/store_closure.ts@strict": "afac50e9548c2f2a516c26acf4f2f8e66af825bf0692644facc389e19f489919",
   "corpus/lower/memory/store_closure.ts@leak": "bbf867028a294c537de7730c60fd971e98b395346e9583e557f90ca9826411de",
   "corpus/lower/memory/store_closure.ts@manual": "7c0cd7631888c242fb7b29cc67ae6c2ce49cc5d4ec2f9a23e43878bd7c418b09",
-  "corpus/lower/memory/store_closure.ts@rc": "4829d53ce403e5e091b8c278d48bef58cfe73790972911729dd89efc97958233",
+  "corpus/lower/memory/store_closure.ts@rc": "64e6813dd19af1c17a96615134557d9bf4cb314161933e0023540286b255e62a",
   "corpus/lower/memory/store_closure.ts@rc+check": "04cec73c999222e6a71578c49071be5e11f46628f7f4615c5b2078ca936c5de2",
   "corpus/lower/memory/store_closure.ts@rc+off": "090cde4f03d043e2eeabdea0e478506ba2c2c5ec4e2cca6a90689ee6bd359e80",
   "corpus/lower/rc/adv_array_release.ts@strict": "b16112719922730a723d444cac72c3072218058a3fee1e42efb0e088c32477ac",
@@ -682,6 +682,6 @@
   "corpus/native/math_values.ts@rc": "673a14c5ad8a71d67d7e6c03726f8b33c3d14bf5cecbdbc62107b2ca1a11e4d1",
   "corpus/native/math_values.ts@rc+check": "d5bc016d2a28cb056e03652f19e1571528b02af7da1830abfa8f80db119d6433",
   "corpus/native/math_values.ts@rc+off": "673a14c5ad8a71d67d7e6c03726f8b33c3d14bf5cecbdbc62107b2ca1a11e4d1",
-  "bench/memory/list_lowered.ts@rc": "1f7f3aa6ebc9ecc67657bbc6b76e83122627ee484ccc6f66d5d0aff6528a491d",
-  "bench/memory/churn_lowered.ts@rc": "1a45a88e929914c9730d3f8636e4c47da183d1dc3e9b7c8380dcfd0901791902"
+  "bench/memory/list_lowered.ts@rc": "23836ba5e001ed054b242c145b0c00ec6f028aa9d9e09bef609c149584c40244",
+  "bench/memory/churn_lowered.ts@rc": "4a1afca4a287d909f85a172e9052550eddcc5ba92dfc656b87a9c5180e766368"
 }

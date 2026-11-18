@@ -1,0 +1,5 @@
+[
+  { "fn": "widths", "args": [400] },
+  { "fn": "widths", "args": [2] },
+  { "fn": "nested", "args": [300] }
+]

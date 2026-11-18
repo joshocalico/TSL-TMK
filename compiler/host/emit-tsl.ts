@@ -28,7 +28,7 @@ import { strLiteralText } from "./down.ts";
 import { loweredRuntime, memText, stdMem } from "./elab-lowered.ts";
 import { VEC_DATA, VEC_LEN } from "./down-rt.ts";
 import { desugarExc, EXC_ABI, EXC_STATE, STACK_LOW } from "./emit-exc.ts";
-import { RC_STR_CORE, RC_STR_NAMES, r21UnitsOff, rcStrRuntime } from "./emit-rcstr.ts";
+import { RC_STR_CORE, RC_STR_NAMES, r21UnitsOff, r22Off, rcStrRuntime } from "./emit-rcstr.ts";
 import {
   ARRAY_BY_ELEM,
   elemSize,
@@ -3346,8 +3346,10 @@ class Emitter {
         decls.push(
           ...rcStrRuntime(
             this.hashNames.length === 2 ? [this.hashNames[0]!, this.hashNames[1]!] : null,
+            this.join3Name !== null,
           ),
           "",
+          ...this.join3Text(),
         );
       }
       parts.unshift(...decls);
@@ -4621,6 +4623,80 @@ class Emitter {
    * In `rc` (R2), a call giving a reference, inside an expression, is a statement of its own first: its result is a count
    * the caller holds, which the expansion gives a local of its own, and it does that only in a statement of its own.
    */
+  /**
+   * R22, in `rc`: \`a + b + c\` (strConcat of strConcat's result and c) as one call of the program's own \`strConcat3\`, which
+   * makes a short result once (jsStrJoined3), where it was made twice: the first join copied a and b into a string of their
+   * own, freed straight after, then a second copied them again with c. Only where c is pure (a literal, a variable, module
+   * state, or a test or choice of those), as it's now evaluated before a and b are joined, and where nothing here desugars
+   * exceptions (strConcat's RangeError is a trap, as the printing has it). Anything longer, or any of them empty, is the two
+   * calls as before, in strConcat3. Null where this doesn't apply.
+   */
+  join3Name: string | null = null;
+  join3(e: Extract<TE, { k: "call" }>): string | null {
+    const f = this.strConcatFn;
+    if (!this.rc || !this.strs || this.excOwn || f === null || e.inst !== f || r22Off("join3"))
+      return null;
+    const inner = e.args[0];
+    const c = e.args[1];
+    if (e.args.length !== 2 || inner === undefined || c === undefined) return null;
+    if (inner.k !== "call" || inner.inst !== f || inner.args.length !== 2) return null;
+    const pure = (x: TE): boolean => {
+      switch (x.k) {
+        case "gaddr":
+        case "var":
+        case "lit":
+        case "global":
+          return true;
+        case "cond":
+          return pure(x.c) && pure(x.a) && pure(x.b);
+        case "cmp":
+        case "bit":
+          return pure(x.a) && pure(x.b);
+        case "not":
+          return pure(x.a);
+        case "arith":
+          // wrapping, so it can't trap, and no division (a zero divisor traps)
+          return x.wrap && x.op !== "idiv" && x.op !== "rem" && pure(x.a) && pure(x.b);
+        case "fload":
+          // module state, read: nothing a join does changes it
+          return x.glob !== undefined && pure(x.base);
+        default:
+          return false;
+      }
+    };
+    if (!pure(c)) return null;
+    if (this.join3Name === null) {
+      let n = `${this.refFn(f) ?? "strConcat"}3`;
+      for (let i = 2; this.topNames.has(n) || this.usedNames.has(n); i++) n = `strConcat3_${i}`;
+      this.topNames.add(n);
+      this.join3Name = n;
+    }
+    // the injected `r22-join3-order` bug: the second and third strings joined the other way round
+    const args =
+      this.fault === "r22-join3-order"
+        ? [inner.args[0]!, c, inner.args[1]!]
+        : [inner.args[0]!, inner.args[1]!, c];
+    return this.rcOwned(e, `${this.join3Name}(${this.operands(args).join(", ")})`);
+  }
+
+  /** R22: the program's `strConcat3` (join3), over its own strConcat; empty where nothing called it. */
+  join3Text(): string[] {
+    if (this.join3Name === null) return [];
+    const f = this.refFn(this.strConcatFn!)!;
+    const s = this.strName("JsString");
+    return [
+      `/** R22: \`a + b + c\` (SPEC 3.5's strings in \`rc\`): short, made once; otherwise as two joins. */`,
+      `function ${this.join3Name}(a: ${s}, b: ${s}, c: ${s}): ${s} {`,
+      "  const la = a.len();",
+      "  const lb = b.len();",
+      "  const lc = c.len();",
+      "  if (la !== 0 && lb !== 0 && lc !== 0 && la + lb + lc <= 64) return jsStrJoined3(a, b, c, la + lb + lc);",
+      `  return ${f}(${f}(a, b), c);`,
+      "}",
+      "",
+    ];
+  }
+
   rcOwned(e: TE, call: string): string {
     if (!this.rc || e.ty.k !== "ref" || this.path.length <= 1) return call;
     const t = this.rcLocal();
@@ -5020,6 +5096,8 @@ class Emitter {
         return this.resultOf(e);
       }
       case "call": {
+        const three = this.join3(e);
+        if (three !== null) return three;
         const mm = this.maps ? this.mapRt.get(e.inst) : undefined;
         if (mm !== undefined) return this.mapCall(e, mm);
         const sm = this.strs ? this.strMapped.get(e.inst) : undefined;

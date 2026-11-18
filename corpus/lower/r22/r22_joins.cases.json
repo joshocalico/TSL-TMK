@@ -1,0 +1,9 @@
+[
+  { "fn": "keys", "args": [300] },
+  { "fn": "keys", "args": [1] },
+  { "fn": "lengths", "args": [70] },
+  { "fn": "lengths", "args": [0] },
+  { "fn": "thirds", "args": [200] },
+  { "fn": "impure", "args": [120] },
+  { "fn": "kept", "args": [150] }
+]

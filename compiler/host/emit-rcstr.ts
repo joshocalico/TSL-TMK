@@ -40,6 +40,8 @@ export const RC_STR_NAMES = [
   "JsStrUnits",
   "jsStrUnits",
   "jsStrJoined",
+  "jsStrJoined3",
+  "jsStrGrown",
   "jsStrView",
   "jsStrEq",
   "jsStrHash",
@@ -85,8 +87,16 @@ export function r21UnitsOff(): boolean {
   return (process.env.TMK_R21_OFF ?? "").split(",").includes("units");
 }
 
+/**
+ * R22's printing put back as it was, for tools/r22-pins.ts (`TMK_R22_OFF=concat`, or `join3`): concatenation whole, out of
+ * line. Never set otherwise.
+ */
+export function r22Off(part: string): boolean {
+  return (process.env.TMK_R22_OFF ?? "").split(",").includes(part);
+}
+
 /** The string runtime's text: the two classes and the functions the printing calls in place of JsString's statics. */
-export function rcStrRuntime(key: [string, string] | null): string[] {
+export function rcStrRuntime(key: [string, string] | null, join3 = false): string[] {
   const off = r21UnitsOff();
   // the hash key (D42): the module's own two words where a native caller can set them, otherwise their first values
   const [k0, k1] = key !== null ? key : ["608135816", "-2052912941"];
@@ -101,6 +111,38 @@ export function rcStrRuntime(key: [string, string] | null): string[] {
   const prependOne = off
     ? "bb.units.set(this.all(), toUsize(h));"
     : "if (la === 1) bb.units[toUsize(h)] = wrapU16(this.unit(0));\n        else bb.units.set(this.all(), toUsize(h));";
+  // R22: concatenation's short cases inlined where it's called (strConcat), and the rest out of line, so a short join no
+  // longer goes through the long cases' frame (twelve registers saved and two spilled) to reach jsStrJoined
+  const concatHead = `concat(b: JsStr): JsStr {`;
+  // R22: a new buffer made out of line (jsStrGrown), so that concatenation's own frame is an append's or a prepend's
+  const grownBody = `const ga = (a.hw & 2) !== 0;
+  if (!ga && (b.hw & 2) === 0) return jsStrJoined(a, b, n);
+  const cap = n >= 268435456 ? (n > 536870888 ? n : 536870888) : n * 2;
+  const nb = withTail(toUsize(cap), new JsStrBuf());
+  const at = ga ? 0 : cap - n;
+  nb.units.set(a.all(), toUsize(at));
+  nb.units.set(b.all(), toUsize(at + ${fault() === "r22-grown-offset" ? "b" : "a"}.n));
+  nb.head = at;
+  nb.end = at + n;
+  return jsStrView(nb, at, n, 2);`;
+  const grownTail = r22Off("concat")
+    ? grownBody
+        .replace("toUsize(at + a.n)", "toUsize(at + la)")
+        .replace(/\ba\b(?=[.,)])/g, "this")
+        .replace(/\n/g, "\n  ")
+    : "return jsStrGrown(this, b, n);";
+  const grownFn = r22Off("concat")
+    ? ""
+    : `/**
+ * R22: \`a + b\` past 64 units where neither can be written in place: copied flat, or the second concatenation onto a string
+ * one made, into a new buffer of twice the room. Out of line, as \`concat\`'s common way is an append in place.
+ */
+/** @tsl.noinline */
+function jsStrGrown(a: JsStr, b: JsStr, n: i32): JsStr {
+  ${grownBody}
+}
+
+`;
   const unitSlot = fault() === "rcstr-unit-low7" ? "u & 127" : "u";
   const unitLimit = fault() === "rcstr-unit-past" ? "<= 256" : "< 256";
   const unitLimitNot = fault() === "rcstr-unit-past" ? "> 256" : ">= 256";
@@ -182,7 +224,7 @@ class JsStr {
    * where its buffer's used units end, or a prepend to one that starts where they start, writes in place where there's
    * room; the second concatenation onto a string made by one makes a buffer of twice the room. So \`s += x\` is linear.
    */
-  concat(b: JsStr): JsStr {
+  ${concatHead}
     const la = this.n;
     const lb = b.n;
     if (la === 0) return b;
@@ -208,16 +250,7 @@ class JsStr {
         return jsStrView(bb, h, n, 2);
       }
     }
-    const ga = (this.hw & 2) !== 0;
-    if (!ga && (b.hw & 2) === 0) return jsStrJoined(this, b, n);
-    const cap = n >= 268435456 ? (n > 536870888 ? n : 536870888) : n * 2;
-    const nb = withTail(toUsize(cap), new JsStrBuf());
-    const at = ga ? 0 : cap - n;
-    nb.units.set(this.all(), toUsize(at));
-    nb.units.set(b.all(), toUsize(at + la));
-    nb.head = at;
-    nb.end = at + n;
-    return jsStrView(nb, at, n, 2);
+    ${grownTail}
   }
 
   /** The n units from i, which are within it: shared with its buffer if they're at least 32 and a quarter of its room. */
@@ -301,7 +334,7 @@ function jsStrEmpty(): JsStr {
   return s;
 }
 
-/** A view of n units of a buffer from start. */
+${grownFn}/** A view of n units of a buffer from start. */
 function jsStrView(b: JsStrBuf, start: i32, n: i32, hw: i32): JsStr {
   const r = withTail(0, new JsStr(n));
   r.start = start;
@@ -319,7 +352,25 @@ function jsStrJoined(a: JsStr, b: JsStr, n: i32): JsStr {
   return r;
 }
 
-/** A literal from its UTF-8 bytes: the text as JS has it, for every literal that's well-formed UTF-16. */
+${
+  join3
+    ? `/**
+ * R22: a, b and c's units, n in all, copied into one flat string made by concatenation: \`a + b + c\` made once where
+ * it's short (the printing's strConcat3), each part's units copied once.
+ */
+function jsStrJoined3(a: JsStr, b: JsStr, c: JsStr, n: i32): JsStr {
+  const r = jsStrZeroed(n);
+  const la = toUsize(a.n);
+  r.units.set(a.all(), 0);
+  r.units.set(b.all(), la);
+  r.units.set(c.all(), la + toUsize(b.n));
+  r.hw = 2;
+  return r;
+}
+
+`
+    : ""
+}/** A literal from its UTF-8 bytes: the text as JS has it, for every literal that's well-formed UTF-16. */
 function jsStrOf(bytes: Uint8Array): JsStr {
   let n: i32 = 0;
   for (let i: usize = 0; i < bytes.length; i++) {

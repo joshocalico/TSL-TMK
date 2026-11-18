@@ -1,0 +1,7 @@
+[
+  { "fn": "caught", "args": [300, 1] },
+  { "fn": "caught", "args": [60, 20] },
+  { "fn": "caught", "args": [3, 0] },
+  { "fn": "keptPast", "args": [200] },
+  { "fn": "rethrown", "args": [150] }
+]

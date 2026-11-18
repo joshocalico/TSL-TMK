@@ -2615,6 +2615,43 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     });
   });
 
+  // 63. R22: rc's remaining per-object costs in class printing, each where a wrong answer shows.
+  M.unit("63", async () => {
+    const R22 = timedModule("r22", await import("../r22-tests.ts"));
+    const failures: string[] = [];
+    const d = await R22.r22Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of R22's programs ran");
+    if (d.agreed !== d.cases)
+      failures.push(`${d.cases - d.agreed} cases differ through the two routes`);
+    for (const p of R22.R22_PROGRAMS)
+      if (!d.printed.includes(`${p}@rc`)) failures.push(`${p} doesn't class-print in rc`);
+    report({
+      box: "63. R22 (3.5, D39, D41, D49): rc class printing's remaining per-object costs, with the same freeing steps: `a + b + c` made once where it's short (the printing's strConcat3), freeOne's second step taken in place, concatenation's new buffer and a tail's owner word worked out apart from its common way; corpus/lower/r22/r22_joins.ts (three strings joined every way, parts empty or not, totals either side of 64 units, pure and calling third parts), r22_throws.ts (errors with and without causes, causes of the program's own classes holding objects, caught 1 and 20 frames up, kept, rethrown through finally) and r22_steps.ts (objects of two to four slots freed with the collector linked, children kept past them and read after their slots are reused) agree with V8 natively and through both routes with class printing forced in rc and leak at -O0 and -O2, and the printed TSL on V8 and JSC with the source (tools/r22-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${d.agreed}/${d.cases} cases the same as V8 and through both routes, class-printed: ${d.printed.join(", ")}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 64. R22's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("64", async () => {
+    const R22 = timedModule("r22", await import("../r22-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R22.R22_FAULTS) {
+      const x = await R22.r22Fault(f, accel, jobs);
+      rows.push(`${f.what}: ${caughtText(x)}`);
+      if (x.answers === 0) failures.push(`${f.name} wasn't caught: ${x.first}`);
+    }
+    report({
+      box: `64. R22: each of ${R22.R22_FAULTS.length} bugs is caught by a wrong answer, with how many cases caught it: a + b + c made once with b and c swapped, a concatenation's new buffer given the second string at the wrong place, freeOne's second step visiting slot 2 in place of slot 1, and a tail's owner word naming the size class above its own (tools/r22-tests.ts, over corpus/lower/r22 and r21 in rc at -O2)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
   M.vms(
     "8",
     "8. No QEMU process of this run is left, and the owner's UTM and QEMU processes were only observed",

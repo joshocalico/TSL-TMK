@@ -165,6 +165,17 @@ function sizeClass(bytes: usize): usize {
   return k;
 }
 
+/**
+ * R22: the owner word of a store's object in size class k, from its owner word for one with no tail (`Rc.owner`, its number
+ * times 256 plus that class, worked out checked when it registered): the same number, and k in the low byte. A size class is
+ * below 256 (at most 64), so this is `id * 256 + k` with nothing to check, where that was a checked multiply and add each
+ * time a tail's class changed.
+ */
+/** @tsl.inline */
+function tailOwner(owner: u32, k: usize): u32 {
+  return ((owner & 0xffff_ff00) | toU32(k)) >>> 0;
+}
+
 // SAFETY: the environment registered this source (setPageSource), and it's trusted to return what it promises (3.8).
 function pages(n: usize): u64 {
   return sourcePages(n);
@@ -671,6 +682,15 @@ function quickFree(slot: u64): u64 {
     cur = slot;
     at = 1;
     slots = s;
+    // R22: the second step, the visit of the slot at the cursor (slot 1), taken here as runSteps(1) took it (freeSteps with
+    // a budget of one: `spare` 0 while the slot is visited, then the cursor one on), without the two calls and freeSteps'
+    // frame; a thrown object (five slots) took both for every allocation that freed it
+    stepping = true;
+    callRelease(ptrAt(u32, entry).read(), objectAt<Counted0>(slot), at, Visit.Drop);
+    stepping = false;
+    at++;
+    stepsTaken = BigInt.asUintN(64, stepsTaken + 1n);
+    return 2n;
   }
   if (cur === 0n && waiting === 0n) return 1n;
   return 1n + runSteps(1);
@@ -1460,8 +1480,10 @@ export class Rc<T extends object> {
     if (n !== this.tn || k === 0) {
       k = sizeClass(SLOT_PREFIX + tailBytes(this.elem, n));
       this.tn = n;
-      this.tk = k;
-      this.tw = this.id * 256 + toU32(k);
+      if (k !== this.tk) {
+        this.tk = k;
+        this.tw = tailOwner(this.owner, k);
+      }
     }
     // a free slot of its size on its list first, as `tryMake` takes one (R3: a lowered `rc` array is made so)
     const head = ptrAt(u64, heads).add(k);
@@ -1514,10 +1536,14 @@ export class Rc<T extends object> {
       if (cyclesLinked()) idleStep();
       else if (waiting !== 0n || cur !== 0n) runSteps(budget);
       if (n !== this.tn || this.tk === 0) {
+        // R22: a new length's size class, and its owner word only where the class is new too (short strings' lengths
+        // change from one make to the next, and most share a class)
         const nk = sizeClass(SLOT_PREFIX + tailBytes(this.elem, n));
-        this.tk = nk;
         this.tn = n;
-        this.tw = this.id * 256 + toU32(nk);
+        if (nk !== this.tk) {
+          this.tk = nk;
+          this.tw = tailOwner(this.owner, nk);
+        }
       }
       const k = this.tk;
       const head = ptrAt(u64, heads).add(k);
