@@ -1,0 +1,21 @@
+[
+  { "fn": "boxesAt", "args": [0, 1, 1], "rcOnly": true, "expect": 15110 },
+  { "fn": "boxesAt", "args": [1, 1, 1], "rcOnly": true, "expect": 101010010 },
+  { "fn": "boxesAt", "args": [3, 1, 1], "rcOnly": true, "expect": 101010010 },
+  { "fn": "boxesAt", "args": [3, 1, 0], "rcOnly": true, "expect": 101010010 },
+  { "fn": "boxesAt", "args": [5, 3, 1], "rcOnly": true, "expect": 303030310 },
+  { "fn": "boxesAt", "args": [5, 3, 0], "rcOnly": true, "expect": 303030410 },
+  { "fn": "boxesAt", "args": [5, 5, 1], "rcOnly": true, "expect": 505010410 },
+  { "fn": "boxesAt", "args": [8, 5, 0], "rcOnly": true, "expect": 505050810 },
+  { "fn": "boxesAt", "args": [9, 7, 1], "rcOnly": true, "expect": 707050810 },
+  { "fn": "boxesAt", "args": [30, 33, 1], "rcOnly": true, "expect": 3327012910 },
+  { "fn": "boxesAt", "args": [30, 33, 0], "rcOnly": true, "expect": 3333255910 },
+  { "fn": "boxesAt", "args": [40, 32, 1], "rcOnly": true, "expect": 3232173910 },
+  { "fn": "runOut", "args": [10, 1], "rcOnly": true, "expect": 7000701 },
+  { "fn": "runOut", "args": [10, 2], "rcOnly": true, "expect": 3500701 },
+  { "fn": "runOut", "args": [10, 3], "rcOnly": true, "expect": 2400701 },
+  { "fn": "runOut", "args": [17, 5], "rcOnly": true, "expect": 2401191 },
+  { "fn": "runOut", "args": [40, 7], "rcOnly": true, "expect": 4002801 },
+  { "fn": "runOut", "args": [40, 32], "rcOnly": true, "expect": 902801 },
+  { "fn": "runOut", "args": [60, 33], "rcOnly": true, "expect": 1304201 }
+]

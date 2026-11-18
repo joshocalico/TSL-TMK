@@ -34,6 +34,7 @@ import {
   r21UnitsOff,
   r22Off,
   r24Off,
+  r25Off,
   rcStrRuntime,
 } from "./emit-rcstr.ts";
 import {
@@ -1259,7 +1260,7 @@ class Emitter {
           te.k === "rtcall" &&
           (te.ty.k === "ref" || te.args.some((a) => a.ty.k === "ref")) &&
           this.vecRt(te) === null &&
-          !(this.strs && te.name === "$concat")
+          !(this.strs && (te.name === "$concat" || te.name === "$indexFrom"))
         )
           this.fail(`the runtime's ${te.name}, on references`);
       });
@@ -2123,12 +2124,7 @@ class Emitter {
    * `strConcat` is JS's length check and then `concat`, so what only it calls isn't either. Everything else is.
    */
   printedFuncs(funcs: FuncInst[]): FuncInst[] {
-    const name = new Map<FuncInst, string>();
-    for (const i of this.r.insts) {
-      const d = i.decl as ts.Node;
-      if (!d.getSourceFile().fileName.endsWith("/compiler/rt/str.ts")) continue;
-      if (ts.isFunctionDeclaration(d) && d.name !== undefined) name.set(i.fi, d.name.text);
-    }
+    const name = this.strRtNames();
     for (const f of funcs) {
       const n = name.get(f);
       if (n === undefined) continue;
@@ -2148,6 +2144,61 @@ class Emitter {
     };
     for (const f of funcs) if (!name.has(f) || f.exported) visit(f);
     return funcs.filter((f) => keep.has(f));
+  }
+
+  /** Each function of compiler/rt's string runtime (str.ts), by its name there. */
+  strRtNames(): Map<FuncInst, string> {
+    const name = new Map<FuncInst, string>();
+    for (const i of this.r.insts) {
+      const d = i.decl as ts.Node;
+      if (!d.getSourceFile().fileName.endsWith("/compiler/rt/str.ts")) continue;
+      if (ts.isFunctionDeclaration(d) && d.name !== undefined) name.set(i.fi, d.name.text);
+    }
+    return name;
+  }
+
+  /**
+   * R25: in `rc`, compiler/rt's `strIndexOf` as far as its empty pattern's case (`if (m === 0) return start;`), then
+   * `return s.indexFrom(p, start)`: the search over the two strings' runs of units, JsStr's own (emit-rcstr.ts), where the
+   * printed loop read each unit through `unit` with its checks, `matchAt` a call. Null where the body isn't that shape, and
+   * the function prints whole.
+   */
+  indexOfBody(f: FuncInst): Stmt[] | null {
+    const isStart = (te: TE | null | undefined): boolean =>
+      te?.k === "var" && te.v.name === "start";
+    const at = f.body.findIndex(
+      (st) =>
+        st.k === "if" &&
+        st.b === null &&
+        st.a.length === 1 &&
+        st.a[0]!.k === "return" &&
+        isStart(st.a[0]!.val),
+    );
+    const start = f.body.find((st) => st.k === "let" && st.v.name === "start");
+    let sh: unknown;
+    eachTE(f.body, (te) => {
+      if (sh === undefined && isStrSh(te.sh)) sh = te.sh;
+    });
+    const [s, p] = f.params;
+    if (
+      at < 0 ||
+      start?.k !== "let" ||
+      sh === undefined ||
+      s === undefined ||
+      p === undefined ||
+      f.ret.k !== "int" ||
+      start.v.ty.k !== "int"
+    )
+      return null;
+    const v = (x: Var): TE => ({ k: "var", v: x, ty: x.ty, sh }) as TE;
+    const sv = start.v;
+    const call = {
+      k: "rtcall",
+      name: "$indexFrom",
+      args: [v(s), v(p), { k: "var", v: sv, ty: sv.ty } as TE],
+      ty: f.ret,
+    } as TE;
+    return [...f.body.slice(0, at + 1), { k: "return", val: call } as Stmt];
   }
 
   /**
@@ -2995,10 +3046,20 @@ class Emitter {
     // Strings as JsString (D67): the string runtime's core isn't printed, and strConcat is its length check and concat.
     strTagsOnly = true;
     let concat: { f: FuncInst; body: Stmt[] } | null = null;
+    const indexOf: { f: FuncInst; body: Stmt[] }[] = [];
     try {
       for (const n of ["JsString", "JsFlat", "jsEq"]) this.topNames.add(n);
       // R10: in `rc`, the program's own string runtime's names, and what it takes from @tsl/core
       if (this.rc) for (const n of [...RC_STR_NAMES, ...RC_STR_CORE]) this.topNames.add(n);
+      // R25: in `rc`, strIndexOf's search JsStr's own (indexOfBody), before what's printed is worked out from what's called
+      if (this.rc && !r25Off("strings"))
+        for (const [g, n] of this.strRtNames()) {
+          if (n !== "strIndexOf" || !this.funcs.includes(g)) continue;
+          const body = this.indexOfBody(g);
+          if (body === null) continue;
+          indexOf.push({ f: g, body: g.body });
+          g.body = body;
+        }
       this.funcs = this.printedFuncs(this.funcs);
       const f = this.strConcatFn;
       if (f !== null && this.funcs.includes(f)) {
@@ -3012,6 +3073,7 @@ class Emitter {
     } finally {
       strTagsOnly = false;
       if (concat !== null) concat.f.body = concat.body;
+      for (const x of indexOf) x.f.body = x.body;
     }
   }
 
@@ -3906,10 +3968,13 @@ class Emitter {
 
   /** R24: compiler/rt's `strConcat` and `strIndex`, printed in `rc` over the program's own JsStr. */
   rcInlined(f: FuncInst): boolean {
+    if (!f.key.includes("/compiler/rt/str.ts")) return false;
+    if (!r24Off("strings") && /^str(Concat|Index)(\$\d+)?$/.test(f.tirName)) return true;
+    // R25: and `slice`'s and `substring`'s, now JsStr's `sub` they call is inlined (its copy and view out of line), so a
+    // substring is one call where it was two at -O2, which inlined the small `strSlice` and called `sub`; and the index
+    // conversions they and `indexOf` make, a call each at -O1
     return (
-      !r24Off("strings") &&
-      f.key.includes("/compiler/rt/str.ts") &&
-      /^str(Concat|Index)(\$\d+)?$/.test(f.tirName)
+      !r25Off("strings") && /^(str(Slice|Substring)|relIndex|absIndex)(\$\d+)?$/.test(f.tirName)
     );
   }
 
@@ -5438,6 +5503,10 @@ class Emitter {
         if (this.strs && e.name === "$concat") {
           const [a, b] = this.operands([e.args[0]!, e.args[1]!]);
           return `${paren(a!)}.concat(${b})`;
+        }
+        if (this.strs && e.name === "$indexFrom") {
+          const [a, b, c] = this.operands([e.args[0]!, e.args[1]!, e.args[2]!]);
+          return `${paren(a!)}.indexFrom(${b}, ${c})`;
         }
         if (this.classes && e.name === "$push") {
           const [v, x] = this.operands([e.args[0]!, e.args[1]!]);

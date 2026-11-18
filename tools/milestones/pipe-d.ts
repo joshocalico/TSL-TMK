@@ -2729,6 +2729,50 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     });
   });
 
+  // 69. R25: strings and freeing in rc class printing, each where a wrong answer shows, the steps pinned as before, and the
+  // backend's add of two 32-bit values.
+  M.unit("69", async () => {
+    const R25 = timedModule("r25", await import("../r25-tests.ts"));
+    const failures: string[] = [];
+    const d = await R25.r25Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of R25's programs ran");
+    if (d.agreed !== d.cases)
+      failures.push(`${d.cases - d.agreed} cases differ through the two routes`);
+    for (const p of R25.R25_PROGRAMS)
+      if (!d.printed.includes(`${p}@rc`)) failures.push(`${p} doesn't class-print in rc`);
+    const st = await R25.r25Steps(accel, jobs);
+    failures.push(...st.failures);
+    if (st.cases === 0) failures.push("no case of corpus/rc/rc_steps_r25.ts ran");
+    const tr = await R25.r25Trap(accel, jobs);
+    failures.push(...tr.failures);
+    if (tr.cases === 0) failures.push("no case of corpus/trap/wide_add.ts ran");
+    report({
+      box: "69. R25 (3.5, 4.4, D39, D41): rc class printing's strings and freeing with the same steps: freeAlloc taking the block's step of an object at the cursor with every slot visited, and its last step in place; callRelease's chain with the release functions that do something first; strIndexOf's search JsStr's own over the two strings' runs, a code point's length read through unit, a substring's common ways inlined, a join's one-unit copies stored, equality's quick answers inlined; and the AArch64 backend's add of two values held from 32 bits or fewer without its tests at -O1 and -O2; corpus/lower/r25/r25_strings.ts (searches, splits, joins, code points, substrings and equality over views and flat strings) and r25_free.ts (arrays of one- and two-slot objects and a split's words let go of, some kept) agree with V8 natively and through both routes with class printing forced in rc and leak at -O0 and -O2, and the printed TSL on V8 and JSC with the source; corpus/rc/rc_steps_r25.ts's step counts at budgets 1 to 7, 32 and 33, pinned with @tsl/gc as it was before R25, natively and on the host; corpus/trap/wide_add.ts natively at -O0 and -O2 (tools/r25-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${d.agreed}/${d.cases} cases the same as V8 and through both routes, class-printed: ${d.printed.join(", ")}; steps ${st.agreed}/${st.cases}; wide adds ${tr.agreed}/${tr.cases}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 70. R25's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("70", async () => {
+    const R25 = timedModule("r25", await import("../r25-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R25.R25_FAULTS) {
+      const x = await R25.r25Fault(f, accel, jobs);
+      rows.push(`${f.what}: ${caughtText(x)}`);
+      if (x.answers === 0) failures.push(`${f.name} wasn't caught: ${x.first}`);
+    }
+    report({
+      box: `70. R25: each of ${R25.R25_FAULTS.length} bugs is caught by a wrong answer, with how many cases caught it: freeAlloc giving the cursor's block back without its step, or leaving the cursor on it, or going on past slot 0 with no step left (each by corpus/rc's pinned step counts or wrong answers), callRelease's chain in the order shown against the numbers stores register, the backend's add left without its tests with a 64-bit operand (corpus/trap natively at -O2), a code point's second unit read two on, indexFrom matching against the next unit, a view's substring copied a unit late, equality comparing against the next unit, and a join's one-unit copy stored a unit early (tools/r25-tests.ts, over corpus/lower/r25, r24, r22 and r21 in rc at -O2, and corpus/rc/rc_steps*.ts natively)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
   M.vms(
     "8",
     "8. No QEMU process of this run is left, and the owner's UTM and QEMU processes were only observed",

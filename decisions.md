@@ -56,6 +56,72 @@ The nightly full run stays paused until the owner agrees the pipeline is fixed.
 
 ---
 
+## 2027-01-17
+
+**Coordinator: R25 verified** (manifest MATCH, tree e99734766a09628d; gate from clean 291 of 291 in 97.2 min; sample 8/8 the same, seed 28057). Highest per-job peak 2.52 GiB (pipe-d/48). No stash or stray worktree was left. Committed locally, not pushed.
+- **Strings in `rc`:** four of five are now at or under the direct route at -O1 and -O2 (appends, short joins, substrings, split and join). Scans are 1.12/1.15. `AUTO_RC_STRINGS` stays off.
+- **The finding that changes the plan:** R25's probe shows that turning `AUTO_RC_STRINGS` on would take no corpus program, because 96 of the `rc` string programs are reshaped. What actually decides `rc` is `TRUSTED_IN`'s `rc` class printing. Under it, 4 programs are over 1.00 at -O1 and 7 at -O2. The worst are:
+  - map_grow_oom (2.19/2.16), which needs the owner's deferred option 1 or a capacity change;
+  - cyc_exhaust (1.42/1.32), the collector's exhaustion path.
+
+  Retiring the direct route (item 11) needs those two settled, so option 1 is now on the critical path. I'm asking the owner when to take it; their "later" stands until they answer.
+
+**Decision: R26 takes the `rc` programs in `TRUSTED_IN`'s way that don't need option 1, plus scans.**
+- **First, measure the 7 programs at -O2 (and the 4 at -O1)** with tools/r14-time.ts and say what each one's gap is.
+- **Then fix the ones that are neither maps nor the collector's exhaustion path:** read_checks, reshape_order, relative_import and the rest R25 lists.
+- **Scans:** the optimiser work R25 named, at -O1 and -O2:
+  - range analysis that accepts a signed loop test whose smaller side is known non-negative, and reaches a `zext`'s source;
+  - hoisting or peeling a string's buffer, start and length out of the scan loop;
+  - `charCodeAt` with an integer index printed as integers at -O1.
+
+  The speed rule covers the direct route too. Report every -O2 pin this moves, by program.
+- *Rejected:* a by-construct trust rule (R19's reason stands); option 1 before the owner says.
+
+## 2027-01-16
+
+**R25 is built (builder's report; for the coordinator to verify).** Strings in `rc` class printing, measured first: freeing's cursor at a block taken in `freeAlloc`, the release chain's empty functions last, `indexOf`'s search over the strings' runs of units, cheaper code points, substrings, joins and equality, and the backend's add that can't carry. SPEC 3.5 (the release dispatch, R25's freeing paragraph, the strings paragraph, `ex-gc-rc.ts`'s block), 4.4 (the add), 8.3 (pipe-d boxes 69 and 70), D39 and M5's R25 record. No check, case or fault was dropped or weakened, and no limit, timeout or watchdog moved. Nothing was added to TSL, and no unchecked operation to anything lowered code can import. **`AUTO_RC_STRINGS` stays off:** four of the five strings benchmarks are now at or below 1.00 at -O1 and -O2, but scans are 1.12 / 1.15.
+
+- **Measured first** (instructions; TCG, `TMK_ICOUNT=1`; "before" a worktree of commit 8501003): R24's after-numbers exactly.
+  - *Split and join:* a split's 4,211 words, let go of by their array, are two steps each; once a budget ran out between a word's two steps, every later allocation found the cursor at a block and went through `runSteps` to `freeSteps`' general loop (410 calls a call of `splitJoin`, 1,425 instructions each). That's a parity trap, not a slow loop: about 95 instructions a word there against `freeAlloc`'s 80, so less than the coordinator's 120. The bigger part was `strIndexOf`: 167.5 instructions a call, each unit read through `unit` (two checks) and `matchAt` a call, where the direct route's search is inlined raw reads. At -O1, a join's copies were a call each (`copyFrom`, 39 a call).
+  - *Scans:* the `charCodeAt` loop is 37 instructions a unit against 23 at -O2. The extra 14 are: the index against the length 2, the buffer's null test 2, its tag 1, the buffer's length and units 2, the start 1, the add's carry and 2^53 tests 4, the units' bounds check 2 (the direct route loads an offset and reads, 3). `for...of` worked out `all()`'s run for each code point's length (about 33 over the direct route's 3), and `sub` was a call (76 against 33).
+  - *Substrings at -O1:* `sub` 77.7 against 33.7, the index conversions a call each, equality 101 against 75.
+  - *The release chain:* `JsStr`'s release was fifth, behind `@tsl/gc`'s rooms' empty release (first by the order of modules) and `JsStrBuf`'s empty one.
+- **Built:**
+  - `@tsl/gc`: `freeAlloc` takes the block's step of an object at the cursor whose slots are all visited, then frees on, and takes its last step in place (slot 0's visit, the cursor left at slot 1), where both went to `runSteps`.
+  - tslc's release dispatch: release functions that do something first, the empty ones (never called, R17) last. This is item 4 of the brief. It changes the TIR of every `rc` program whose chain had an empty release first (`@tsl/gc`'s rooms' comes first by the order of modules), hand-written `rc` programs' at -O0 included, but none of those is pinned: of the pins it moved only the five lowered programs `@tsl/gc`'s change moves anyway.
+  - Class printing in `rc`: `strIndexOf` printed to its empty-pattern case, then `s.indexFrom(p, start)`, JsStr's own search over the two runs of units, inlined. Its loop's test proves the first read's check (at -O1 `loopbounds` takes it). Also: `cpLen` through `unit`, inlined; `sub`'s common ways inlined with the copy out of line (`subMade`, a view's copy from its buffer straight); `copyFrom` inlined, one unit a checked store; equality's quick answers inlined (`jsStrSame` out of line); `slice`, `substring` and their index conversions inlined.
+  - Backend (AArch64, -O1 and -O2, machine code only): a checked unsigned add of two values each held from 32 bits or fewer drops its carry and 2^53 tests. Its sum is below 2^33. wasm32's `ix` is 32 bits, so the TIR keeps the check. This is 3 instructions of every view read.
+- **Why sound:** `freeAlloc`'s new paths take exactly `freeSteps`' and `freeFlat`'s steps in their order. corpus/rc/rc_steps_r25.ts (new: boxes and pairs waiting at budgets 1 to 7, 32 and 33, so the cursor stops at blocks and at slots) was pinned with `@tsl/gc` as it was before R25 and gives the same 19 counts after, natively and on the host; every pin of corpus/rc/rc_steps*.ts holds, rc_steps_r24.ts's 57 among them. The release numbering is one list that `releaseIndex` and `callRelease` share. Every unit read is still a tail's checked read. D39 and D41 are unchanged.
+- **Not built (the coordinator's item 1, by proof):** scans' first check, the index against the length.
+  - At -O2, `range.ts` takes a signed loop test as a fact only where both sides are known not negative, and the length is a load. "The smaller side not negative" would be enough, plus reaching `zext n` by its own definition. Both are sound, but they change -O2's TIR wherever they apply (the direct route's too), for 2 of the 14 instructions a unit.
+  - At -O1, `loopbounds` doesn't take a widened length, and the printed `charCodeAt`'s index goes through a float (`(Math.trunc(i)) | 0`).
+  - The bigger cost is loads LICM can't move: a load that can fault moves only from the first turn's path, which `charCodeAt`'s NaN test blocks.
+  - That's optimiser work; see *Next*.
+- **After** (TSL / direct, -O1 and -O2, before → after):
+  - Strings: appends 0.963/0.924 → 0.950/0.914; short joins 0.747/0.755 → 0.734/0.747; substrings 1.021/1.000 → 0.988/0.983; **scans 1.193/1.209 → 1.122/1.147**; split and join 1.059/1.032 → 0.998/0.980.
+  - Exceptions: calls that can throw, `try`, `try`/`finally` 1.00. Throws 0.938/0.972 → 0.930/0.962 (1 up), 0.951/0.978 → 0.944/0.970 (10 up), 0.984/0.993 → 0.982/0.990 (100 up).
+  - `AUTO_RC`'s benchmarks: none worse. List 0.518/0.559 → 0.514/0.554, churn 0.840/0.864 → 0.835/0.858, cycles 1.045/0.908 → 1.038/0.893, arrays 0.723/0.828 → 0.715/0.828, acyclic 0.768/0.791 → 0.753/0.763, object-keyed maps 0.906/0.891 → 0.902/0.891, number-keyed maps 0.989/1.002 the same.
+- **`auto`:** nothing new; `AUTO_RC_STRINGS` stays off (scans).
+  - tools/r14-time.ts, `TMK_TRUST_IN=rc:classes` (TCG, counted; R24 didn't run it): no program slower, the same 4 over 1.00 at -O1 and 7 at -O2 before and after. Worst: map_grow_oom 2.19/2.16 and cyc_exhaust 1.42/1.32, unchanged; adv_forof_mutation -O2 1.033 → 1.025; read_checks -O2 1.080 → 1.079.
+  - Coverage (`route-blockers`, -O2) is the same before and after: `strict` 30 + 18, `leak` and `manual` 63 + 43, `rc` 19 + 0.
+  - *What it would take:* `route-blockers --mode rc` on a copy of this tree with `AUTO_RC_STRINGS` set true: still `rc` 19 + 0. Of the 100 `rc` programs whose first reason changes, 96 are left as reshaped programs `auto` doesn't trust in `rc` (`TRUSTED_IN`; they were blocked by a string literal's module state reached by address), and 4 by another printing gap. So turning strings on alone would take no corpus program: `TRUSTED_IN`'s `rc` class printing is the switch that gates them (4 and 7 programs over 1.00 above).
+- **Injected bugs** (box 70), each caught by wrong answers:
+  - `freeAlloc` giving the cursor's block back without its step (31), leaving the cursor on it (25), or with one step left going past slot 0 (31);
+  - the release chain in the order shown against the numbers stores register (107);
+  - the backend's add left without tests with a 64-bit operand (3; also in `OPT_FAULTS`);
+  - a code point's second unit read two on (2), `indexFrom` matching the next unit (4), a view's substring a unit late (8), equality against the next unit (5), a join's one-unit copy a unit early (2).
+
+  Older bugs in the code R25 changed still patch and are still caught: `r24-alloc-block-step` (43), `r24-alloc-cursor` (17), `r24-rest-from-two` (26), gc-tests' "release not called" (4), "freeing not bounded" (1), unbounded freeing at an allocation (65), r19's `pair-elem-undropped` (12).
+- **Pins:** 20 of 3,864 moved, none TSL proper's, none unexplained, all by `@tsl/gc` and the release order together (tools/r25-pins.ts, stages gc and release; tools/r25-moved.ts). They're in the same five lowered `rc` programs R19, R21, R22 and R24 moved (bench/memory/list_lowered.ts and churn_lowered.ts, corpus/lower/fallback/escape_global.ts and closure_outlives.ts, corpus/lower/memory/store_closure.ts), at -O0, -O1 and -O2: a library change, which D44 allows. The printing moved none (`auto` doesn't take strings in `rc`), and the backend's change is machine code. 15 pinned again, 5 in the read-only pre-strings file set aside by key (`r25Moved`, in maps-pins' `mapsMoved`).
+- **Gate:** this entry was finished before the final gate; the result is in the builder's report.
+- *Rejected:* a flat string's release reporting no slots (D39's step counts); unzeroed allocation; option 1; the collector's exhaustion path; an unchecked view read; `sub` inlined into `strSlice` (substrings at -O2 to 1.005).
+- *Next:* scans, 1.12/1.15, are optimiser work.
+  - (a) `range.ts`: a signed test's fact where its smaller side isn't negative, and a target reached through its own `zext`.
+  - (b) LICM or peeling: the string's buffer, start and length moved out of a scan's loop, past `charCodeAt`'s NaN test on the first turn.
+  - (c) At -O1, `charCodeAt` with an integer index printed as integers.
+  - Then freeing's per-object cost: scans' 135 instructions a call against 112.
+  - Then `AUTO_RC_STRINGS`, then item 11.
+
 ## 2027-01-15
 
 **Coordinator: R24 verified** (manifest MATCH, tree 8707df61b52bc0e6; gate from clean 289 of 289 in 95.4 min; sample 8/8 the same, seed 26981). Highest per-job peak 2.41 GiB (pipe-d/48, down from 2.65). Committed locally, not pushed.

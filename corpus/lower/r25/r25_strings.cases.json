@@ -1,0 +1,12 @@
+[
+  { "fn": "searches", "args": [30] },
+  { "fn": "searches", "args": [70] },
+  { "fn": "splits", "args": [40] },
+  { "fn": "splits", "args": [100] },
+  { "fn": "codePoints", "args": [9] },
+  { "fn": "codePoints", "args": [80] },
+  { "fn": "substrings", "args": [50] },
+  { "fn": "substrings", "args": [100] },
+  { "fn": "equal", "args": [9] },
+  { "fn": "equal", "args": [100] }
+]

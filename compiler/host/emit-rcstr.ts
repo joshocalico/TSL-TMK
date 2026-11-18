@@ -44,6 +44,7 @@ export const RC_STR_NAMES = [
   "jsStrGrown",
   "jsStrView",
   "jsStrEq",
+  "jsStrSame",
   "jsStrHash",
   "toU64",
 ];
@@ -104,6 +105,15 @@ export function r22Off(part: string): boolean {
  */
 export function r24Off(part: string): boolean {
   return (process.env.TMK_R24_OFF ?? "").split(",").includes(part);
+}
+
+/**
+ * R25's printing put back as it was, for tools/r25-pins.ts (`TMK_R25_OFF=strings`): `cpLen` reading its units through
+ * `all()`, `sub` and `copyFrom` out of line, and no `indexFrom` (compiler/rt's strIndexOf printed whole, emit-tsl.ts). Never
+ * set otherwise.
+ */
+export function r25Off(part: string): boolean {
+  return (process.env.TMK_R25_OFF ?? "").split(",").includes(part);
 }
 
 /** The string runtime's text: the two classes and the functions the printing calls in place of JsString's statics. */
@@ -190,6 +200,147 @@ function jsStrGrown(a: JsStr, b: JsStr, n: i32): JsStr {
   r.buf = b;
   r.hw = hw;
   return r;`;
+  // R25 (TMK_R25_OFF=strings puts these back as they were, for tools/r25-pins.ts)
+  const r25 = !r25Off("strings");
+  // R25: a code point's length read through \`unit\`, inlined, where \`all()\` worked out the units' run (a subarray's
+  // clamps) on every call: for...of over a string calls it once a code point
+  const cpLenText = r25
+    ? `  /** @tsl.inline */
+  cpLen(i: i32): i32 {
+    const n = this.n;
+    if (i < 0 || i >= n) trap(Trap.Bounds);
+    const c = this.unit(toUsize(i));
+    if (c < 0xd800 || c > 0xdbff || i + 1 >= n) return 1;
+    const d = this.unit(toUsize(i + ${fault() === "r25-cplen-next" ? "2" : "1"}));
+    return d >= 0xdc00 && d <= 0xdfff ? 2 : 1;
+  }`
+    : `  cpLen(i: i32): i32 {
+    const n = this.n;
+    if (i < 0 || i >= n) trap(Trap.Bounds);
+    const u = this.all();
+    const c = toI32(u[toUsize(i)]!);
+    if (c < 0xd800 || c > 0xdbff || i + 1 >= n) return 1;
+    const d = toI32(u[toUsize(i + 1)]!);
+    return d >= 0xdc00 && d <= 0xdfff ? 2 : 1;
+  }`;
+  // R25: a substring's common ways (the whole, empty, one unit) inlined where it's taken, the copy and the view out of line
+  const subHead = r25
+    ? `  /** @tsl.inline */
+  sub(i: i32, n: i32): JsStr {
+    const len = this.n;
+    if (i < 0 || n < 0 || i + n > len) trap(Trap.Bounds);
+    if (n === len) return this;
+    if (n === 0) return jsStrEmpty();
+    if (n === 1) return jsStrOfUnit(this.unit(toUsize(i)));
+    return this.subMade(i, n);
+  }
+
+  /** \`sub\`'s copy or view: n units from i, at least 2, within it and fewer than all of it. */
+  /** @tsl.noinline */
+  subMade(i: i32, n: i32): JsStr {`
+    : `  sub(i: i32, n: i32): JsStr {
+    const len = this.n;
+    if (i < 0 || n < 0 || i + n > len) trap(Trap.Bounds);
+    if (n === len) return this;
+    if (n === 0) return jsStrEmpty();
+    if (n === 1) return jsStrOfUnit(this.unit(toUsize(i)));`;
+  // R25: a copy or a view read from the buffer's units straight, where it went through \`all()\`'s run, then a run of that
+  const subBody = r25
+    ? `    const b = this.buf;
+    if (b !== null) {
+      if (n >= 32 && n * 4 >= wrapI32(b.units.length)) return jsStrView(b, this.start + i, n, 0);
+      const r = jsStrZeroed(n);
+      const at = toUsize(this.start + i${fault() === "r25-sub-start" ? " + 1" : ""});
+      r.units.set(b.units.subarray(at, at + toUsize(n)), 0);
+      return r;
+    }
+    const r = jsStrZeroed(n);
+    r.units.set(this.units.subarray(toUsize(i), toUsize(i + n)), 0);
+    return r;`
+    : `    const b = this.buf;
+    if (b !== null && n >= 32 && n * 4 >= wrapI32(b.units.length))
+      return jsStrView(b, this.start + i, n, 0);
+    const r = jsStrZeroed(n);
+    r.units.set(this.all().subarray(toUsize(i), toUsize(i + n)), 0);
+    return r;`;
+  // R25: inlined (a join copies each part and each separator), one unit a checked store, not a copy's call (as R21 made
+  // an append of one), and a whole string its run, with no run of that
+  const copyFromText = r25
+    ? `  /** @tsl.inline */
+  copyFrom(di: usize, s: JsStr, si: usize, n: usize): void {
+    const sn = toUsize(s.n);
+    if (si + n > sn) trap(Trap.Bounds);
+    if (n === 1) {
+      this.units[${fault() === "r25-copy-one" ? "di > 0 ? di - 1 : di" : "di"}] = wrapU16(s.unit(si));
+      return;
+    }
+    const u = s.all();
+    this.units.set(si === 0 && n === sn ? u : u.subarray(si, si + n), di);
+  }`
+    : `  copyFrom(di: usize, s: JsStr, si: usize, n: usize): void {
+    if (si + n > toUsize(s.n)) trap(Trap.Bounds);
+    this.units.set(s.all().subarray(si, si + n), di);
+  }`;
+  // R25: equality's quick answers (the same string, one missing, the lengths differ) inlined where it's asked, the units
+  // compared out of line
+  const eqText = r25
+    ? `/** \`a === b\` for strings that may be \`undefined\` (null): the same units, or both missing. */
+/** @tsl.inline */
+function jsStrEq(a: JsStr | null, b: JsStr | null): bool {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  if (a.n !== b.n) return false;
+  return jsStrSame(a, b);
+}
+
+/** Whether two strings of the same length have the same units. */
+/** @tsl.noinline */
+function jsStrSame(a: JsStr, b: JsStr): bool {
+  const ua = a.all();
+  const ub = b.all();
+  const n = ua.length;
+  if (ub.length !== n) return false;
+  for (let i: usize = 0; i < n; i++) if (ua[i]! !== ub[${fault() === "r25-eq-shift" ? "i + 1 < n ? i + 1 : i" : "i"}]!) return false;
+  return true;
+}`
+    : `/** \`a === b\` for strings that may be \`undefined\` (null): the same units, or both missing. */
+function jsStrEq(a: JsStr | null, b: JsStr | null): bool {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  const n = a.n;
+  if (n !== b.n) return false;
+  const ua = a.all();
+  const ub = b.all();
+  for (let i: usize = 0; i < toUsize(n); i++) if (ua[i]! !== ub[i]!) return false;
+  return true;
+}`;
+  // R25: compiler/rt's strIndexOf past its empty pattern's case (emit-tsl.ts prints its body's rest as this call): the units
+  // read as the two strings' runs, each read checked against its run's length, where the loop's own test proves the first
+  const indexFromText = r25
+    ? `  /** Where p's units are first found in this at or after \`from\`, or -1: compiler/rt's strIndexOf for a pattern not empty. */
+  /** @tsl.inline */
+  indexFrom(p: JsStr, from: i32): i32 {
+    const us = this.all();
+    const up = p.all();
+    const n = us.length;
+    const m = up.length;
+    if (m === 0) return from;
+    if (m > n) return -1;
+    const last = n - m;
+    const c0 = up[0]!;
+    for (let i: usize = toUsize(from); i < n; i++) {
+      if (i > last) break;
+      if (us[i]! === c0) {
+        let k: usize = 1;
+        while (k < m && us[i + k]! === up[${fault() === "r25-index-match" ? "k - 1" : "k"}]!) k++;
+        if (k === m) return toI32(i);
+      }
+    }
+    return -1;
+  }
+
+`
+    : "";
   const unitSlot = fault() === "rcstr-unit-low7" ? "u & 127" : "u";
   const unitLimit = fault() === "rcstr-unit-past" ? "<= 256" : "< 256";
   const unitLimitNot = fault() === "rcstr-unit-past" ? "> 256" : ">= 256";
@@ -241,10 +392,7 @@ ${jsStrCtor}  units = tail(u16);
   }
 
   /** Copies n units of s from si into this string, made by jsStrZeroed and no one else's yet, from di. */
-  copyFrom(di: usize, s: JsStr, si: usize, n: usize): void {
-    if (si + n > toUsize(s.n)) trap(Trap.Bounds);
-    this.units.set(s.all().subarray(si, si + n), di);
-  }
+${copyFromText}
 
   /** Unit 0's address, where a native caller writes a string argument's units (4.5's ABI). */
   unitsAddr(): u64 {
@@ -252,15 +400,7 @@ ${jsStrCtor}  units = tail(u16);
   }
 
   /** How many units the code point at i takes, 1 or 2; a lone surrogate is one. */
-  cpLen(i: i32): i32 {
-    const n = this.n;
-    if (i < 0 || i >= n) trap(Trap.Bounds);
-    const u = this.all();
-    const c = toI32(u[toUsize(i)]!);
-    if (c < 0xd800 || c > 0xdbff || i + 1 >= n) return 1;
-    const d = toI32(u[toUsize(i + 1)]!);
-    return d >= 0xdc00 && d <= 0xdfff ? 2 : 1;
-  }
+${cpLenText}
 
   /**
    * \`this + b\`, whose length the caller has checked is within JS's. Up to 64 units it copies; an append to a view that ends
@@ -297,21 +437,11 @@ ${jsStrCtor}  units = tail(u16);
   }
 
   /** The n units from i, which are within it: shared with its buffer if they're at least 32 and a quarter of its room. */
-  sub(i: i32, n: i32): JsStr {
-    const len = this.n;
-    if (i < 0 || n < 0 || i + n > len) trap(Trap.Bounds);
-    if (n === len) return this;
-    if (n === 0) return jsStrEmpty();
-    if (n === 1) return jsStrOfUnit(this.unit(toUsize(i)));
-    const b = this.buf;
-    if (b !== null && n >= 32 && n * 4 >= wrapI32(b.units.length))
-      return jsStrView(b, this.start + i, n, 0);
-    const r = jsStrZeroed(n);
-    r.units.set(this.all().subarray(toUsize(i), toUsize(i + n)), 0);
-    return r;
+${subHead}
+${subBody}
   }
 
-  /** By code unit, as JS orders strings: negative, zero or positive. */
+${indexFromText}  /** By code unit, as JS orders strings: negative, zero or positive. */
   compare(b: JsStr): i32 {
     const ua = this.all();
     const ub = b.all();
@@ -564,15 +694,5 @@ function jsStrHash(at: Uint16Array, k0: i32, k1: i32): u32 {
   return (v1 ^ v3) & 0x3fffffff;
 }
 
-/** \`a === b\` for strings that may be \`undefined\` (null): the same units, or both missing. */
-function jsStrEq(a: JsStr | null, b: JsStr | null): bool {
-  if (a === b) return true;
-  if (a === null || b === null) return false;
-  const n = a.n;
-  if (n !== b.n) return false;
-  const ua = a.all();
-  const ub = b.all();
-  for (let i: usize = 0; i < toUsize(n); i++) if (ua[i]! !== ub[i]!) return false;
-  return true;
-}`.split("\n");
+${eqText}`.split("\n");
 }

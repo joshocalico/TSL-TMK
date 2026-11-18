@@ -601,15 +601,36 @@ function freeFlat(n: usize): u64 {
  * runSteps', with what's left. So the same steps in the same order with the same effects, in one call: the strings'
  * one-slot objects went through runSteps' 33-instruction hand-over and freeFlat's frame, 187 instructions a freeing call
  * against the direct route's 108.
+ *
+ * R25: with one step left, too, as freeFlat takes it (slot 0's visit, then the cursor left at slot 1, or for an object with
+ * no slots that visit the step that gives it back); and where the cursor is set with every slot of its object visited, its
+ * block's step first, as freeSteps takes it, then the rest here. A one-slot object is two steps, so once a budget ran out
+ * between them every later allocation found the cursor set that way and went through freeSteps' general loop, about 120
+ * instructions an object where this takes 80 (split and join's strings, let go of by their array).
  */
 /** @tsl.noinline */
 // SAFETY: as freeFlat: the queue's head is a waiting slot holding its object, taken off before its release function runs
-// (which may queue more), and its store's entry is its class's; the cursor is idle, so nothing else is being freed.
+// (which may queue more), and its store's entry is its class's; the cursor is idle when the loop starts (a cursor whose
+// object has every slot visited is that object's block given back first, as freeSteps gives it back), so nothing else is
+// being freed.
 function freeAlloc(n: usize): u64 {
-  if (stepping || cur !== 0n) return runSteps(n);
+  if (stepping) return runSteps(n);
   const all = toU64(n);
   let left = all;
-  while (left > 1n) {
+  if (cur !== 0n) {
+    // R25: the cursor's object with every slot visited, so only its block's step is left (a one-slot object's two steps
+    // split by the budget leave it so, and from then on every allocation's would): that step taken here, as freeSteps
+    // takes it first, then the rest as below; with slots of its own still to visit, freeSteps takes it on (runSteps')
+    if (cyclesLinked() || at < slots || left === 0n) return runSteps(n);
+    const c = cur;
+    const owner = ownerAt(c).read();
+    cur = 0n;
+    left = BigInt.asUintN(64, left - 1n); // giving its block back, a step of its own
+    giveBack(c, owner, entryOf(owner >>> 8));
+  }
+  // R25: down to the last step (R24 stopped at two): with one left, a waiting object's slot 0 visit is that step, and an
+  // object with slots is left at the cursor's slot 1, as freeFlat leaves it, or its block given back where it has none
+  while (left !== 0n) {
     const head = waiting;
     if (head === 0n) {
       // nothing more waiting, and the cursor idle: what runSteps' test after the loop would say

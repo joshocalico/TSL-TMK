@@ -281,6 +281,7 @@ export class NativeElaborator extends Elaborator {
   ifaceTys = new Map<ts.Symbol, Ty>(); // each dispatch interface's type, once its set is known
   ifaceReported = new Set<ts.Symbol>(); // an interface whose problem was reported, once
   releaseFns: ts.FunctionDeclaration[] = []; // @tsl/gc's release functions, numbered from 1 (R1d)
+  releaseShown: ts.FunctionDeclaration[] = []; // the same, in the order the program shows them (R25's injected bug)
 
   constructor(program: ts.Program, root: ts.SourceFile, sink: DiagSink, modules: ts.SourceFile[]) {
     super(program, root, sink);
@@ -1145,6 +1146,16 @@ export class NativeElaborator extends Elaborator {
       ts.forEachChild(n, visit);
     };
     for (const sf of this.modules) visit(sf);
+    // R25: those that do something first, each kind in the order the program shows it. Freeing calls only those (R17: an
+    // empty one's store is marked, and its objects given back without the call), so `callRelease`'s compare chain reaches
+    // a class's own sooner: `@tsl/gc`'s rooms' empty release, first by the order of modules, came before every class of
+    // the program's, and a string's empty buffer before the string. `TMK_R25_OFF=release` keeps the order shown.
+    this.releaseShown = [...this.releaseFns];
+    if (!(process.env.TMK_R25_OFF ?? "").split(",").includes("release"))
+      this.releaseFns = [
+        ...this.releaseFns.filter((d) => !isEmptyRelease(d)),
+        ...this.releaseFns.filter((d) => isEmptyRelease(d)),
+      ];
   }
 
   /** The release functions as instances, with the order an injected bug may rotate (`release-wrong-arm`, R1d). */
@@ -4148,7 +4159,12 @@ export class NativeElaborator extends Elaborator {
         const at = usizeArg(2);
         const op = this.expr(a[3]!);
         if (this.dry || item.ty.k === "unk" || op.ty.k === "unk") return mk(T.usize, { k: "err" });
-        const fns = this.releaseInsts(e);
+        // R25's injected bug: the chain in the order the program shows them, the numbers stores register by the order
+        // with empty ones last, so a number reaches another class's release function. Never set otherwise.
+        const fns =
+          process.env.TMK_TEST_TSL === "r25-release-order"
+            ? this.releaseShown.map((d) => this.instance(d, [], e))
+            : this.releaseInsts(e);
         const vi = this.newHidden(T.u32);
         const vo = this.newHidden(item.ty);
         const va = this.newHidden(T.usize);

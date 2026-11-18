@@ -1,0 +1,8 @@
+[
+  { "fn": "ones", "args": [300] },
+  { "fn": "ones", "args": [1] },
+  { "fn": "mixed", "args": [301] },
+  { "fn": "mixed", "args": [2] },
+  { "fn": "wordsKept", "args": [60] },
+  { "fn": "wordsKept", "args": [1] }
+]

@@ -128,7 +128,11 @@ export function backendFaults(): Shape {
   return {
     faults: new Set(
       list(env?.TMK_OPT_FAULT).filter(
-        (x) => x.startsWith("b3-") || x.startsWith("r21-") || x.startsWith("r23-"),
+        (x) =>
+          x.startsWith("b3-") ||
+          x.startsWith("r21-") ||
+          x.startsWith("r23-") ||
+          x.startsWith("r25-"),
       ),
     ),
     on: (part) => !off.has(part),
@@ -1557,6 +1561,26 @@ class FuncEmit {
     const sf = is64(t);
     const trap = this.trapLabel(trapId);
     if (t === "i8" || t === "i16") throw new Error(`no aarch64 lowering for checked ${t}`);
+    // R25: an unsigned 64-bit add of two values each held zero-extended from 32 bits or fewer, or a constant, can't carry,
+    // and its sum is below 2^53 (`ix`'s limit, SPEC 4.3): a view's unit index, its u32 start plus an i32 index. At -O1
+    // and -O2, the add without either test. Machine code only: the TIR, and wasm32's 32-bit `ix`, are as they were.
+    if (base === "add" && sign === "u" && (t === "ix" || t === "i64") && this.sh !== null) {
+      const most = (v: number): bigint | null => {
+        const r = this.rematOf(v);
+        if (r?.k === "int") return BigInt.asUintN(64, r.val);
+        const own = this.f.types[this.s.alias[v]!]!;
+        if (own === "i8" || own === "i16" || own === "i32")
+          return (1n << (own === "i8" ? 8n : own === "i16" ? 16n : 32n)) - 1n;
+        // the injected `r25-add-narrow` bug: a 64-bit operand taken for a 32-bit one
+        return this.sh?.faults.has("r25-add-narrow") === true ? (1n << 32n) - 1n : null;
+      };
+      const x = most(vals[0]!);
+      const y = most(vals[1]!);
+      if (x !== null && y !== null && x + y <= (t === "ix" ? (1n << 53n) - 1n : (1n << 64n) - 1n)) {
+        this.wrapAddSub("add", t, vals, res);
+        return;
+      }
+    }
     const op = base === "add" ? "adds" : "subs";
     const rd = this.dst(res);
     const k = this.smallImm(vals[1]!, sf);
