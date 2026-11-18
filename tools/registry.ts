@@ -487,9 +487,10 @@ export function quotesToolByKey(key: string): boolean {
 // --- inputs: what a run's result can depend on
 
 const INPUT_DIRS = ["compiler", "tools", "packages", "corpus", "bench"];
+// README.md and decisions.md aren't inputs: nothing a run does reads them, so editing them doesn't wait for a gate (owner,
+// 2026-11-18). SPEC.md is, as its `// file:` blocks are checked.
 const INPUT_ROOT_FILES = [
   "SPEC.md",
-  "README.md",
   "THIRD_PARTY",
   "package.json",
   "pnpm-lock.yaml",

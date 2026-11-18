@@ -9086,7 +9086,7 @@ caught in every quarter: those that aren't (the runtime's faults against random 
 the nightly run, and every `tmk milestone` run everything, and only those verify.
 
 **The manifest.** Every gate, milestone or `tmk test` run writes `build/gate/manifest.json` (and a dated copy): a content hash
-of every input (the compiler, runtime, tools, packages, corpora, benchmarks, the spec and its backups, the root configs),
+of every input (the compiler, runtime, tools, packages, corpora, benchmarks, the spec and its backups, the root configs; not README.md or decisions.md, which no run reads),
 the versions of Node, Bun, QEMU, clang and the rest, the real corpus's manifest, whether it started from `tmk clean`, the
 views and levels, the accelerators and HVF, the sweep (full, or the subset's key), and every job's result, boxes, suite counts,
 level trace and peak memory. `tmk verify-manifest [file]` checks one against the tree as it is: every input the same, the

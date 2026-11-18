@@ -11,13 +11,13 @@ A compiler from TypeScript to machine code, and a capability microkernel to be w
 ## Pipeline
 
 ```mermaid
-flowchart LR
-    TS[TypeScript] -- lower --> TSL
-    TSL -- tslc --> TIR["TIR (typed IR, optimised)"]
-    TIR --> A64[AArch64 machine code]
-    TIR --> WASM[WebAssembly]
-    TS -. "direct route (retiring)" .-> TIR
-    TSL -. "also runs as-is" .-> JS[V8 / JavaScriptCore]
+graph LR
+    TS["TypeScript"] -->|lower| TSL["TSL"]
+    TSL -->|tslc| TIR["TIR: typed IR, optimised"]
+    TIR --> A64["AArch64 machine code"]
+    TIR --> WASM["WebAssembly"]
+    TS -.->|direct route, retiring| TIR
+    TSL -.->|also runs as-is| JS["V8 / JavaScriptCore"]
 ```
 
 There are still two routes from TypeScript: the TSL route, and an older direct route (dotted) that lowers straight to TIR. Programs move to the TSL route only when it is no slower than the direct route at `-O1` and `-O2`. The direct route is retired once everything has moved.
