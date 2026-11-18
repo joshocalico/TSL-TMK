@@ -73,7 +73,9 @@ export const RC_STR_CORE = [
  * in place to a buffer whatever view ends there, so two strings built from one prefix write over each other's tails. R21
  * (tools/r21-tests.ts): `rcstr-unit-low7` files a one-unit string in the table by its unit's low 7 bits, so units 128 apart
  * share a slot and the second is given the first's string; `rcstr-unit-past` takes the table for units to 256 inclusive,
- * so unit 256 reads past the table's 256 slots (a bounds trap, never another string).
+ * so unit 256 reads past the table's 256 slots (a bounds trap, never another string). R24 (tools/r24-tests.ts):
+ * `r24-view-start` gives a view's constructor its start one on, and `r24-unit-start` reads a view's unit from its length's
+ * bits where its start's are.
  */
 function fault(): string {
   return process.env.TMK_TEST_EMIT ?? "";
@@ -93,6 +95,15 @@ export function r21UnitsOff(): boolean {
  */
 export function r22Off(part: string): boolean {
   return (process.env.TMK_R22_OFF ?? "").split(",").includes(part);
+}
+
+/**
+ * R24's printing put back as it was, for tools/r24-pins.ts (`TMK_R24_OFF=strings`): a view's fields stored after it's made,
+ * its constructor taking only its length, a unit read with its length and start checked, and `a + b` and `s[i]` not tagged
+ * inline (emit-tsl.ts). Never set otherwise.
+ */
+export function r24Off(part: string): boolean {
+  return (process.env.TMK_R24_OFF ?? "").split(",").includes(part);
 }
 
 /** The string runtime's text: the two classes and the functions the printing calls in place of JsString's statics. */
@@ -143,6 +154,42 @@ function jsStrGrown(a: JsStr, b: JsStr, n: i32): JsStr {
 }
 
 `;
+  // R24 (TMK_R24_OFF=strings puts these back as they were, for tools/r24-pins.ts)
+  const r24 = !r24Off("strings");
+  const jsStrCtor = r24
+    ? `  // R24: a view's fields given to its constructor, whose stores to them give up nothing (a fresh object's fields hold
+  // nothing yet), so a function that makes views can still hold borrowed strings without counting them (3.5's quiet rule)
+  /** @tsl.inline */
+  constructor(
+    public n: i32,
+    start: i32,
+    buf: JsStrBuf | null,
+    hw: i32,
+  ) {
+    this.start = start;
+    this.buf = buf;
+    this.hw = hw;
+  }
+`
+    : "  constructor(public n: i32) {}\n";
+  const unitBody = r24
+    ? `// R24: n and start are never negative (every maker checks them), so each is its u32's bits, with no check of its own:
+    // were one ever negative, the index past it would be huge, and the units' own bounds check would trap
+    if (i >= toUsize(wrapU32(this.n))) trap(Trap.Bounds);
+    const b = this.buf;
+    if (b === null) return toI32(this.units[i]!);
+    return toI32(b.units[toUsize(wrapU32(this.${fault() === "r24-unit-start" ? "n" : "start"})) + i]!);`
+    : `if (i >= toUsize(this.n)) trap(Trap.Bounds);
+    const b = this.buf;
+    if (b === null) return toI32(this.units[i]!);
+    return toI32(b.units[toUsize(this.start) + i]!);`;
+  const viewBody = r24
+    ? `return withTail(0, new JsStr(n, ${fault() === "r24-view-start" ? "start + 1" : "start"}, b, hw));`
+    : `const r = withTail(0, new JsStr(n));
+  r.start = start;
+  r.buf = b;
+  r.hw = hw;
+  return r;`;
   const unitSlot = fault() === "rcstr-unit-low7" ? "u & 127" : "u";
   const unitLimit = fault() === "rcstr-unit-past" ? "<= 256" : "< 256";
   const unitLimitNot = fault() === "rcstr-unit-past" ? "> 256" : ">= 256";
@@ -165,8 +212,7 @@ class JsStr {
   hw: i32 = 0; // 2 if concatenation made it; bit 0 once the hash is known, which is in the bits above bit 1
   start: i32 = 0; // where its units start in its buffer
   buf: JsStrBuf | null = null; // a view's buffer
-  constructor(public n: i32) {}
-  units = tail(u16);
+${jsStrCtor}  units = tail(u16);
 
   /** @tsl.inline */
   len(): i32 {
@@ -185,10 +231,7 @@ class JsStr {
   /** The code unit at i, which is below the length. */
   /** @tsl.inline */
   unit(i: usize): i32 {
-    if (i >= toUsize(this.n)) trap(Trap.Bounds);
-    const b = this.buf;
-    if (b === null) return toI32(this.units[i]!);
-    return toI32(b.units[toUsize(this.start) + i]!);
+    ${unitBody}
   }
 
   /** Writes unit i of a string jsStrZeroed just made; a view has none of its own, so it traps. */
@@ -322,7 +365,7 @@ let jsStrNone: JsStr | null = null;
 /** \`n\` units, each zero, for a builder to \`put\` and \`copyFrom\` into before anyone else sees it. */
 function jsStrZeroed(n: i32): JsStr {
   if (n < 0 || n > 536870888) trap(Trap.OutOfMemory);
-  return withTail(toUsize(n), new JsStr(n));
+  return withTail(toUsize(n), new JsStr(${r24Off("strings") ? "n" : "n, 0, null, 0"}));
 }
 
 /** \`""\`. */
@@ -336,11 +379,7 @@ function jsStrEmpty(): JsStr {
 
 ${grownFn}/** A view of n units of a buffer from start. */
 function jsStrView(b: JsStrBuf, start: i32, n: i32, hw: i32): JsStr {
-  const r = withTail(0, new JsStr(n));
-  r.start = start;
-  r.buf = b;
-  r.hw = hw;
-  return r;
+  ${viewBody}
 }
 
 /** a's units then b's, n in all, copied into a flat string made by concatenation. */

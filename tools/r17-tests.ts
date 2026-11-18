@@ -152,7 +152,8 @@ export async function r17FaultRun(
 /**
  * The shapes in TIR and in the printing: at -O1 and -O2, class printing's `new` in `rc` makes its object in line (no call to
  * an Rc store's `make` left in adv_forof_mutation.ts's churn, only its slow paths', and the freeing it takes first a call
- * to runSteps); at -O0 `make` is still a call. In `leak` and `manual`, r17_free.ts's arrays of numbers are made with no holes
+ * to runSteps, or since R24, with no collector linked, to freeAlloc, which took runSteps' place there); at -O0 `make` is
+ * still a call. In `leak` and `manual`, r17_free.ts's arrays of numbers are made with no holes
  * and its arrays of objects with them.
  */
 export async function r17Shapes(): Promise<{ ok: boolean; rows: string[]; failures: string[] }> {
@@ -162,6 +163,8 @@ export async function r17Shapes(): Promise<{ ok: boolean; rows: string[]; failur
   const failures: string[] = [];
   const calls = (s: string, re: RegExp): number =>
     s.split("\n").filter((l) => /\bcall\b/.test(l) && re.test(l)).length;
+  // the freeing an allocation takes first, a call: runSteps, or freeAlloc where R24 put it in runSteps' place
+  const FREEING = /\.(runSteps|freeAlloc)\b/;
   for (const level of [0, 1, 2] as const) {
     const r = lowerFile(join(ROOT, "corpus/lower/rc/adv_forof_mutation.ts"), {
       memory: "rc",
@@ -179,23 +182,27 @@ export async function r17Shapes(): Promise<{ ok: boolean; rows: string[]; failur
       }
       const t = printFunc(g);
       const make = calls(t, /\.make\b/);
-      const steps = calls(t, /\.runSteps\b/);
+      const steps = calls(t, FREEING);
       rows.push(
-        `rc -O${level}: replaceCurrent (churn inlined) ${make} calls to make, ${steps} to runSteps`,
+        `rc -O${level}: replaceCurrent (churn inlined) ${make} calls to make, ${steps} to its freeing (runSteps or freeAlloc)`,
       );
       if (level > 0 && (make !== 0 || steps === 0))
         failures.push(
-          `rc -O${level}: make not inlined, or no call to runSteps (${make}, ${steps})`,
+          `rc -O${level}: make not inlined, or no call to its freeing (${make}, ${steps})`,
         );
       continue;
     }
     const t = printFunc(f);
     const make = calls(t, /\.make\b/);
-    const steps = calls(t, /\.runSteps\b/);
-    rows.push(`rc -O${level}: churn ${make} calls to make, ${steps} to runSteps`);
+    const steps = calls(t, FREEING);
+    rows.push(
+      `rc -O${level}: churn ${make} calls to make, ${steps} to its freeing (runSteps or freeAlloc)`,
+    );
     if (level === 0 && make === 0) failures.push("rc -O0: make inlined at -O0");
     if (level > 0 && (make !== 0 || steps === 0))
-      failures.push(`rc -O${level}: make not inlined, or no call to runSteps (${make}, ${steps})`);
+      failures.push(
+        `rc -O${level}: make not inlined, or no call to its freeing (${make}, ${steps})`,
+      );
   }
   for (const memory of ["leak", "manual"] as const) {
     const r = lowerFile(join(ROOT, R17_PROGRAM), {

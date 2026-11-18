@@ -28,7 +28,14 @@ import { strLiteralText } from "./down.ts";
 import { loweredRuntime, memText, stdMem } from "./elab-lowered.ts";
 import { VEC_DATA, VEC_LEN } from "./down-rt.ts";
 import { desugarExc, EXC_ABI, EXC_STATE, r23Off, STACK_LOW } from "./emit-exc.ts";
-import { RC_STR_CORE, RC_STR_NAMES, r21UnitsOff, r22Off, rcStrRuntime } from "./emit-rcstr.ts";
+import {
+  RC_STR_CORE,
+  RC_STR_NAMES,
+  r21UnitsOff,
+  r22Off,
+  r24Off,
+  rcStrRuntime,
+} from "./emit-rcstr.ts";
 import {
   ARRAY_BY_ELEM,
   elemSize,
@@ -3870,6 +3877,9 @@ class Emitter {
     // R23: in `rc`, the string runtime's `charCodeAt` inlined where it's called, at -O1 as at -O2, as a scan calls it a unit
     // at a time (`TMK_R23_OFF=codeat` for tools/r23-pins.ts)
     if (this.rc && this.strs && this.rcCodeAt(f) && !attrs.includes("inline")) attrs.push("inline");
+    // R24: and `a + b`'s and `s[i]`'s, each called once a turn in an append loop, where -O1 kept them as calls
+    if (this.rc && this.strs && this.rcInlined(f) && !attrs.includes("inline"))
+      attrs.push("inline");
     const name = this.fnNames.get(f)!;
     const tags = attrs.map((a) => `@tsl.${a}`);
     // Class printing makes TSL classes whose members have symbols like the lowering's `P.constructor`: its TIR is tslc's
@@ -3891,6 +3901,15 @@ class Emitter {
       !r23Off("codeat") &&
       f.key.includes("/compiler/rt/str.ts") &&
       /^strCharCodeAt(\$\d+)?$/.test(f.tirName)
+    );
+  }
+
+  /** R24: compiler/rt's `strConcat` and `strIndex`, printed in `rc` over the program's own JsStr. */
+  rcInlined(f: FuncInst): boolean {
+    return (
+      !r24Off("strings") &&
+      f.key.includes("/compiler/rt/str.ts") &&
+      /^str(Concat|Index)(\$\d+)?$/.test(f.tirName)
     );
   }
 

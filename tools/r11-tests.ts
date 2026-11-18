@@ -303,8 +303,9 @@ export const R11_FAULTS: R11Fault[] = [
     where: "patch",
     patch: {
       file: "packages/tsl-gc/ex-gc-rc.ts",
-      from: "    if (rest !== 0) restIfWork();\n  } else if (waiting !== 0n || cur !== 0n) runSteps(budget);",
-      to: "    runSteps(budget);\n    if (rest !== 0) restIfWork();\n  } else if (waiting !== 0n || cur !== 0n) runSteps(budget);",
+      // R24: the branch without the collector is freeAlloc's now; the bug is in the other, as it was
+      from: "    if (rest !== 0) restIfWork();\n  } else if (waiting !== 0n || cur !== 0n) freeAlloc(budget);",
+      to: "    runSteps(budget);\n    if (rest !== 0) restIfWork();\n  } else if (waiting !== 0n || cur !== 0n) freeAlloc(budget);",
     },
   },
 ];

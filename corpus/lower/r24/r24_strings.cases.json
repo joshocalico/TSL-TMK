@@ -1,0 +1,8 @@
+[
+  { "fn": "views", "args": [100] },
+  { "fn": "views", "args": [70] },
+  { "fn": "indexed", "args": [80] },
+  { "fn": "indexed", "args": [3] },
+  { "fn": "kept", "args": [300] },
+  { "fn": "kept", "args": [5] }
+]

@@ -591,6 +591,115 @@ function freeFlat(n: usize): u64 {
 }
 
 /**
+ * R24: an allocation's freeing without the collector linked (what `make` called runSteps for): up to `n` steps, as runSteps
+ * takes them, gives how many it took. While the cursor is idle, at least two steps are left and the next waiting object has
+ * at most one slot, it's freed here, as freeFlat frees it: slot 0's visit a step (`spare` what the budget has left after
+ * it), then, for an object with one slot, giving its block back a step of its own, or, for one with none, that visit the
+ * step that gives it back; and an empty store's object is given back as runSteps gives it. Where it has more slots, the
+ * cursor is left at slot 1, where freeFlat's loop over its rest starts, and freeSteps takes it on from there with what the
+ * budget has left, as it takes any object part freed. Anything else (the cursor set, a scan's object, one step left) is
+ * runSteps', with what's left. So the same steps in the same order with the same effects, in one call: the strings'
+ * one-slot objects went through runSteps' 33-instruction hand-over and freeFlat's frame, 187 instructions a freeing call
+ * against the direct route's 108.
+ */
+/** @tsl.noinline */
+// SAFETY: as freeFlat: the queue's head is a waiting slot holding its object, taken off before its release function runs
+// (which may queue more), and its store's entry is its class's; the cursor is idle, so nothing else is being freed.
+function freeAlloc(n: usize): u64 {
+  if (stepping || cur !== 0n) return runSteps(n);
+  const all = toU64(n);
+  let left = all;
+  while (left > 1n) {
+    const head = waiting;
+    if (head === 0n) {
+      // nothing more waiting, and the cursor idle: what runSteps' test after the loop would say
+      const done = BigInt.asUintN(64, all - left);
+      stepsTaken = BigInt.asUintN(64, stepsTaken + done);
+      return done;
+    }
+    const w = countAt(head).read() ^ WAITING;
+    if (cyclesLinked() && w >= ST_CAND) break; // one a scan gave up: freeSteps', by way of runSteps
+    const owner = ownerAt(head).read();
+    const entry = entryOf(cyclesLinked() ? (owner % 0x100_0000) >>> 8 : owner >>> 8);
+    waiting = w;
+    let s: usize = 0;
+    if ((ptrAt(u64, entry).read() & EMPTY) === 0n) {
+      // slot 0's visit, a step, which also says how many there are
+      stepping = true;
+      spare = BigInt.asUintN(64, left - 1n);
+      const rel = ptrAt(u32, entry).read();
+      const item = objectAt<Counted0>(head);
+      s = callRelease(rel, item, 0, Visit.Drop);
+      left = spare;
+      spare = 0n;
+      stepping = false;
+      if (s !== 0) {
+        if (s > 1 && left !== 0n) {
+          // the rest of its slots (freeRest), out of line, so the common one-slot object keeps a small frame
+          left = freeRest(head, entry, s, left);
+          if (cur !== 0n) break;
+        } else if (s > 1 || left === 0n) {
+          // the cursor left where freeFlat leaves it, at slot 1, for the next freeing to take on
+          cur = head;
+          at = 1;
+          slots = s;
+          break;
+        }
+        left = BigInt.asUintN(64, left - 1n); // every slot visited: giving its block back, a step of its own
+      }
+    } else left = BigInt.asUintN(64, left - 1n);
+    if (cyclesLinked() && (countAt(head).read() ^ WAITING) >= ST_GONE && !releasedGivenUp(head)) continue;
+    giveBack(head, owner, entry);
+  }
+  const took = BigInt.asUintN(64, all - left);
+  stepsTaken = BigInt.asUintN(64, stepsTaken + took);
+  if (left === 0n || (waiting === 0n && cur === 0n)) return took;
+  return BigInt.asUintN(64, took + runSteps(toUsize(left)));
+}
+
+/**
+ * R24: freeAlloc's object of more than one slot, its slot 0 visited, `n` steps left (at least one): its slots from 1 visited
+ * in order, one a step, as freeFlat visits them, `spare` what the budget has left after each. Gives what's left; where the
+ * budget runs out before its block's step, the cursor is left where freeFlat leaves it, for the next freeing to take on.
+ */
+/** @tsl.noinline */
+// SAFETY: as freeFlat: head is off the queue, its object still in its slot, and its store's entry, `entry`, is its class's.
+function freeRest(head: u64, entry: u64, s: usize, n: u64): u64 {
+  const rel = ptrAt(u32, entry).read();
+  const item = objectAt<Counted0>(head);
+  let left = n;
+  let a: usize = 1;
+  stepping = true;
+  while (a < s && left !== 0n) {
+    spare = BigInt.asUintN(64, left - 1n);
+    callRelease(rel, item, a, Visit.Drop);
+    left = spare;
+    spare = 0n;
+    a++;
+  }
+  stepping = false;
+  if (a < s || left === 0n) {
+    cur = head;
+    at = a;
+    slots = s;
+  }
+  return left;
+}
+
+/**
+ * R24: `visitLeaf`'s last count, given back at once as a step the budget had to spare. Its store's entry is found from its
+ * owner word, as freeing finds it, so the store's object isn't made at hand on the way that keeps a count.
+ */
+/** @tsl.inline */
+// SAFETY: as visitLeaf's: slot is a live counted slot of a store whose objects have no slots, its one count the one being
+// dropped, so what freeing would do with it is give its block back; its owner word names its store, whose entry is this.
+function leafBack(slot: u64): void {
+  spare = BigInt.asUintN(64, spare - 1n); // runSteps counts it: its steps are what the budget had, less what's left
+  const owner = ownerAt(slot).read();
+  giveBack(slot, owner, entryOf(cyclesLinked() ? (owner % 0x100_0000) >>> 8 : owner >>> 8));
+}
+
+/**
  * Freeing has dropped every reference in x, which a scan gave up (R1e): the scan may decide once none is left like it.
  * Whether its block can be given back now: not while it's still in the scan's list, as its link there is in its prefix.
  */
@@ -790,7 +899,7 @@ export function rcAllocSteps(): void {
     else idleStep();
     if (rest !== 0 && !stepping && (waiting !== 0n || cur !== 0n)) rest -= toUsize(runSteps(rest));
     if (rest !== 0) restIfWork();
-  } else if (waiting !== 0n || cur !== 0n) runSteps(budget);
+  } else if (waiting !== 0n || cur !== 0n) freeAlloc(budget);
 }
 
 /** Freeing and collecting steps taken since the program started: a deterministic count, for tests (D39, D41). */
@@ -1473,7 +1582,7 @@ export class Rc<T extends object> {
     if (cyclesLinked()) {
       if (ccPhase !== 0 || (ccTop !== 0 && (ccGap === 0 || !pacing))) stepAll(budget);
       else idleStep();
-    } else if (waiting !== 0n || cur !== 0n) runSteps(budget);
+    } else if (waiting !== 0n || cur !== 0n) freeAlloc(budget);
     if (!this.register()) return null;
     // the size class as for the last object made, if its tail was as long: a lowered array's holders mostly are (R3)
     let k = this.tk;
@@ -1534,7 +1643,7 @@ export class Rc<T extends object> {
       !(cyclesLinked() && (ccPhase !== 0 || (ccTop !== 0 && (ccGap === 0 || !pacing))))
     ) {
       if (cyclesLinked()) idleStep();
-      else if (waiting !== 0n || cur !== 0n) runSteps(budget);
+      else if (waiting !== 0n || cur !== 0n) freeAlloc(budget);
       if (n !== this.tn || this.tk === 0) {
         // R22: a new length's size class, and its owner word only where the class is new too (short strings' lengths
         // change from one make to the next, and most share a class)
@@ -1588,7 +1697,7 @@ export class Rc<T extends object> {
     if (cyclesLinked()) {
       if (ccPhase !== 0 || (ccTop !== 0 && (ccGap === 0 || !pacing))) stepAll(budget);
       else idleStep();
-    } else if (waiting !== 0n || cur !== 0n) runSteps(budget);
+    } else if (waiting !== 0n || cur !== 0n) freeAlloc(budget);
     // the common case first: a store that has made something before, and a free slot of its size on its list
     if (this.id !== 0) {
       const head = ptrAt(u64, heads).add(this.k);
@@ -1620,7 +1729,7 @@ export class Rc<T extends object> {
   make(item: T): Counted<T> {
     if (this.id !== 0 && !(cyclesLinked() && (ccPhase !== 0 || (ccTop !== 0 && (ccGap === 0 || !pacing))))) {
       if (cyclesLinked()) idleStep();
-      else if (waiting !== 0n || cur !== 0n) runSteps(budget);
+      else if (waiting !== 0n || cur !== 0n) freeAlloc(budget);
       const head = ptrAt(u64, heads).add(this.k);
       const slot = head.read();
       if (slot !== 0n) {
@@ -1739,14 +1848,23 @@ export class Rc<T extends object> {
   visitLeaf(h: Counted<T>, op: Visit): void {
     if (op === Visit.Drop && spare !== 0n) {
       const slot = this.slotIn(h);
-      if (countAt(slot).read() === 1n) {
-        spare = BigInt.asUintN(64, spare - 1n); // runSteps counts it: its steps are what the budget had, less what's left
-        giveBack(slot, ownerAt(slot).read(), entryOf(this.id));
+      const c = countAt(slot);
+      const n = c.read();
+      if (n === 1n) {
+        leafBack(slot);
+        return;
+      }
+      // R24: a count left, which `drop` would take one off, as here, with the count read once: the same test of it (a
+      // count tslc placed is never stale or waiting, and one below WAITING isn't), and no barrier, as T is in no cycle;
+      // above 1, so less one can't wrap
+      if (cycleGroup<T>() === 0 && n > 1n && (countedExactly<T>() || n < WAITING)) {
+        c.write(BigInt.asUintN(64, n - 1n));
         return;
       }
     }
     this.visit(h, op);
   }
+
 
   /** visit's collector part: Collect, Scan and Trace. */
   /** @tsl.moves h */

@@ -1,0 +1,6 @@
+[
+  { "fn": "widths", "args": [400] },
+  { "fn": "widths", "args": [2] },
+  { "fn": "burst", "args": [200] },
+  { "fn": "burst", "args": [1] }
+]

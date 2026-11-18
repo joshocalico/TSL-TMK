@@ -35,7 +35,7 @@ const MAP = "ex-jsrt-map.ts";
 export const R19_FAULTS: {
   name: string;
   what: string;
-  patch?: TestPatch; // TSL_TEST_PATCH: a bug in a library's source
+  patch?: TestPatch | TestPatch[]; // TSL_TEST_PATCH: a bug in a library's source (R24: or several places of one)
   emit?: string; // TMK_TEST_EMIT: a bug in the printer
   tslEnv?: string; // TMK_TEST_TSL: a bug in tslc
   by: "dual" | "fields";
@@ -75,11 +75,20 @@ export const R19_FAULTS: {
   {
     name: "pair-elem-undropped",
     what: "a freed array literal's element not dropped: freeing a holder visits its slots from the third, so a literal of two objects is given back with its second still counted",
-    patch: {
-      file: RC,
-      from: "    let a: usize = 1;\n    stepping = true;",
-      to: "    let a: usize = 2;\n    stepping = true;",
-    },
+    // R24: and in freeRest, the same loop where freeAlloc, an allocation's freeing without the collector since R24, takes
+    // an object of more than one slot; freeFlat's is reached now only after another step or by runSteps' other callers
+    patch: [
+      {
+        file: RC,
+        from: "    let a: usize = 1;\n    stepping = true;",
+        to: "    let a: usize = 2;\n    stepping = true;",
+      },
+      {
+        file: RC,
+        from: "  let a: usize = 1;\n  stepping = true;\n  while (a < s && left !== 0n) {",
+        to: "  let a: usize = 2;\n  stepping = true;\n  while (a < s && left !== 0n) {",
+      },
+    ],
     by: "dual",
   },
   {

@@ -2689,6 +2689,46 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     });
   });
 
+  // 67. R24: strings and freeing in rc class printing, each where a wrong answer shows, and the steps pinned as before.
+  M.unit("67", async () => {
+    const R24 = timedModule("r24", await import("../r24-tests.ts"));
+    const failures: string[] = [];
+    const d = await R24.r24Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of R24's programs ran");
+    if (d.agreed !== d.cases)
+      failures.push(`${d.cases - d.agreed} cases differ through the two routes`);
+    for (const p of R24.R24_PROGRAMS)
+      if (!d.printed.includes(`${p}@rc`)) failures.push(`${p} doesn't class-print in rc`);
+    const st = await R24.r24Steps(accel, jobs);
+    failures.push(...st.failures);
+    if (st.cases === 0) failures.push("no case of corpus/rc/rc_steps_r24.ts ran");
+    report({
+      box: "67. R24 (3.5, D39, D41): rc class printing's strings and freeing with the same steps: an allocation's freeing with no collector linked in one call (freeAlloc: an object of one slot freed in place, the cursor left at slot 1 where the budget runs out, the rest of a wider object's slots in freeRest), a leaf's count read once, a view's fields given to its constructor, a unit read with its length and start as their bits, and `a + b` and `s[i]` inlined; corpus/lower/r24/r24_strings.ts (views made by appends and prepends past 64 units, views of views, substrings, every index, `s[i]` at every kind of index, strings kept while freed slots are taken again) and r24_free.ts (objects of no slots, one and five freed with some children kept) agree with V8 natively and through both routes with class printing forced in rc and leak at -O0 and -O2, and the printed TSL on V8 and JSC with the source; corpus/rc/rc_steps_r24.ts's step counts at budgets 1 to 5 and RC_BUDGET, pinned with @tsl/gc as it was before R24, natively and on the host (tools/r24-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${d.agreed}/${d.cases} cases the same as V8 and through both routes, class-printed: ${d.printed.join(", ")}; steps ${st.agreed}/${st.cases}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 68. R24's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("68", async () => {
+    const R24 = timedModule("r24", await import("../r24-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R24.R24_FAULTS) {
+      const x = await R24.r24Fault(f, accel, jobs);
+      rows.push(`${f.what}: ${caughtText(x)}`);
+      if (x.answers === 0) failures.push(`${f.name} wasn't caught: ${x.first}`);
+    }
+    report({
+      box: `68. R24: each of ${R24.R24_FAULTS.length} bugs is caught by a wrong answer, with how many cases caught it: freeAlloc giving a block back without its step, freeAlloc leaving the cursor at slot 2, freeRest starting at slot 2 (each by corpus/rc's pinned step counts), visitLeaf taking two off a count, a leaf given back on the next size class's list, a view's start one on, and a view's unit read from its length's bits (tools/r24-tests.ts, over corpus/lower/r24, r22 and r21 in rc at -O2, and corpus/rc/rc_steps*.ts natively)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
   M.vms(
     "8",
     "8. No QEMU process of this run is left, and the owner's UTM and QEMU processes were only observed",

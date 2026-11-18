@@ -29,8 +29,9 @@ export const GC_FAULTS: Fault[] = [
     // R4: runSteps finds the release function once an object, as rel. R17: freeSteps' first visit of an object, which says
     // how many slots it has, made to say none without the call, so the object is given back with what it holds unvisited.
     // R19: and freeFlat's, the same visit in the same words, which takes an object freeing starts with the cursor idle
-    // (freeSteps then takes only an object part freed, or one a scan gave up): both, or the bug wouldn't be where freeing is
-    times: 2,
+    // (freeSteps then takes only an object part freed, or one a scan gave up): both, or the bug wouldn't be where freeing is.
+    // R24: and freeAlloc's, the same visit in the same words, which an allocation without the collector linked takes
+    times: 3,
     from: "s = callRelease(rel, item, 0, Visit.Drop);",
     to: "s = 0;",
   },
@@ -94,8 +95,9 @@ export const RC_TSL_FAULTS: (Fault & {
     name: "unbounded freeing at an allocation with no collector linked",
     file: RC,
     // R17: on the path `make` takes, which is inlined and takes its slot in line, so tryMake's own isn't on it
-    from: "      else if (waiting !== 0n || cur !== 0n) runSteps(budget);\n      const head = ptrAt(u64, heads).add(this.k);",
-    to: "      else if (waiting !== 0n || cur !== 0n) runSteps(0x10_0000);\n      const head = ptrAt(u64, heads).add(this.k);",
+    // R24: where freeAlloc took over runSteps' place, given the same unbounded budget
+    from: "      else if (waiting !== 0n || cur !== 0n) freeAlloc(budget);\n      const head = ptrAt(u64, heads).add(this.k);",
+    to: "      else if (waiting !== 0n || cur !== 0n) freeAlloc(0x10_0000);\n      const head = ptrAt(u64, heads).add(this.k);",
   },
   {
     // what a WeakRef that resurrects does: deref hands out an object whose count already reached zero

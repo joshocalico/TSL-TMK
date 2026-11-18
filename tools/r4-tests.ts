@@ -18,7 +18,8 @@ export const R4_FAULTS: R2Fault[] = [
     where: "library",
     patch: {
       file: "ex-gc-rc.ts",
-      from: "        spare = BigInt.asUintN(64, spare - 1n); // runSteps counts it: its steps are what the budget had, less what's left\n",
+      // R24: the same line, now in leafBack, visitLeaf's last count out of line
+      from: "  spare = BigInt.asUintN(64, spare - 1n); // runSteps counts it: its steps are what the budget had, less what's left\n",
       to: "",
     },
     dirs: [],
