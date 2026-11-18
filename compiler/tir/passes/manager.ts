@@ -100,6 +100,7 @@ export const OPT_FAULTS = [
   "b3-layout-stale-next", // after loop rotation, a block falls through to the next block in TIR order, not in layout order
   "b3-null-past-store", // a null check is left to a load that comes after a store, so the store runs where -O0 trapped first (R7)
   "r21-shrinkwrap-callee", // shrink-wrapping takes a callee-saved register as free, so the quick way writes it unsaved (R21)
+  "r23-range-lo", // a 32-bit signed range check whose upper bound is the type's own loses its lower bound too (R23)
 ] as const;
 
 export interface OptOptions {

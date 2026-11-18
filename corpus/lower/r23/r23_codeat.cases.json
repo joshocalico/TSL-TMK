@@ -1,0 +1,6 @@
+[
+  { "fn": "units", "args": [40] },
+  { "fn": "units", "args": [3] },
+  { "fn": "odd", "args": [7] },
+  { "fn": "odd", "args": [0] }
+]

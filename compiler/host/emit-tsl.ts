@@ -27,7 +27,7 @@ import {
 import { strLiteralText } from "./down.ts";
 import { loweredRuntime, memText, stdMem } from "./elab-lowered.ts";
 import { VEC_DATA, VEC_LEN } from "./down-rt.ts";
-import { desugarExc, EXC_ABI, EXC_STATE, STACK_LOW } from "./emit-exc.ts";
+import { desugarExc, EXC_ABI, EXC_STATE, r23Off, STACK_LOW } from "./emit-exc.ts";
 import { RC_STR_CORE, RC_STR_NAMES, r21UnitsOff, r22Off, rcStrRuntime } from "./emit-rcstr.ts";
 import {
   ARRAY_BY_ELEM,
@@ -64,6 +64,8 @@ type PlanField = {
   flag?: PlanField;
   // R7: a typed-array field, held in place as a runtime class of its pointer and length: the array's TSL type
   arr?: string;
+  // R23, `rc`: an `unknown`'s reference field nothing printed stores to: a getter giving null, its 8 bytes kept (`noneFields`)
+  none?: boolean;
 };
 
 /** R7: an optional scalar prints as two fields, a `bool` flag and its value (`TMK_R7_OFF` lists what's off, r7-pins.ts). */
@@ -1578,6 +1580,31 @@ class Emitter {
   }
 
   /**
+   * R23, `rc`: an `unknown`'s reference fields that nothing printed ever stores to (`SuppressedError`'s `error` and
+   * `suppressed` in a program that never makes one) are always null, so each prints as a getter giving null, not a field,
+   * and the class's release function visits only the slots that can hold something. Each keeps its 8 bytes as a field
+   * that holds no reference (`<name>_none: u64`), so the object is as big as it was and stays in its size class: R22
+   * found that a smaller `Dyn` moved to the 64-byte class and corpus/lower/exc/exc_exhaust.ts then ran out of pages, as
+   * the collector's chunks stay their size class's. A read is the same null it always was; there is no store to keep.
+   */
+  noneFields(): void {
+    if (!this.rc || this.dynNode === null || r23Off("none")) return;
+    const plan = this.plans.get(this.canon(this.dynNode));
+    if (plan === undefined) return;
+    const stored = new Set<PlanField>();
+    for (const f of this.funcs)
+      eachTE(f.body, (te) => {
+        if (te.k !== "fstore" || te.fld === undefined) return;
+        const n = this.canon(findNode(te.fld.node as HeapNode));
+        if (this.plans.get(n) !== plan) return;
+        stored.add(this.planField(te.fld));
+      });
+    for (const f of new Set(plan.fields.values()))
+      if (f.init === "null" && /^@CLS\d+@ \| null$|^@SELF@ \| null$/.test(f.ty) && !stored.has(f))
+        f.none = true;
+  }
+
+  /**
    * Locals the lowering set to `this` and to nothing else (pipe-h): a field read or write through one prints on `this`
    * itself, which tslc knows isn't null, where the local would need a `!` and its check.
    */
@@ -2723,24 +2750,34 @@ class Emitter {
   classDecls(): string[] {
     const out: string[] = [];
     for (const [n, plan] of this.plans) {
-      const lines = [...new Set(plan.fields.values())].map((f) => {
-        this.curMod = this.modOfPlan(n) ?? this.rootSf;
-        const ty = f.ty
-          .replace("@STR@", () => this.strName("JsString"))
-          .replace("@SELF@", plan.name)
-          .replace(/@CLS(\d+)@/, (_m, id: string) => {
-            for (const [m] of this.plans) if (m.id === Number(id)) return this.clsName(m);
-            for (const [m] of this.vecs) if (m.id === Number(id)) return this.clsName(m);
-            // A map in a field (D72): JsMap or JsSet, and a cursor JsMapCursor.
-            for (const [m] of this.mapPlans) if (m.id === Number(id)) return this.clsName(m);
-            for (const m of this.mapCursors) if (m.id === Number(id)) return this.clsName(m);
-            if (this.strNode !== null && this.strNode.id === Number(id))
-              return this.clsName(this.strNode);
-            return this.fail("a field's class");
-          });
-        if (plan.env !== undefined) return `  ${f.name}: ${ty};`;
-        return f.init === null ? `  ${f.name}!: ${ty};` : `  ${f.name}: ${ty} = ${f.init};`;
-      });
+      const getters: string[] = [];
+      const lines = [...new Set(plan.fields.values())]
+        .map((f): string | null => {
+          this.curMod = this.modOfPlan(n) ?? this.rootSf;
+          const ty = f.ty
+            .replace("@STR@", () => this.strName("JsString"))
+            .replace("@SELF@", plan.name)
+            .replace(/@CLS(\d+)@/, (_m, id: string) => {
+              for (const [m] of this.plans) if (m.id === Number(id)) return this.clsName(m);
+              for (const [m] of this.vecs) if (m.id === Number(id)) return this.clsName(m);
+              // A map in a field (D72): JsMap or JsSet, and a cursor JsMapCursor.
+              for (const [m] of this.mapPlans) if (m.id === Number(id)) return this.clsName(m);
+              for (const m of this.mapCursors) if (m.id === Number(id)) return this.clsName(m);
+              if (this.strNode !== null && this.strNode.id === Number(id))
+                return this.clsName(this.strNode);
+              return this.fail("a field's class");
+            });
+          if (plan.env !== undefined) return `  ${f.name}: ${ty};`;
+          if (f.none === true) {
+            // R23 (`noneFields`): its 8 bytes, holding no reference, and a getter giving null; the injected `r23-none-pad`
+            // bug leaves the 8 bytes out, so the object is smaller and in another size class
+            this.coreUsed.add("u64");
+            getters.push(`  get ${f.name}(): ${ty} {\n    return null;\n  }`);
+            return this.fault === "r23-none-pad" ? null : `  ${f.name}_none: u64 = 0n;`;
+          }
+          return f.init === null ? `  ${f.name}!: ${ty};` : `  ${f.name}: ${ty} = ${f.init};`;
+        })
+        .filter((l): l is string => l !== null);
       if (plan.env !== undefined && plan.env.length > 0) {
         // An environment's constructor (R3): every field from its parameter of the same name and type.
         const tys = lines.map((l) => l.slice(l.indexOf(":") + 2, -1));
@@ -2757,7 +2794,7 @@ class Emitter {
           .map((l) => (l === "" ? l : `  ${l}`))
           .join("\n"),
       );
-      const body = [...lines, ...methods.flatMap((m) => ["", m])];
+      const body = [...lines, ...[...getters, ...methods].flatMap((m) => ["", m])];
       const note = plan.note !== undefined ? `// ${plan.note}\n` : "";
       // R5: a class that crosses an export is laid out as D36 lists it, exported so a host caller can make one (D71).
       const laid = this.boundaryLaid.get(n);
@@ -2923,7 +2960,7 @@ class Emitter {
     // R11: built since; TMK_R11_OFF=exc refuses them by name as before, for computing what R11 moved
     if (this.rc && r11Off("exc"))
       this.fail("exceptions in rc, desugared by the printer (D68), which aren't built in rc (R10)");
-    const d = desugarExc(src, this.fault);
+    const d = desugarExc(src, this.fault, { rc: this.rc });
     this.excOwn = true;
     try {
       return this.run1(d.funcs);
@@ -3110,6 +3147,7 @@ class Emitter {
 
     if (this.classes) {
       this.planClasses();
+      this.noneFields();
       this.planMembers();
       this.findThisCopies();
       this.planStack();
@@ -3829,6 +3867,9 @@ class Emitter {
       ([n, t]) => `  ${this.declText(n, t, this.topRefs.has(n))}`,
     );
     const attrs = f.attrs.filter((a) => ["inline", "noinline", "noalloc", "nosleep"].includes(a));
+    // R23: in `rc`, the string runtime's `charCodeAt` inlined where it's called, at -O1 as at -O2, as a scan calls it a unit
+    // at a time (`TMK_R23_OFF=codeat` for tools/r23-pins.ts)
+    if (this.rc && this.strs && this.rcCodeAt(f) && !attrs.includes("inline")) attrs.push("inline");
     const name = this.fnNames.get(f)!;
     const tags = attrs.map((a) => `@tsl.${a}`);
     // Class printing makes TSL classes whose members have symbols like the lowering's `P.constructor`: its TIR is tslc's
@@ -3842,6 +3883,15 @@ class Emitter {
     }
     const kw = f.exported ? "export function" : "function";
     return `${doc}${kw} ${this.fnNames.get(f)!}(${params.join(", ")}): ${ret} {\n${[...decls, ...this.body].join("\n")}\n}`;
+  }
+
+  /** R23: compiler/rt's `strCharCodeAt`, printed in `rc` over the program's own JsStr. */
+  rcCodeAt(f: FuncInst): boolean {
+    return (
+      !r23Off("codeat") &&
+      f.key.includes("/compiler/rt/str.ts") &&
+      /^strCharCodeAt(\$\d+)?$/.test(f.tirName)
+    );
   }
 
   /**

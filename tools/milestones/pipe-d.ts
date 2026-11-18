@@ -2652,6 +2652,43 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     });
   });
 
+  // 65. R23: throws and strings in rc class printing, each where a wrong answer shows.
+  M.unit("65", async () => {
+    const R23 = timedModule("r23", await import("../r23-tests.ts"));
+    const failures: string[] = [];
+    const d = await R23.r23Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of R23's programs ran");
+    if (d.agreed !== d.cases)
+      failures.push(`${d.cases - d.agreed} cases differ through the two routes`);
+    for (const p of R23.R23_PROGRAMS)
+      if (!d.printed.includes(`${p}@rc`)) failures.push(`${p} doesn't class-print in rc`);
+    report({
+      box: "65. R23 (3.5, 4.4, D49, D68): rc class printing's throws and strings: a thrown object built out of line by a builder of its shape, an unknown's reference fields nothing stores to as getters giving null with their 8 bytes kept, and charCodeAt inlined; corpus/lower/r23/r23_throws.ts (throws of the program's own classes and Error's, literals differing between the throws of one class, variables, a constructor that throws itself, a frame and a hundred up, kept, rethrown through finally) and r23_codeat.ts (strings made every way, indices of every kind) agree with V8 natively and through both routes with class printing forced in rc and leak at -O0 and -O2, and the printed TSL on V8 and JSC with the source (tools/r23-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${d.agreed}/${d.cases} cases the same as V8 and through both routes, class-printed: ${d.printed.join(", ")}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 66. R23's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("66", async () => {
+    const R23 = timedModule("r23", await import("../r23-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R23.R23_FAULTS) {
+      const x = await R23.r23Fault(f, accel, jobs);
+      rows.push(`${f.what}: ${caughtText(x)}`);
+      if (x.answers === 0) failures.push(`${f.name} wasn't caught: ${x.first}`);
+    }
+    report({
+      box: `66. R23: each of ${R23.R23_FAULTS.length} bugs is caught by a wrong answer, with how many cases caught it: thrown objects' builders shared by throws whose literals differ, a builder leaving out the class id, never-stored fields printed without their 8 bytes (corpus/lower/exc/exc_exhaust.ts runs out of pages), and a range check losing its lower bound where its upper is the type's own (corpus/trap natively at -O2) (tools/r23-tests.ts, over corpus/lower/r23 and r22 in rc at -O2)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
   M.vms(
     "8",
     "8. No QEMU process of this run is left, and the owner's UTM and QEMU processes were only observed",

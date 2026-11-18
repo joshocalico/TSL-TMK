@@ -56,6 +56,39 @@ The nightly full run stays paused until the owner agrees the pipeline is fixed.
 
 ---
 
+## 2027-01-13
+
+**Coordinator: R23 verified** (manifest MATCH, tree 419611865a764852; gate from clean 287 of 287 in 94.3 min; sample 8/8 the same, seed 25913). Highest per-job peak 2.65 GiB (pipe-d/48). It's under the 3 GiB watchdog, but I'm watching it: this is the second time that job has passed 2.6 GiB. Committed locally, not pushed. The gate also covers f17c6bf (README's diagram; README.md no longer an input).
+- **Throws in `rc` are now at or below the direct route** (0.94–0.99), so `AUTO_RC_EXC` is on. It takes no corpus program yet: every `rc` program with exceptions also has strings, is reshaped, or is blocked.
+- **Strings are 1.17–1.40** (short joins 0.86). They're now the one thing keeping `auto` from `rc` exceptions programs.
+- **No pins moved.**
+
+**Decision: R24 closes strings' gap in `rc`, measured first.**
+- **Scans' freeing:** 187 instructions a call against 108, from `freeFlat`'s frame and `runSteps`' hand-over. Two attempts have failed so far, so measure where the 79 go before building.
+- **Then concatenation, substrings and `strIndex`:** each is about 15–20k instructions a scan call over the direct route.
+- **When all five strings benchmarks are ≤ 1.00 at -O1 and -O2,** turn `AUTO_RC_STRINGS` on and report what `auto` then takes in `rc` (exceptions programs included).
+- *Next:* item 11, retiring the direct route.
+
+## 2027-01-12
+
+**R23 is built (builder's report; for the coordinator to verify).** Throws in `rc` class printing (a thrown object built out of line, an `unknown`'s never-stored fields as getters in the same size class), strings' `charCodeAt` inlined, and the backend's range checks without the compares that can't fire. `AUTO_RC_EXC` is on. SPEC 3.5 (exceptions counted by the expansion, the strings paragraph), 4.4 (range checks), 8.3 (pipe-d boxes 65 and 66), D49 and M5's R23 record. No check, case or fault was dropped or weakened, and no limit, timeout or watchdog moved. Nothing was added to TSL, and no unchecked operation to anything lowered code can import; `@tsl/gc` is unchanged.
+
+- **Measured first** (instructions; TCG, `TMK_ICOUNT=1`; "before" the tree at commit f17c6bf): R22's after-numbers exactly. `down` (a throw 100 frames up, -O2) 28.5 instructions a frame against 23.1: two more saved registers, a 64-byte frame and the slot's address in x19, five instructions a frame, all for the `Dyn` its cold throw path builds in a frame slot. A throw a frame up 856 against 761, the rest freeing the `Dyn`'s five reference slots, two of them `SuppressedError`'s. Scans at -O1: `strCharCodeAt` 49 instructions against 20, mostly checks that can't fire (`toUsize` of an i32 against 2^31 - 1, `toI32` of a u16 unit against 2^31 - 1).
+- **Built:**
+  - Class printing in `rc`: `throw new C(…)` (the lowering's plain shape: a constructor that can't throw, arguments that are variables, literals or string literals) is a call of a `@tsl.noinline` builder of that shape, shared by throws of the same shape. Out of line beat the backend working out the slot's address at its use: that takes one instruction of the five, out of line all five.
+  - Class printing in `rc`: an `unknown`'s reference field nothing stores to is a getter giving null, its 8 bytes kept as a `u64` field, so a thrown `Dyn` has three slots, stays 56 bytes and stays in the 128-byte size class. That's what the brief's "keep `Dyn`'s size class" asks; exc_exhaust.ts completes, and the injected bug that drops the 8 bytes runs it out of pages again, as R22 found.
+  - Class printing in `rc`: `strCharCodeAt` tagged `@tsl.inline`, so -O1 inlines it as -O2 did.
+  - Backend (-O1, -O2, machine code only): a 32-bit range check leaves out a compare against a bound its operand can't pass (a signed upper bound of 2^31 - 1; any bound past an 8- or 16-bit value's zero-extended range).
+- **Why sound:** the same object made by the same steps in the same order, in a function of its own, and shared only where every literal and every variable's type match; a getter gives the null a never-stored field always holds, and the object's size is unchanged; an inlined function is the same function; a left-out compare tests a bound no operand value passes. D39 and D41 unchanged (`@tsl/gc` untouched).
+- **Tried and removed:** `make` handing straight to `freeFlat` where the next waiting object isn't an empty store's (`stepWaiting`, the call `runSteps` makes there anyway). Inlined: scans 1.38/1.40 → 1.35/1.36, but `AUTO_RC`'s arrays at -O2 0.84 → 0.87. Out of line: scans 1.36/1.38, arrays 1.444 → 1.448. Too little to move `@tsl/gc`'s pins again, and arrays got slower. Scans' freeing is still 154 + 33 against 108 a call.
+- **After** (TSL / direct, -O1 and -O2, before → after): appends 1.26/1.23 → 1.21/1.21, short joins 0.91/0.90 → 0.86/0.86, substrings 1.22/1.19 → 1.19/1.17, scans 1.53/1.46 → 1.38/1.40, split and join 1.28/1.22 → 1.22/1.19. Throws 1 up 1.10/1.12 → 0.94/0.97, 10 up 1.13/1.14 → 0.95/0.98, 100 up 1.19/1.19 → 0.98/0.99. Calls that can throw, `try`, `try`/`finally` 1.00. A throw a frame up at -O2 856 → 740 instructions (direct 761), `down` 23.0 a frame. `AUTO_RC`'s benchmarks unchanged in every cell.
+- **`auto`:** `AUTO_RC_EXC` on: all seven `rc` exceptions cells are 1.00 or under at -O1 and -O2. It takes no corpus program yet: every `rc` program with exceptions also has strings (`AUTO_RC_STRINGS` stays off, four of five strings benchmarks 1.17–1.40) or is reshaped or blocked. Coverage (`route-blockers`, -O2) the same before and after, row for row: `strict` 30 + 18, `leak` and `manual` 63 + 43, `rc` 19 + 0. `TRUSTED_IN`'s `rc` class printing stays off: tools/r14-time.ts (`TMK_TRUST_IN=rc:classes`, TCG, counted) gives every program the same ratio before and after, the same five over 1.00 at each level.
+- **Injected bugs** (box 66), each caught by wrong answers: a builder shared by throws whose literals differ (4), a builder without the class id (5), the never-stored fields' 8 bytes left out (1: exc_exhaust.ts runs out of pages), a range check losing its lower bound where its upper is the type's own (4, corpus/trap natively at -O2; also in `OPT_FAULTS`, and opt-a box 12 catches it).
+- **Pins:** none of 3,864 moved (tools/r23-pins.ts). The printing's changes are `rc`'s, `auto` takes no strings in `rc` and no pinned program with exceptions, and the backend's change is machine code.
+- **Gate:** this entry was finished before the final gate; the result is in the builder's report.
+- *Rejected:* shrinking `Dyn`'s size class (R22's `exc_exhaust` finding); the backend's slot-address rematerialisation (one instruction of five here); `stepWaiting` (above); unzeroed allocation and option 1 (not in scope).
+- *Next:* strings' remaining gap: scans' freeing (`freeFlat`'s frame and `runSteps`' hand-over, 187 against 108 a call), then concatenation, substrings and `strIndex` (each 15–20k instructions a scan call over the direct route). Then `AUTO_RC_STRINGS`, which would let `AUTO_RC_EXC` take real programs. Then item 11.
+
 ## 2027-01-11
 
 **Coordinator: R22 verified** (manifest MATCH, tree d3ab6e210acb543f; gate from clean 285 of 285 in 91.7 min, the builder's third: it stopped two for its own bugs; sample 8/8 the same, seed 24851). Highest per-job peak 2.33 GiB. Committed locally, not pushed.

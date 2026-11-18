@@ -127,7 +127,9 @@ export function backendFaults(): Shape {
   const off = new Set(list(env?.TMK_OPT_DISABLE));
   return {
     faults: new Set(
-      list(env?.TMK_OPT_FAULT).filter((x) => x.startsWith("b3-") || x.startsWith("r21-")),
+      list(env?.TMK_OPT_FAULT).filter(
+        (x) => x.startsWith("b3-") || x.startsWith("r21-") || x.startsWith("r23-"),
+      ),
     ),
     on: (part) => !off.has(part),
   };
@@ -1673,9 +1675,31 @@ class FuncEmit {
       }
       this.jcc(cond, trap);
     };
-    const skipLo = sign === "u" && lo === 0n;
     const width = sf ? 64 : 32;
-    const skipHi = sign === "u" && hi >= (1n << BigInt(width)) - 1n;
+    let skipLo = sign === "u" && lo === 0n;
+    let skipHi = sign === "u" && hi >= (1n << BigInt(width)) - 1n;
+    // R23: a bound the operand can't pass either way it's read. A 32-bit signed check's upper bound at 2^31 - 1, or its
+    // lower at -2^31, is the type's own; and a value whose own type is 8 or 16 bits is held zero-extended (`select`), so
+    // it's 0 to 2^8 - 1 or 2^16 - 1 read signed or unsigned. Machine code only: the same trap where the value is out of
+    // range, which these values never are.
+    if (t === "i32" && this.sh !== null && this.sh !== undefined) {
+      const own = this.f.types[this.s.alias[v]!]!;
+      const nb = own === "i8" ? 8 : own === "i16" ? 16 : 0;
+      const [vlo, vhi] =
+        nb > 0
+          ? [0n, (1n << BigInt(nb)) - 1n]
+          : sign === "s"
+            ? [-(1n << 31n), (1n << 31n) - 1n]
+            : [0n, (1n << 32n) - 1n];
+      const read = (x: bigint): bigint =>
+        sign === "s" ? BigInt.asIntN(32, x) : BigInt.asUintN(32, x);
+      if (read(lo) <= vlo) skipLo = true;
+      if (read(hi) >= vhi) {
+        skipHi = true;
+        // the injected `r23-range-lo` bug: the lower bound left out too wherever the upper is the operand's own
+        if (this.sh.faults.has("r23-range-lo")) skipLo = true;
+      }
+    }
     if (!skipLo) check(lo, sign === "s" ? Cond.LT : Cond.LO);
     if (!skipHi) check(hi, sign === "s" ? Cond.GT : Cond.HI);
     const rd = this.dst(res);

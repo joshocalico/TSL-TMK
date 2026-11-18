@@ -1062,10 +1062,19 @@ export const AUTO_RC = true;
 /**
  * R11: whether `auto` builds a lowered `rc` program with exceptions through the TSL route, desugared by the printer (D68)
  * and counted by tslc's expansion: only once every `rc` exceptions benchmark is no slower than the direct route at -O1 and
- * -O2 in two quiet runs (M5's R11 record). Forced only for now: nearly every such program has strings, which `auto` doesn't
- * take in `rc` either (AUTO_RC_STRINGS).
+ * -O2 (M5's R11 record). On since R23 (M5's R23 record), by instruction counts. Nearly every such program has strings, which
+ * `auto` doesn't take in `rc` (AUTO_RC_STRINGS), so in the corpus it takes none yet (route-blockers: `rc` 19 + 0 as before).
  */
-export const AUTO_RC_EXC = false;
+export const AUTO_RC_EXC = true;
+
+/**
+ * R23: AUTO_RC_EXC put back off (`TMK_R23_OFF=exc`), for tools/r23-pins.ts's comparison. Never set otherwise. On since R23
+ * (M5's R23 record): every `rc` exceptions benchmark is no slower than the direct route at -O1 and -O2 (instruction counts:
+ * calls that can throw, `try` and `try`/`finally` 1.00; throws 1, 10 and 100 frames up 0.94 to 0.99).
+ */
+function autoRcExc(): boolean {
+  return AUTO_RC_EXC && !(process.env.TMK_R23_OFF ?? "").split(",").includes("exc");
+}
 
 /**
  * The memory modes in which `auto`'s class printing prints closure values as environment classes (R3): only where every
@@ -1987,7 +1996,7 @@ function lowerFileIn(file: string, opts: LowerOptions): LowerOutput {
             via = null;
           }
           // R11: exceptions in `rc` print, counted by the expansion, but `auto` doesn't take them (AUTO_RC_EXC)
-          else if (memory === "rc" && via.info.stats.rcExc === true && !AUTO_RC_EXC) {
+          else if (memory === "rc" && via.info.stats.rcExc === true && !autoRcExc()) {
             tslSkipped = "exceptions in rc, which auto doesn't take yet (AUTO_RC_EXC, R11)";
             via = null;
           }

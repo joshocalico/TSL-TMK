@@ -1,0 +1,7 @@
+[
+  { "fn": "shapes", "args": [70, 0] },
+  { "fn": "shapes", "args": [140, 1] },
+  { "fn": "shapes", "args": [21, 100] },
+  { "fn": "messages", "args": [60] },
+  { "fn": "rethrown", "args": [35] }
+]

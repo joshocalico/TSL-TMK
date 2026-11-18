@@ -49,6 +49,15 @@ export const EXC_FAULTS: { name: string; what: string }[] = [
     what: "an unknown's class sharing storage within one class it holds: two fields of one type of the same class in one field",
   },
 ];
+// R23's own bugs in `made` (`r23-made-key`, `r23-made-cid`) are tools/r23-tests.ts's, run in `rc`, where it's built.
+
+/**
+ * R23's out-of-line builder put back as it was (`TMK_R23_OFF=made`), for tools/r23-pins.ts: each thrown object built where
+ * it's thrown. Never set otherwise.
+ */
+export function r23Off(part: string): boolean {
+  return (process.env.TMK_R23_OFF ?? "").split(",").includes(part);
+}
 
 const REF: Ty = { k: "ref" };
 const VOID: TE = mk(T.void, { k: "tuple", items: [] });
@@ -213,7 +222,11 @@ function zero(ty: Ty): TE | null {
  * and a wrapper for each export that can throw, as the native caller's ABI has (D36). `restore` puts back what the
  * direct route has, which the functions are shared with.
  */
-export function desugarExc(src: ExcSource, fault: string | undefined): ExcPrinted {
+export function desugarExc(
+  src: ExcSource,
+  fault: string | undefined,
+  opts: { rc?: boolean } = {},
+): ExcPrinted {
   const saved = src.funcs.map((x) => ({ f: x.f, now: { ...x.f } }));
   const restore = (): void => {
     for (const s of saved) Object.assign(s.f, s.now);
@@ -228,7 +241,7 @@ export function desugarExc(src: ExcSource, fault: string | undefined): ExcPrinte
       attrs: [...x.pre.attrs],
     });
   try {
-    return { ...new Desugar(src, fault).run(), restore };
+    return { ...new Desugar(src, fault, opts.rc === true && !r23Off("made")).run(), restore };
   } catch (e) {
     restore();
     throw e;
@@ -249,11 +262,16 @@ class Desugar {
   nextId = 0;
   nextLabel = 1;
   targets: Target[] = [];
+  // R23, `rc`: a thrown object's builders, out of line, one per shape of throw (`made`)
+  outOfLine: boolean;
+  builders = new Map<string, FuncInst>();
+  shIds = new Map<unknown, number>();
 
-  constructor(src: ExcSource, fault: string | undefined) {
+  constructor(src: ExcSource, fault: string | undefined, outOfLine = false) {
     this.src = src;
     this.fault = fault;
     this.funcs = src.funcs.map((x) => x.f);
+    this.outOfLine = outOfLine;
   }
 
   run(): Omit<ExcPrinted, "restore"> {
@@ -299,7 +317,7 @@ class Desugar {
     const wrappers: FuncInst[] = [];
     for (const f of this.funcs) if (f.exported && this.can.has(f)) wrappers.push(this.wrapper(f));
     return {
-      funcs: [...this.funcs, ...wrappers],
+      funcs: [...this.funcs, ...this.builders.values(), ...wrappers],
       stats: {
         throwing: this.can.size,
         checks: this.checks,
@@ -396,6 +414,96 @@ class Desugar {
     return [{ k: "if", c: low, a: this.throwing(made, { handler: null, fins: [] }), b: null }];
   }
 
+  /**
+   * R23, `rc`: `throw new C(a, b)`'s object built out of line, as a call of a builder function that returns it, so the
+   * function that throws keeps no frame slot for it, and no register for that slot's address, on the way that doesn't
+   * throw. Only the shape the lowering gives a `new` with plain arguments: `{ let t = alloc; t.cid = k; C.ctor(t, …);
+   * t }`, its constructor one that can't throw, each argument a variable, a literal or a global's address. A variable is a
+   * parameter of the builder; a literal or an address is in it, so throws that differ only in them don't share one. The
+   * same object, made by the same steps in the same order: only where they run moves, into a function of its own, and a
+   * borrowed argument is borrowed there as it was here. Null: anything else, which stays where it was.
+   */
+  made(v: TE): TE | null {
+    if (v.k !== "blockexpr" || v.body.length !== 3) return null;
+    const [a, b, c] = v.body as [Stmt, Stmt, Stmt];
+    if (a.k !== "let" || a.init === null || a.init.k !== "alloc" || a.init.size.k !== "lit")
+      return null;
+    const t = a.v;
+    const isT = (x: TE): boolean => x.k === "var" && x.v === t;
+    if (b.k !== "expr" || b.e.k !== "fstore" || !isT(b.e.base) || b.e.val.k !== "lit") return null;
+    if (b.e.mem.length !== 1 || b.e.mem[0]!.off !== 0) return null;
+    if (c.k !== "expr" || c.e.k !== "call" || this.can.has(c.e.inst)) return null;
+    if (c.e.args.length === 0 || !isT(c.e.args[0]!) || !isT(v.result)) return null;
+    const rest = c.e.args.slice(1);
+    const vars: Var[] = [];
+    const key: string[] = [];
+    const shId = (sh: unknown): number => {
+      let id = this.shIds.get(sh);
+      if (id === undefined) this.shIds.set(sh, (id = this.shIds.size));
+      return id;
+    };
+    // the injected `r23-made-key` bug: a literal's value left out of the key
+    // a literal is in the builder, so throws whose literals differ in any way (-0 from 0, null from undefined) don't share it
+    const litKey = (x: TE): string => {
+      if (this.fault === "r23-made-key") return "lit";
+      const l = x as Extract<TE, { k: "lit" }>;
+      const v = Object.is(l.value, -0) ? "-0" : `${typeof l.value} ${String(l.value)}`;
+      return `lit ${v}${l.undef === true ? " undef" : ""}${x.isNull === true ? " null" : ""}${x.negz === true ? " negz" : ""}`;
+    };
+    for (const x of rest) {
+      if (x.k === "var") {
+        if (x.v === t || x.v.boxed === true) return null;
+        if (!vars.includes(x.v)) vars.push(x.v);
+        // a reference's shape is its parameter's class, which the printing works out from what's passed (`sh`)
+        const sh = x.ty.k === "ref" ? ` ${shId(x.sh)}` : "";
+        key.push(`var ${vars.indexOf(x.v)} ${JSON.stringify(x.ty)}${sh}`);
+      } else if (x.k === "lit") key.push(`${litKey(x)} ${JSON.stringify(x.ty)}`);
+      else if (x.k === "gaddr") key.push(`gaddr ${x.name} ${x.off ?? 0}`);
+      else return null;
+    }
+    const ctor = c.e.inst;
+    // every thrown value is the program's one class of `unknown` values, whatever shape object says so at each throw
+    const id = `${ctor.key}\0${String(b.e.val.value)}\0${String(a.init.size.value)}\0${key.join("\0")}`;
+    let fn = this.builders.get(id);
+    if (fn === undefined) {
+      const params: Var[] = vars.map((x, i) => ({ id: i + 1, name: x.name, ty: x.ty }));
+      const t2: Var = { id: params.length + 1, name: t.name, ty: t.ty };
+      const sub = (x: TE): TE =>
+        x.k === "var" && vars.includes(x.v) ? { ...x, v: params[vars.indexOf(x.v)]! } : x;
+      const tv = (x: TE): TE => ({ ...x, v: t2 }) as TE;
+      const cidStore: Stmt[] =
+        this.fault === "r23-made-cid" ? [] : [{ k: "expr", e: { ...b.e, base: tv(b.e.base) } }];
+      const body: Stmt[] = [
+        { k: "let", v: t2, init: a.init, constant: true },
+        ...cidStore,
+        { k: "expr", e: { ...c.e, args: [tv(c.e.args[0]!), ...rest.map(sub)] } },
+      ];
+      const stem = ctor.tirName.replace(/\..*$/, "").replace(/[^A-Za-z0-9_]/g, "_");
+      let name = `tmkMade${stem}`;
+      for (let i = 2; [...this.builders.values()].some((g) => g.tirName === name); i++)
+        name = `tmkMade${stem}_${i}`;
+      fn = {
+        key: `$made\0${id}`,
+        tirName: name,
+        jsName: name,
+        params,
+        ret: REF,
+        exported: false,
+        attrs: ["noinline"],
+        body: [...body, { k: "return", val: { ...v.result, v: t2 } as TE }],
+        ...(this.f.memory !== undefined ? { memory: this.f.memory } : {}),
+      };
+      this.builders.set(id, fn);
+    }
+    const keep: Partial<TE> = {};
+    if (v.sh !== undefined) keep.sh = v.sh;
+    return mk(
+      REF,
+      { k: "call", inst: fn, args: vars.map((x) => rest.find((r) => r.k === "var" && r.v === x)!) },
+      keep,
+    );
+  }
+
   label(kind: string): string {
     return `$${kind}${this.nextLabel++}`;
   }
@@ -414,7 +522,8 @@ class Desugar {
   x0(te: TE, cx: Cx): TE {
     if (te.k === "raise") {
       const v = this.x(te.val, cx);
-      return mk(T.never, { k: "blockexpr", body: this.throwing(v, cx), result: VOID });
+      const call = this.outOfLine ? this.made(v) : null;
+      return mk(T.never, { k: "blockexpr", body: this.throwing(call ?? v, cx), result: VOID });
     }
     let made = mapKidsAll(
       te,
