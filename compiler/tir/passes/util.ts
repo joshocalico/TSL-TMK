@@ -340,3 +340,13 @@ export function termCost(t: Block["term"]): number {
       return 1;
   }
 }
+
+/**
+ * R26's optimiser changes put back as they were, for tools/r26-pins.ts (`TMK_R26_OFF`, a comma-separated list): `range`
+ * (range.ts's signed tests by their smaller side, a float compare of converted i32s where they're known, and a target
+ * reached through its own `zext`), `rounds` (-O2's loop copying in one round), `inline` (the inliner's loop blocks as computed
+ * before a split), `codeat` (class printing's `charCodeAt` in floats). Never set otherwise.
+ */
+export function r26Off(part: string): boolean {
+  return (process.env.TMK_R26_OFF ?? "").split(",").includes(part);
+}

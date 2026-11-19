@@ -382,6 +382,25 @@ async function faultSteps(
   const engines = defaultEngines();
   return [
     {
+      // R26: range.ts's signed tests and float compares, -O1's loopbounds and -O2's copying rounds, on R26's program and
+      // R25's strings through both routes in rc and leak at -O1 and -O2, against V8 (seconds, so first: R26's bugs are caught
+      // here, and so may an earlier bug be, which changes only which step names it).
+      name: "R26's programs through both routes at -O1 and -O2 (corpus/lower/r26 and r25, tools/r26-tests.ts)",
+      run: async () => {
+        const R26 = await import("./r26-tests.ts");
+        const d = await R26.r26Dual(
+          [accel],
+          jobs,
+          [1, 2],
+          false,
+          undefined,
+          ["rc", "leak"],
+          [R26.R26_DIR, "corpus/lower/r25"],
+        );
+        return d.failures.length === 0 && d.cases > 0;
+      },
+    },
+    {
       // R21: the backend's shrink-wrapping, on R21's programs through both routes in rc and leak at -O2, against V8 (seconds,
       // so first: R21's bug is caught here, and so may an earlier bug be, which changes only which step names it).
       name: "R21's programs through both routes at -O2 (corpus/lower/r21, tools/r21-tests.ts)",

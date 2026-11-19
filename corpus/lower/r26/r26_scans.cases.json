@@ -1,0 +1,21 @@
+[
+  { "fn": "scans", "args": [10, 0, 0] },
+  { "fn": "scans", "args": [80, 0, 0] },
+  { "fn": "scans", "args": [80, -2, 0] },
+  { "fn": "scans", "args": [80, 0, 2] },
+  { "fn": "scans", "args": [80, 0, -1] },
+  { "fn": "scans", "args": [9, -3, 3] },
+  { "fn": "scans", "args": [100, 75, 1] },
+  { "fn": "twoStrings", "args": [5, 9] },
+  { "fn": "twoStrings", "args": [90, 70] },
+  { "fn": "twoStrings", "args": [70, 90] },
+  { "fn": "arrays", "args": [6, 6] },
+  { "fn": "arrays", "args": [6, 9] },
+  { "fn": "arrays", "args": [6, 4], "lowered_trap": 2 },
+  { "fn": "arraysFrom", "args": [6, 0] },
+  { "fn": "arraysFrom", "args": [6, 4] },
+  { "fn": "arraysFrom", "args": [6, -2], "lowered_trap": 2 },
+  { "fn": "firsts", "args": [0] },
+  { "fn": "firsts", "args": [1] },
+  { "fn": "firsts", "args": [7] }
+]

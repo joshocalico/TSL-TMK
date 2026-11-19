@@ -56,6 +56,63 @@ The nightly full run stays paused until the owner agrees the pipeline is fixed.
 
 ---
 
+## 2027-01-19
+
+**Coordinator: R26 verified** (manifest MATCH, tree b6819e4e64c3b8c1; gate from clean 293 of 293 in 102.0 min, the builder's second: its first failed 12 spec-sync boxes on an unregenerated `corpus/spec/ex-gc-rc.ts`; sample 8/8 the same, seed 29123). Committed locally, not pushed.
+- **Pins:** 863 of 3,864 moved, far more than any round before. 826 of them involve one inliner fix: blocks split off by inlining now stay in their loop. That's an optimiser change at -O1/-O2 with every move explained by program, so D44 allows it. 38 are TSL proper's, at -O1/-O2 only. JPEG and S4 were timed before and after: neither is slower. I accept it, and flag it for the owner.
+- **Harness change checked:** in tools/pipe-tests.ts, a case pinned `lowered_trap` must now give exactly that trap natively, where V8 reads `undefined`. That's stricter, not looser, as R12's Wasm runs already treat such cases, and the two routes are still compared with each other.
+- **Memory:** pipe-d/48 peaked at 2.70 GiB, against the 3 GiB watchdog, and has risen most rounds (2.33 → 2.47 → 2.65 → 2.41 → 2.52 → 2.70). It needs bringing down before it trips.
+- **Results:**
+  - Scans 1.04/1.07; the other strings are at or under 1.00.
+  - Programs over 1.00 under `TRUSTED_IN` rc: 4 at -O1, 5 at -O2.
+  - `auto` takes nothing new.
+
+**Decision: R27 is option 1** (the owner's go-ahead, 2027-01-17), **plus pipe-d/48's memory.**
+- **Option 1:**
+  - tslc proves a freshly allocated object can't be reached through any other reference while it's being filled (fresh-allocation separation), using per-call summaries of what each call can write;
+  - then it drops the bounds and liveness checks that proof makes redundant;
+  - aimed first at map_grow_oom and r2_maps (a map's new table filled in growth).
+
+  No unchecked operation; a check is only removed by proof. Every proof gets injected bugs that a wrong proof would let through.
+- **pipe-d/48:** measure what holds its memory and bring its peak down well under 3 GiB, without dropping any case.
+- *Next* (R28): read_checks' fresh-allocation path, `freeAlloc`'s frame (adv_forof_mutation), reshape_order at -O1, relative_import's tag proof, scans' last costs; then cyc_exhaust.
+
+## 2027-01-18
+
+**R26 is built (builder's report; for the coordinator to verify).** `TRUSTED_IN`'s `rc` class printing measured program by program, what of it is sound built, and scans' optimiser work at -O1 and -O2. SPEC 4.3 (the inliner, unswitching and peeling, check elimination), 3.5 (`charCodeAt` in integers, `ex-gc-rc.ts`'s block), 8.3 (pipe-d boxes 71 and 72), D44, D73 and M5's R26 record. No check, case or fault was dropped or weakened, and no limit, timeout or watchdog moved. Nothing was added to TSL, and no unchecked operation to anything lowered code can import.
+
+- **Measured first** (tools/r14-time.ts, `TMK_TRUST_IN=rc:classes`, TCG, counted; "before" a worktree of commit 4579b37): R25's figures exactly. Over 1.00 at -O1: relative_import 1.003, reshape_order 1.028, map_grow_oom 2.191, cyc_exhaust 1.424. At -O2: read_checks 1.079, relative_import 1.001, escape_global 1.0005, adv_forof_mutation 1.025, reshape_order 1.003, map_grow_oom 2.162, cyc_exhaust 1.316. Where each gap is (`tmk profile --instructions`):
+  - *read_checks* (-O2; 0.98 at -O1): its trapping cases (7 of 12) leave what they made, so each pass makes everything fresh. A fresh object took 59 instructions out of line (`tryMakeAfter`) against `__rc_small`'s 34, ten of them `pageSlot`'s checked shift (`1 << k`) testing that no bit was lost; rooms grown and zeroed (`__rt_routines` 324 against 227 a made array) and the store's count of objects made are the rest. At -O2 the direct route inlines `__rc_new`'s and `__vec_reserve_rc`'s fast paths, so it gains 10% from -O1 where class printing gains 2%.
+  - *reshape_order* (-O1): `note`, a small leaf called in a filter's loop, wasn't inlined: the call's block had been split by inlining the array read before it, and the inliner's loop blocks are worked out before a sweep, so the new block counted as outside the loop.
+  - *adv_forof_mutation* (-O2): `freeAlloc` 69.1 instructions a call against `__rc_work`'s 65.5 for a one-field object: its frame saves 12 registers against 8.
+  - *relative_import*: R19's one masking `ubfx`, which can't soundly go.
+  - *escape_global* (-O2): 0.05%, gone with the optimiser changes below.
+- **Built:**
+  - `range.ts` (-O2): a signed test is a fact, read unsigned, where its smaller side isn't negative (both had to be); a fact reaches a target through the target's own `zext` or range check; a float compare of two converted `i32`s is decided from the integers as known in its block.
+  - -O2's unswitching and peeling in up to three rounds, value numbering between, limits shared; a round after the first takes only loops a round peeled and the copies unswitching them makes (taking every loop grew `JsMap`'s `advance` from 823 lines of TIR to 1,413 and made number-keyed maps 0.4% slower, so that's how it's limited).
+  - -O1's `loopbounds`: `k < 0` is false for a signed test's index that's never negative.
+  - The inliner: the blocks a call in a loop's block splits off stay in the loop.
+  - Class printing in `rc`: `charCodeAt` with an `i32` index printed in integers (`x < 0 || x >= s.len()`, then `s.unit(x)`).
+  - `@tsl/gc`: `pageSlot`'s `1 << k` by a wrapping shift (k is a size class below `CLASSES`, which `cuts`' reads at k already rely on).
+  - *Tried and taken out:* `loopbounds` taking a widened length (`zext m`) as the test's own: its only use is `unit`'s length check, which every caller's own test guards, so no injected bug in it could be caught by a wrong answer; and a fold of a range check on a widened 16-bit unit, for the same reason.
+- **Why sound:** `k < m` signed with `k >= 0` puts `m` above `k`, so neither is negative and the unsigned reading agrees; a `zext n` or `range.chk n` is the number `n`; an `i32` converted exactly compares as the integer; a loop index from 0, rising by 1 below `m`, is never negative; each copying round only unswitches and peels as before; inlining choices change no result; `charCodeAt`'s steps on an `i32` are the value itself, never NaN; 1 << k for k below 48 is exact. D39 and D41 are untouched: no freeing step moved, and every pin of corpus/rc/rc_steps*.ts holds.
+- **After** (class printing / direct, instructions, before → after, -O1 / -O2):
+  - `TRUSTED_IN` rc: read_checks 0.984 / 1.079 → 0.974 / 1.064; reshape_order 1.028 / 1.003 → 1.003 / 0.997; adv_forof_mutation 0.811 / 1.025 → 0.811 / 1.010; escape_global 0.998 / 1.0005 → 0.997 / 0.998; relative_import 1.003 / 1.001 the same; map_grow_oom 2.191 / 2.162 the same; cyc_exhaust 1.424 / 1.316 → 1.426 / 1.335 (the direct route faster). Over 1.00: -O1 4 → 4, -O2 7 → 5. No program's class printing got slower; five ratios rose only because the direct route got faster.
+  - Strings: scans 1.122 / 1.147 → 1.044 / 1.072; appends 0.950 / 0.914 → 0.950 / 0.940; short joins 0.734 / 0.747 → 0.731 / 0.735; substrings 0.988 / 0.983 → 0.988 / 0.969; split and join 0.998 / 0.980 → 0.998 / 0.977.
+  - Exceptions in `rc`: calls that can throw, `try`, `try`/`finally` 1.00; throws 0.930 / 0.962 → 0.937 / 0.981 (1 up), 0.944 / 0.970 → 0.950 / 0.985 (10 up), 0.982 / 0.990 → 0.983 / 0.995 (100 up): the direct route faster, all ≤ 1.00.
+  - `AUTO_RC`'s benchmarks: list 0.514 / 0.554 → 0.514 / 0.564, churn 0.835 / 0.858 → 0.835 / 0.836, cycles 1.038 / 0.893 → 1.038 / 0.890, arrays 0.715 / 0.828 → 0.715 / 0.692, acyclic 0.753 / 0.763 → 0.753 / 0.803, number-keyed maps 0.989 / 1.002 the same, object-keyed 0.902 / 0.891 → 0.902 / 0.885.
+- **`auto`:** nothing new. `TRUSTED_IN`'s `rc` class printing stays off: read_checks (-O2 1.064), adv_forof_mutation (-O2 1.010), reshape_order (-O1 1.003) and relative_import (1.003 / 1.001) are still over, besides map_grow_oom and cyc_exhaust. `AUTO_RC_STRINGS` stays off: scans 1.044 / 1.072. Coverage (`route-blockers`, -O2) is the same before and after, line for line: `strict` 30 + 18, `leak` and `manual` 63 + 43, `rc` 19 + 0.
+- **Injected bugs** (box 72, each caught by wrong answers; the four optimiser ones in `OPT_FAULTS` too): `r26-rel-any` 20, `r26-fcmp-swap` 29, `r26-round-swap` 6, `r26-lb-const` 4, `r26-codeat-past` 4, `r26-page-half` 62 (wrong answers, of 36, 29, 6, 4, 4 and 133 failures in all).
+- **JPEG and S4:** their TIR changes, so both were timed before and after (HVF, back to back, rough): the JPEG decoder native / V8 1.103 → 1.103 at -O2, 1.084 → 1.084 at -O1; S4's median native / clang 1.039 → 1.039 at -O2, 1.170 → 1.163 at -O1. Neither slower.
+- **Pins:** 863 of 3,864 moved, none unexplained, none at -O0 but `@tsl/gc`'s 10 in the five lowered `rc` programs earlier rounds moved (tools/r26-pins.ts, tools/r26-moved.ts). Most are the inliner's change (826 involve it), which touches any function where a call follows an inlined one in a loop's block: -O1 139, -O2 714. **TSL proper's moved: 38**, at -O1 and -O2 only (corpus/std's programs, corpus/mem's alloc_slab, alloc_vec, gen_adversarial and lang_misc, corpus/spec/run_std.ts), by the inliner, 8 at -O2 by the copying rounds too: an optimiser change, which D44 allows. This is far more than R25's 20; the coordinator may want to weigh it.
+- **Gate:** from clean, 293 of 293 in 102.0 min, tree b6819e4e64c3b8c1, `verify-manifest` MATCH; pipe-d/48's peak 2.70 GiB (2.52 in R25; the watchdog is 3 GiB). *Process slip:* the first gate (also from clean) failed 12 jobs, all the spec-sync boxes, because I hadn't regenerated corpus/spec/ex-gc-rc.ts from SPEC's block (`tools/spec-extract.ts --write`) after changing `pageSlot`; fixed that way and gated again from clean. Nothing else changed between the two.
+- *Rejected:* a by-construct trust rule (R19); option 1 and an unchecked read (the owner's ruling); the collector's exhaustion path; reworking `freeAlloc`'s register use (four instructions a call, a backend matter); an inliner rule for -O1 on all loops by dominators.
+- *Next:* what stands between `TRUSTED_IN` rc and switching it on, besides map_grow_oom (option 1) and cyc_exhaust: read_checks' fresh allocations (a room's growth and zeroing, the store's count, `tryMakeAfter` out of line, about 6% at -O2), `freeAlloc`'s frame for one-field objects (1% on adv_forof_mutation), reshape_order's array making and freeing at -O1 (0.3%), relative_import's mask (0.1–0.3%, needs a proof that a lowered `rc` package's references carry no tag where they're read). For scans: freeing's per-call cost (135 against 112) and the view read's add and bounds check (3 instructions a unit), then `AUTO_RC_STRINGS`.
+
+## 2027-01-17 (owner)
+
+**Owner: option 1 comes after R26** ("Give it a go"). That's the fresh-allocation proof from R17's 3a: tslc proves a freshly allocated object (a map's new table, an array's new holder) can't be reached through any other reference while it's filled, and drops the checks that proof makes redundant. It adds no unchecked operation, and lowered TSL still has no way of violating memory safety. R27 builds it, aimed first at map_grow_oom and r2_maps.
+
 ## 2027-01-17
 
 **Coordinator: R25 verified** (manifest MATCH, tree e99734766a09628d; gate from clean 291 of 291 in 97.2 min; sample 8/8 the same, seed 28057). Highest per-job peak 2.52 GiB (pipe-d/48). No stash or stray worktree was left. Committed locally, not pushed.

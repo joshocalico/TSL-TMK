@@ -7,6 +7,7 @@
 // What isn't printable yet throws EmitUnsupported with what it was, and that program stays on the direct route.
 import { dirname, relative } from "node:path";
 import type { Global } from "../tir/ir.ts";
+import { r26Off } from "../tir/passes/util.ts";
 import type { Desc, DownMeta, DownResult } from "./down.ts";
 import ts from "typescript";
 import {
@@ -3923,7 +3924,9 @@ class Emitter {
     const tail = this.classes ? this.deadTail(f) : null;
     // the injected `dead-tail-live` bug: the live return before the dead one left out with it
     const cut = tail === null ? 0 : this.fault === "dead-tail-live" ? 2 : 1;
-    this.stmts(cut > 0 ? f.body.slice(0, -cut) : f.body);
+    const codeAt = this.intCodeAt(f);
+    if (codeAt !== null) this.body.push(...codeAt);
+    else this.stmts(cut > 0 ? f.body.slice(0, -cut) : f.body);
     // The string literals (D67), made first thing, before anything can read one.
     if (f.tirName === "__init" && this.strLitInit.length > 0)
       this.body.unshift(...this.strLitInit.map((l) => `  ${l}`));
@@ -3964,6 +3967,29 @@ class Emitter {
       f.key.includes("/compiler/rt/str.ts") &&
       /^strCharCodeAt(\$\d+)?$/.test(f.tirName)
     );
+  }
+
+  /**
+   * R26: in `rc`, compiler/rt's `strCharCodeAt` where the lowering gave it an `i32` index, printed in integers. JS's steps
+   * (ToIntegerOrInfinity, then NaN outside [0, length)) on an i32 are its own value, never NaN, so `x !== x` is false,
+   * `Math.trunc` is the value and `t | 0` is too: the same answers, where the float printing kept a float compare a unit
+   * that -O1's passes can't take (`loopbounds` reads integer tests). Null where the index isn't an i32, and the function
+   * prints as compiler/rt has it. `TMK_R26_OFF=codeat` puts it back, for tools/r26-pins.ts.
+   */
+  intCodeAt(f: FuncInst): string[] | null {
+    if (!this.rc || !this.strs || !this.rcCodeAt(f) || r26Off("codeat")) return null;
+    const [s, x] = f.params;
+    if (s === undefined || x === undefined || f.params.length !== 2) return null;
+    if (this.varTy(x) !== "i32" || this.tyText(f.ret) !== "f64") return null;
+    const sn = this.varName(s);
+    const xn = this.varName(x);
+    const bad = this.fault === "r26-codeat-le" ? ">" : ">=";
+    return [
+      `  if (((${xn} < 0) || (${xn} ${bad} ${sn}.len()))) {`,
+      `    return cast<f64>(NaN);`,
+      `  }`,
+      `  return toF64(${sn}.unit(cast<usize>(${xn}, "usize")));`,
+    ];
   }
 
   /** R24: compiler/rt's `strConcat` and `strIndex`, printed in `rc` over the program's own JsStr. */

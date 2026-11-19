@@ -40,6 +40,7 @@ import {
   instrCost,
   newBlockId,
   newValue,
+  r26Off,
   termCost,
   valueOps,
 } from "./util.ts";
@@ -63,12 +64,32 @@ export interface CopyContext {
   limits: UnswitchLimits;
   unswitch: boolean;
   peel: boolean;
+  /**
+   * R26: what earlier rounds over the same function copied, so the limit is the function's in all and a loop is peeled
+   * once in all: the pass manager runs this again after value numbering, which is what makes a test on a load the first
+   * turn took (a string's buffer's null test) the loop's own invariant branch.
+   */
+  round?: CopyRound;
+  /** Injected (R26): this round's unswitched copies each take the other's way (the pass manager sets it after round 1). */
+  swapLater?: boolean;
+}
+
+export interface CopyRound {
+  grown: number;
+  peeled: Set<number>;
+  /**
+   * After the first round, the loops a round may copy, by header id: those an earlier round peeled, and the copies
+   * unswitching one of them makes. Every other loop was there to be copied in the first round already, and copying it now
+   * (once value numbering has changed it) only grows code that no peeled first turn made worth copying.
+   */
+  later?: Set<number>;
 }
 
 export function unswitchFunc(f: Func, ctx: CopyContext): boolean {
-  let grown = 0;
+  const round: CopyRound = ctx.round ?? { grown: 0, peeled: new Set() };
+  let grown = round.grown;
   let changed = false;
-  const peeled = new Set<number>(); // headers peeled already, by block id: the loop left behind has the same header
+  const peeled = round.peeled; // headers peeled already, by block id: the loop left behind has the same header
   for (let tries = 0; tries < 16; tries++) {
     const cfg = buildCfg(f);
     const loops = findLoops(f, cfg);
@@ -76,8 +97,19 @@ export function unswitchFunc(f: Func, ctx: CopyContext): boolean {
     for (const l of loops) {
       const c = loopCost(f, l);
       if (grown + c > ctx.limits.funcGrowth) continue;
-      if (ctx.unswitch && c <= ctx.limits.loopCost && unswitchLoop(f, l, ctx.deadAtO0)) {
+      const hid = f.blocks[l.header]!.id;
+      if (round.later !== undefined && !round.later.has(hid)) continue;
+      let copy: number | false = false;
+      if (
+        ctx.unswitch &&
+        c <= ctx.limits.loopCost &&
+        (copy = unswitchLoop(f, l, ctx.deadAtO0, ctx.swapLater === true)) !== false
+      ) {
         ctx.stats.loops++;
+        // R26: each way's loop is a loop of its own now, with one branch fewer, and may be peeled once more: the way that
+        // keeps the header, as the copy, which has a header of its own.
+        if (ctx.round !== undefined && !r26Off("rounds")) peeled.delete(hid);
+        round.later?.add(copy);
       } else if (
         ctx.peel &&
         c <= ctx.limits.peelCost &&
@@ -96,6 +128,7 @@ export function unswitchFunc(f: Func, ctx: CopyContext): boolean {
     }
     if (!done) break;
   }
+  round.grown = grown;
   return changed;
 }
 
@@ -278,7 +311,8 @@ function dropUnreachable(f: Func): void {
   f.blocks = f.blocks.filter((_, i) => live.has(i));
 }
 
-function unswitchLoop(f: Func, l: Loop, deadAtO0: WeakSet<Instr>): boolean {
+/** Unswitches the loop on its first invariant branch: the copy's header's id, or false where it isn't. */
+function unswitchLoop(f: Func, l: Loop, deadAtO0: WeakSet<Instr>, swap = false): number | false {
   const inLoop = definedIn(f, l.blocks);
   const index = new Map<number, number>();
   f.blocks.forEach((b, i) => index.set(b.id, i));
@@ -349,10 +383,12 @@ function unswitchLoop(f: Func, l: Loop, deadAtO0: WeakSet<Instr>): boolean {
   // Each copy's branches on the condition are now jumps: the original's go the true way, the copy's the false way.
   for (const at of r.blocks) {
     const b = f.blocks[at]!;
-    if (b.term.k === "brif" && b.term.cond === cond) b.term = { k: "br", to: b.term.t };
+    if (b.term.k === "brif" && b.term.cond === cond)
+      b.term = { k: "br", to: swap ? b.term.f : b.term.t };
   }
   for (const b of copies.values()) {
-    if (b.term.k === "brif" && b.term.cond === cond) b.term = { k: "br", to: b.term.f };
+    if (b.term.k === "brif" && b.term.cond === cond)
+      b.term = { k: "br", to: swap ? b.term.t : b.term.f };
   }
   // The preheader chooses.
   const into = preBlock.term;
@@ -365,7 +401,7 @@ function unswitchLoop(f: Func, l: Loop, deadAtO0: WeakSet<Instr>): boolean {
     f: { block: copies.get(header.id)!.id, args: [...into.to.args] },
   };
   dropUnreachable(f);
-  return true;
+  return copies.get(header.id)!.id;
 }
 
 /**

@@ -28,6 +28,7 @@ import {
   instrCost,
   newBlockId,
   newValue,
+  r26Off,
   termCost,
   valueOps,
 } from "./util.ts";
@@ -636,6 +637,7 @@ function inlineInto(
   const softCap = Math.max(initial * GROWTH_FACTOR, initial + GROWTH_ADD);
   let frame = 0;
   const considered = new WeakSet<Instr>();
+  const keepLoops = !r26Off("inline");
   for (let sweep = 0; sweep < 3; sweep++) {
     const loops =
       ctx.level >= 2 ? loopBlocks(f) : ctx.level === 1 ? spannedBlocks(f) : new Set<number>();
@@ -749,7 +751,12 @@ function inlineInto(
             );
             continue;
           }
+          const had = keepLoops ? new Set(f.blocks.map((x) => x.id)) : null;
           inlineAt(f, bi, ii, g, ctx, null);
+          // R26: a call in a loop's block leaves that block split, its copy of the callee and the rest of the block new
+          // blocks: they're in the loop as the block was, so a call after this one in the block is still a call in a loop
+          if (had !== null && loops.has(b.id))
+            for (const x of f.blocks) if (!had.has(x.id)) loops.add(x.id);
           ctx.afterInline?.(f);
           cost = grown;
           frame += slots;
@@ -770,7 +777,10 @@ function inlineInto(
           if (plan !== null && plan.cost <= threshold) {
             const pgrown = cost + plan.cost - callOverhead(g);
             if (pgrown <= softCap && pgrown <= HARD_CAP) {
+              const had = keepLoops ? new Set(f.blocks.map((x) => x.id)) : null;
               inlineAt(f, bi, ii, g, ctx, plan);
+              if (had !== null && loops.has(b.id))
+                for (const x of f.blocks) if (!had.has(x.id)) loops.add(x.id);
               ctx.afterInline?.(f);
               cost = pgrown;
               frame += slots;

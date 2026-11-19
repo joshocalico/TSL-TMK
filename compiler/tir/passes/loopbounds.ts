@@ -22,7 +22,7 @@
 import { buildCfg, edgesOf, type Block, type Func, type Instr } from "../ir.ts";
 import { removeUnreachable } from "./cfg.ts";
 import { findLoops, type Loop } from "./loops.ts";
-import { opParts, valueOps } from "./util.ts";
+import { opParts, r26Off, valueOps } from "./util.ts";
 
 export interface LoopBoundsStats {
   bounds: number; // bounds.chk removed
@@ -32,6 +32,8 @@ export interface LoopBoundsStats {
 export interface LoopBoundsFaults {
   /** Injected (R7): a loop test `k <= m` taken for `k < m`, so a check that fires on the last turn goes. */
   inclusive?: boolean;
+  /** Injected (R26): `k < c` taken as false for any constant `c`, not only 0. */
+  r26Const?: boolean;
 }
 
 const LT: Record<string, { signed: boolean; flip: boolean } | undefined> = {
@@ -112,6 +114,24 @@ export function loopBoundsFunc(
   let changed = false;
   let branched = false;
   const subst = new Map<number, number>();
+  // R26: a signed test's `k` is never negative (neverNegative), so in its loop `k < 0` is false and `k >= 0` true: the
+  // test `charCodeAt` printed in integers makes of its index (emit-tsl.ts's intCodeAt).
+  const notNegative = (v: number, at: number): boolean =>
+    !r26Off("range") && facts.some((x) => x.signed && x.k === v && x.blocks.has(at));
+  f.blocks.forEach((b: Block, at) => {
+    for (const ins of b.instrs) {
+      const p = opParts(ins.op);
+      if (p[0] !== "icmp" || (p[1] !== "slt" && p[1] !== "sge")) continue;
+      const [a, z] = valueOps(ins) as [number, number];
+      const zd = def.get(z);
+      if (zd === undefined || !zd.op.startsWith("iconst.") || zd.ops[0]?.t !== "i") continue;
+      if ((zd.ops[0].val !== 0n && faults.r26Const !== true) || !notNegative(a, at)) continue;
+      ins.op = "iconst.i32";
+      ins.ops = [{ t: "i", val: p[1] === "slt" ? 0n : 1n }];
+      stats.branches++;
+      changed = true;
+    }
+  });
   f.blocks.forEach((b: Block, at) => {
     let removed = false;
     for (const ins of b.instrs) {

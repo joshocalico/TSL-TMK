@@ -2773,6 +2773,43 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     });
   });
 
+  // 71. R26: scans' checks and loads proved or moved by the optimiser, and charCodeAt printed in integers in rc.
+  M.unit("71", async () => {
+    const R26 = timedModule("r26", await import("../r26-tests.ts"));
+    const failures: string[] = [];
+    const d = await R26.r26Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of R26's programs ran");
+    if (d.agreed !== d.cases)
+      failures.push(`${d.cases - d.agreed} cases differ through the two routes`);
+    for (const p of R26.R26_PROGRAMS)
+      if (!d.printed.includes(`${p}@rc`)) failures.push(`${p} doesn't class-print in rc`);
+    report({
+      box: "71. R26 (4.3, 3.5, D44, D73): range.ts reading a signed loop test as the unsigned one where its smaller side isn't negative, deciding a float compare of two converted i32s from the integers as known where it is, and reaching a target through its own zext; -O1's loopbounds taking `k < 0` as false for a signed test's index; -O2's loop copying in rounds with value numbering between, so a peeled first turn's test is unswitched and each copy peeled; -O1's inliner keeping a loop's block in the loop once a call in it is inlined; charCodeAt with an i32 index printed in integers in rc; and @tsl/gc's fresh slot's size by a wrapping shift: corpus/lower/r26/r26_scans.ts (scans of flat strings and views from below 0, 0 and past the end to the length, one short and one past, by its own length and another's; arrays the same, with the lowering's pinned traps; tests by a constant in a loop) agrees with V8 natively and through both routes with class printing forced in rc and leak at -O0, -O1 and -O2, and the printed TSL on V8 and JSC with the source (tools/r26-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${d.agreed}/${d.cases} cases the same as V8 and through both routes, class-printed: ${d.printed.join(", ")}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 72. R26's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("72", async () => {
+    const R26 = timedModule("r26", await import("../r26-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R26.R26_FAULTS) {
+      const x = await R26.r26Fault(f, accel, jobs);
+      rows.push(`${f.what}: ${caughtText(x)}`);
+      if (x.answers === 0) failures.push(`${f.name} wasn't caught: ${x.first}`);
+    }
+    report({
+      box: `72. R26: each of ${R26.R26_FAULTS.length} bugs is caught by a wrong answer, with how many cases caught it: range.ts reading a signed test as unsigned whatever its sides' signs, or deciding a float compare from the integers the other way round, -O2's later copying rounds sending an unswitched loop's copies each the other's way (each at -O2), -O1's loopbounds taking \`k < c\` as false for any constant (at -O1), charCodeAt printed in integers taking the length as in range, and @tsl/gc's fresh slot cut half its size (tools/r26-tests.ts, over corpus/lower/r26 and r25 in rc and leak, @tsl/gc's over r26, r25 and r24 in rc at -O2 and corpus/rc/rc_steps*.ts natively)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
   M.vms(
     "8",
     "8. No QEMU process of this run is left, and the owner's UTM and QEMU processes were only observed",

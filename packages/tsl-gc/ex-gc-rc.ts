@@ -311,7 +311,9 @@ function cutSlot(k: usize): u64 {
 // is cut from it, and where cutting is only ever moves forward over slots handed out, each 2^k bytes, within the page: so
 // an address plus a slot's size, at most the page's end, can't wrap.
 function pageSlot(k: usize): u64 {
-  const size = toU64(1) << toU64(k);
+  // R26: k is a size class, below CLASSES (cuts' words at k are read below), so the shift loses nothing: a wrapping one,
+  // where the checked shift's test that no bit was lost was ten instructions of every fresh slot.
+  const size = BigInt.asUintN(64, toU64(1) << toU64(k));
   if (size > toU64(PAGE_CUT)) return heap.allocBytes(toUsize(size));
   const at = ptrAt(u64, cuts).add(k);
   const end = at.add(CLASSES);

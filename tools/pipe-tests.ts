@@ -535,7 +535,19 @@ export async function dualRoute(o: {
               allowed.push(line);
             } else failures.push(line);
           }
-          if (ref !== undefined && ref[i] !== x)
+          // R26: a case the lowering traps where V8 reads `undefined` (its `lowered_trap`, as the native corpus pins it):
+          // native gives that trap, exactly, or it's a failure; V8's result isn't the reference there
+          const pinned = (c as { lowered_trap?: number }).lowered_trap;
+          if (ref !== undefined && pinned !== undefined) {
+            const got =
+              x === undefined
+                ? undefined
+                : (JSON.parse(x) as { result?: { trap?: number } }).result;
+            if (got?.trap !== pinned)
+              failures.push(
+                `${where}: ${c.fn}#${i}: native ${x ?? "nothing"}, the lowering's pinned trap ${pinned}`,
+              );
+          } else if (ref !== undefined && ref[i] !== x)
             failures.push(
               `${where}: ${c.fn}#${i}: native ${x ?? "nothing"}, V8 ${ref[i] ?? "nothing"}${x === undefined && d.outOfTime === true ? " (its run ran out of time)" : ""}`,
             );

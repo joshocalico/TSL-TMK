@@ -17,7 +17,7 @@
 // 2^53 - 1 (D23), which is the 64-bit target's limit for checked `ix` arithmetic, and wasm32's `ix` can't pass its own.
 // So `i + k` checked, where `i + k <= n` for an `ix` value `n` read unsigned, can't fire on either.
 import { buildCfg, edgesOf, type Cfg, type Func, type Instr, type TirType } from "./ir.ts";
-import { intImm, opParts, valueOps } from "./passes/util.ts";
+import { intImm, opParts, r26Off, valueOps } from "./passes/util.ts";
 
 export interface Iv {
   lo: bigint;
@@ -36,6 +36,12 @@ const P32 = 1n << 32n;
 export const IX_PORTABLE = P32 - 1n;
 /** And no `ix` result of one that passed is above this on either (SPEC 4.3). */
 const IX_CHECKED = (1n << 53n) - 1n;
+
+/** R26's injected bugs (D73's fault rule), set by the pass manager for its run: tools/r26-tests.ts. */
+let rangeFaults: { relAny?: boolean; fcmpSwap?: boolean } = {};
+export function setRangeFaults(f: { relAny?: boolean; fcmpSwap?: boolean }): void {
+  rangeFaults = f;
+}
 
 export function isTracked(t: TirType): boolean {
   return t in W;
@@ -560,8 +566,21 @@ export class Ranges {
       // Two converted i32s, neither negative, compare as the integers do, whose facts are unsigned.
       const x = this.fsrc.get(ops[0]!);
       const y = this.fsrc.get(ops[1]!);
-      if (x === undefined || y === undefined || a.lo < 0n || b.lo < 0n) return null;
-      return this.relCompare(p[1]!, x, y, at);
+      if (x === undefined || y === undefined) return null;
+      if (r26Off("range")) {
+        if (a.lo < 0n || b.lo < 0n) return null;
+        return this.relCompare(p[1]!, x, y, at);
+      }
+      // R26: each as known where the compare is (a test above may say an i32 isn't negative), not as converted.
+      const xs = this.at(x, at)!;
+      const ys = this.at(y, at)!;
+      // the injected `r26-fcmp-swap` bug: the integers compared the other way round
+      const [u, w] = rangeFaults.fcmpSwap === true ? [y, x] : [x, y];
+      const [us, ws] = rangeFaults.fcmpSwap === true ? [ys, xs] : [xs, ys];
+      const byInt = cmpIv(p[1]!, us.s, ws.s);
+      if (byInt !== null) return byInt;
+      if ((a.lo < 0n && xs.s.lo < 0n) || (b.lo < 0n && ys.s.lo < 0n)) return null;
+      return this.relCompare(p[1]!, u, w, at);
     }
     if (p[0] !== "icmp") return null;
     const t = this.type(ops[0]!);
@@ -696,8 +715,15 @@ export class Ranges {
     if (pred.startsWith("s")) {
       const x = this.at(a, at)!;
       const y = this.at(b, at)!;
-      if (!(x.s.lo >= 0n && y.s.lo >= 0n)) return [];
-      if (t === "ix" && !(x.u.hi < P31 && y.u.hi < P31)) return [];
+      if (t === "ix" && !(x.s.lo >= 0n && y.s.lo >= 0n && x.u.hi < P31 && y.u.hi < P31)) return [];
+      // R26: a signed test reads as the unsigned one where its smaller side isn't negative: `a < b` (or `<=`) with `a >= 0`
+      // puts `b` at or above `a`, so not negative either, and two values that aren't negative compare alike either way.
+      const small = pred === "slt" || pred === "sle" ? x : y;
+      // the injected `r26-rel-any` bug: neither side's sign asked
+      const ok = r26Off("range")
+        ? x.s.lo >= 0n && y.s.lo >= 0n
+        : small.s.lo >= 0n || rangeFaults.relAny === true;
+      if (!ok) return [];
     }
     switch (pred.replace(/^[su]/, "")) {
       case "lt":
@@ -806,6 +832,9 @@ export class Ranges {
     if (a === b) return c >= 0n;
     const yb = this.at(b, at);
     const blo = yb !== null ? yb.u.lo : 0n;
+    // R26: `b` is the same number as what its own definition widens or range-checks (`zext n`, `range.chk n`), so reaching
+    // that is reaching `b`: `b` is asked about where it's used, so its definition has run.
+    const targets = this.sameAs(b);
     const seen = new Map<number, bigint>();
     const stack: { v: number; w: bigint; d: number }[] = [{ v: a, w: 0n, d: 0 }];
     let steps = 0;
@@ -814,13 +843,31 @@ export class Ranges {
       const prev = seen.get(v);
       if (prev !== undefined && prev <= w) continue;
       seen.set(v, w);
-      if (v === b && w <= c + slack) return true;
+      if (targets.has(v) && w <= c + slack) return true;
       const r = this.at(v, at);
       if (r !== null && r.u.hi + w <= blo + c + slack) return true;
       if (d >= 6) continue;
       for (const e of this.outEdges(v, at)) stack.push({ v: e.to, w: w + e.c, d: d + 1 });
     }
     return false;
+  }
+
+  /** `b`, and the values it's the same number as by its own definition, read unsigned: a `zext` or `range` check's operand. */
+  private sameAs(b: number): Set<number> {
+    const out = new Set<number>([b]);
+    if (r26Off("range")) return out;
+    let v = b;
+    for (let d = 0; d < 4; d++) {
+      const ins = this.defs.get(v);
+      if (ins === undefined) break;
+      const base = opParts(ins.op)[0];
+      if (base !== "zext" && base !== "range") break;
+      const src = valueOps(ins)[0]!;
+      if (base === "zext" && this.type(v) === "ix" && this.type(src) === "i64") break;
+      out.add(src);
+      v = src;
+    }
+    return out;
   }
 
   /**

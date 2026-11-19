@@ -7,7 +7,7 @@ import { appendFileSync } from "node:fs";
 import { canonicalize, type Cfg, type Func, type Instr, type Module } from "../ir.ts";
 import { printFunc } from "../text.ts";
 import { verifyFuncIn, verifyModule } from "../verify.ts";
-import { Ranges } from "../range.ts";
+import { Ranges, setRangeFaults } from "../range.ts";
 import type { Loop } from "./loops.ts";
 import { cfgFunc, type CfgStats } from "./cfg.ts";
 import { checksFunc, type ChecksStats } from "./checks.ts";
@@ -25,12 +25,12 @@ import { keepLoads, markDeadAtO0 } from "./keep.ts";
 import { licmFunc, type LicmStats } from "./licm.ts";
 import { loopBoundsFunc, type LoopBoundsStats } from "./loopbounds.ts";
 import { readonlyFunctions } from "./memory.ts";
-import { unswitchFunc, type UnswitchStats } from "./unswitch.ts";
+import { unswitchFunc, type CopyRound, type UnswitchStats } from "./unswitch.ts";
 import { versionFunc, type VersionStats } from "./version.ts";
 import { simplifyFunc, type FoldFaults, type SimplifyStats } from "./simplify.ts";
 import { sroaFunc, type SroaStats } from "./sroa.ts";
 import { removeUnreached, type UnreachedStats } from "./unreached.ts";
-import { cloneModule } from "./util.ts";
+import { cloneModule, r26Off } from "./util.ts";
 
 export type { OptLevel, Remark } from "./inline.ts";
 
@@ -102,6 +102,10 @@ export const OPT_FAULTS = [
   "r21-shrinkwrap-callee", // shrink-wrapping takes a callee-saved register as free, so the quick way writes it unsaved (R21)
   "r23-range-lo", // a 32-bit signed range check whose upper bound is the type's own loses its lower bound too (R23)
   "r25-add-narrow", // a checked unsigned 64-bit add with one operand 64 bits wide loses its tests, as if both were 32 (R25)
+  "r26-rel-any", // range.ts reads a signed loop test as the unsigned one whatever either side's sign (R26)
+  "r26-fcmp-swap", // range.ts decides a float compare of two converted i32s from the integers the other way round (R26)
+  "r26-lb-const", // -O1's loopbounds takes `k < c` as false for any constant c, not only 0 (R26)
+  "r26-round-swap", // in -O2's second or later copying round, an unswitched loop's two copies take each other's way (R26)
 ] as const;
 
 export interface OptOptions {
@@ -252,6 +256,11 @@ export function optimizeModule(
     if (!(OPT_FAULTS as readonly string[]).includes(x))
       throw new Error(`no optimiser fault named ${x}`);
   }
+  // R26: range.ts's injected bugs, read by every Ranges this run makes (checks, LICM's first turn, versioning)
+  setRangeFaults({
+    relAny: faults.has("r26-rel-any"),
+    fcmpSwap: faults.has("r26-fcmp-swap"),
+  });
   const fold: FoldFaults = {
     wrongFold: faults.has("fold-wrong"),
     dropCheck: faults.has("fold-drop-check"),
@@ -390,7 +399,10 @@ export function optimizeModule(
     };
     // R7: -O1's cheap form of `checks` for one shape, a bounds check on the index its loop's own test bounds by the same
     // length (loopbounds.ts): no intervals and no fixpoint, so within -O1's compile-time limit. -O2's `checks` proves these.
-    const loopBoundsFaults = { inclusive: faults.has("loopbounds-inclusive") };
+    const loopBoundsFaults = {
+      inclusive: faults.has("loopbounds-inclusive"),
+      r26Const: faults.has("r26-lb-const"),
+    };
     const loopBounds = (f: Func): boolean => {
       if (off.has("loopbounds") || o.level !== 1) return false;
       const c = loopBoundsFunc(f, report.loopBounds, loopBoundsFaults);
@@ -488,16 +500,25 @@ export function optimizeModule(
           }
         }
         if (o.level >= 2 && (!off.has("unswitch") || !off.has("peel"))) {
-          const before = process.env.TMK_OPT_DEBUG === "1" ? printFunc(f) : "";
-          const copied = unswitchFunc(f, {
-            deadAtO0,
-            readonly,
-            stats: report.unswitch,
-            limits: UNSWITCH_O2,
-            unswitch: !off.has("unswitch"),
-            peel: !off.has("peel"),
-          });
-          if (copied) {
+          // R26: rounds, with the function's limit and peeled loops shared between them. A peeled first turn's loads are
+          // the loop's own only once value numbering has run, so a test on one (a string's buffer's null test) becomes an
+          // invariant branch to unswitch in the next round, and each copy's own loads a reason to peel it.
+          const round: CopyRound = { grown: 0, peeled: new Set<number>() };
+          for (let k = 0; k < (r26Off("rounds") ? 1 : COPY_ROUNDS); k++) {
+            const before = process.env.TMK_OPT_DEBUG === "1" ? printFunc(f) : "";
+            const copied = unswitchFunc(f, {
+              deadAtO0,
+              readonly,
+              stats: report.unswitch,
+              limits: UNSWITCH_O2,
+              unswitch: !off.has("unswitch"),
+              peel: !off.has("peel"),
+              round,
+              swapLater: k > 0 && faults.has("r26-round-swap"),
+            });
+            if (!copied) break;
+            // later rounds take only the loops a round peeled, and the copies unswitching them makes
+            round.later = new Set(round.peeled);
             try {
               verify("unswitch", f);
             } catch (e) {
@@ -546,6 +567,9 @@ function markInvariantLoads(m: Module): void {
         if (p[0] === "load" && p.length === 3 && p[2] === "na") ins.op = `load.${p[1]}.inv`;
       }
 }
+
+/** R26: how many times -O2 copies loops in one function, value numbering between (unswitch.ts's `CopyRound`). */
+const COPY_ROUNDS = 3;
 
 /** How big a loop -O2 copies, and how much copies may add to one function (D73, measured in M5's phase B record). */
 const UNSWITCH_O2 = { loopCost: 160, peelCost: 64, funcGrowth: 640 };

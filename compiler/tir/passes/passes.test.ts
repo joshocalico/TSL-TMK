@@ -700,6 +700,17 @@ test("licm: an invariant check in the header moves out only with nothing before 
 });
 
 test("unswitching: a loop branching on an invariant test becomes one loop each way", () => {
+  const text0 = LOOP(`%8 = load.i32.na %0
+  %9 = iconst.i32 1
+  %11 = icmp.eq.i32 %8, %9
+  brif %11, bb4, bb5
+bb4:
+  %12 = add.i32 %5, %2
+  br bb6(%12)
+bb5:
+  %13 = sub.i32 %5, %2
+  br bb6(%13)
+bb6(%10: i32):`);
   const { text } = opt(
     LOOP(`%8 = load.i32.na %0
   %9 = iconst.i32 1
@@ -715,8 +726,23 @@ bb6(%10: i32):`).replace("  %8 = load", "  %8 = load"),
     2,
   );
   const f = fn(text, "f");
-  assert.equal(count(f, /icmp\.slt/), 2, f);
+  // R26: the load can fault, so the first turn is peeled (its test and load in front); value numbering makes the loop's test
+  // the first turn's, invariant, and the next round unswitches it: the peeled turn's loop test and one loop each way, none
+  // of them testing it again
+  assert.equal(count(f, /icmp\.slt/), 3, f);
   assert.equal(count(f, /icmp\.eq/), 1, f);
+  assert.equal(count(f, /brif %7,/), 2, f);
+  // in one round, as before R26: peeled, the loop still branching on it
+  const was = process.env.TMK_R26_OFF;
+  process.env.TMK_R26_OFF = "rounds";
+  try {
+    const g = fn(opt(text0, 2).text, "f");
+    assert.equal(count(g, /icmp\.slt/), 2, g);
+    assert.equal(count(g, /icmp\.eq/), 1, g);
+  } finally {
+    if (was === undefined) delete process.env.TMK_R26_OFF;
+    else process.env.TMK_R26_OFF = was;
+  }
   // -O1 doesn't copy loops.
   const o1 = fn(opt(text, 1).text, "f");
   void o1;
@@ -1202,4 +1228,101 @@ test("version: the guard is the loop's bound against the room left; the injected
   const ok = fn(opt(src).text, "f");
   const bug = fn(optFaults(src, 2, ["version-off-by-one"]), "f");
   assert.equal(count(bug, /add\.ix/) - count(ok, /add\.ix/), 2, `${ok}\n${bug}`);
+});
+
+// --- R26 (M5's R26 record): scans' checks and loads, at -O1 and -O2
+
+function r26Off<T>(part: string, run: () => T): T {
+  const was = process.env.TMK_R26_OFF;
+  process.env.TMK_R26_OFF = part;
+  try {
+    return run();
+  } finally {
+    if (was === undefined) delete process.env.TMK_R26_OFF;
+    else process.env.TMK_R26_OFF = was;
+  }
+}
+
+const R26_CHECK = (check: string): string =>
+  LOOP(`${check}
+  brif %11, bb4, bb5
+bb4:
+  trap t2
+bb5:
+  %10 = add.i32 %5, %4`);
+
+test("R26: a signed loop test whose smaller side isn't negative proves a check against the widened length", () => {
+  // `i < n` with n a parameter, which may be negative: i, from 0 and below n, isn't, so neither is n
+  const src = R26_CHECK(`%8 = zext.ix %4
+  %9 = zext.ix %1
+  %11 = icmp.uge.ix %8, %9`);
+  const on = fn(opt(src, 2, ["conds", "version"]).text, "f");
+  assert.doesNotMatch(on, /icmp\.uge\.ix/, on);
+  const off = r26Off("range", () => fn(opt(src, 2, ["conds", "version"]).text, "f"));
+  assert.match(off, /icmp\.uge\.ix/, off);
+  // `i <= n`: the last turn's i is n, and the check fires there
+  const le = src.replace("icmp.slt.i32 %4, %1", "icmp.sle.i32 %4, %1");
+  assert.match(fn(opt(le, 2, ["conds", "version"]).text, "f"), /icmp\.uge\.ix/);
+});
+
+test("R26: charCodeAt's float test of an index against the length, both converted i32s, is decided where they're known", () => {
+  const src = R26_CHECK(`%8 = sitofp.f64 %4
+  %9 = ftrunc.f64 %8
+  %12 = sitofp.f64 %1
+  %11 = fcmp.ge.f64 %9, %12`);
+  const on = fn(opt(src, 2, ["conds", "version"]).text, "f");
+  assert.doesNotMatch(on, /fcmp/, on);
+  assert.match(
+    r26Off("range", () => fn(opt(src, 2, ["conds", "version"]).text, "f")),
+    /fcmp/,
+  );
+  // against n + 1 (wrapping, so maybe below i), nothing is known
+  const plus = src.replace(
+    "%12 = sitofp.f64 %1",
+    "%13 = iconst.i32 1\n  %14 = add.i32 %1, %13\n  %12 = sitofp.f64 %14",
+  );
+  assert.match(fn(opt(plus, 2, ["conds", "version"]).text, "f"), /fcmp/);
+});
+
+test("R26: -O1's loopbounds takes `k < 0` as false for a signed test's index that's never negative", () => {
+  const src = R26_CHECK(`%8 = iconst.i32 0
+  %11 = icmp.slt.i32 %4, %8`);
+  const on = fn(opt(src, 1).text, "f");
+  assert.equal((on.match(/icmp\.slt/g) ?? []).length, 1, on);
+  const off = r26Off("range", () => fn(opt(src, 1).text, "f"));
+  assert.equal((off.match(/icmp\.slt/g) ?? []).length, 2, off);
+  // an index from -1 can be negative
+  const neg = src.replace(
+    "%3 = iconst.i32 0\n  br bb1(%3, %3)",
+    "%3 = iconst.i32 0\n  %7 = iconst.i32 -1\n  br bb1(%7, %3)",
+  );
+  assert.equal((fn(opt(neg, 1).text, "f").match(/icmp\.slt/g) ?? []).length, 2);
+});
+
+test("R26: a call after an inlined one in a loop's block is still a call in the loop (-O1's small leaf)", () => {
+  const src = `func @g(%0: i32) -> (i32) inline {
+bb0:
+  %1 = iconst.i32 3
+  %2 = mul.i32 %0, %1
+  ret %2
+}
+func @h(%0: i32) -> (i32) {
+bb0:
+  %1 = iconst.i32 7
+  %2 = mul.i32 %0, %1
+  %3 = iconst.i32 5
+  %4 = add.i32 %2, %3
+  %5 = iconst.i32 2
+  %6 = sub.i32 %4, %5
+  %7 = xor.i32 %6, %0
+  %8 = mul.i32 %7, %1
+  %9 = xor.i32 %8, %2
+  ret %9
+}
+${LOOP(`%8 = call @g %4
+  %9 = call @h %8
+  %10 = add.i32 %5, %9`)}`;
+  const on = fn(opt(src, 1).text, "f");
+  assert.doesNotMatch(on, /call @h/, on);
+  assert.match(fn(r26Off("inline", () => opt(src, 1)).text, "f"), /call @h/);
 });
