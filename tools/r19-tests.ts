@@ -67,8 +67,9 @@ export const R19_FAULTS: {
     what: "a map table's growth losing an entry: the entry its move puts first in the new table left out of every chain there",
     patch: {
       file: MAP,
-      from: "        this.link(r, hashOf(k));",
-      to: "        if (r !== 0) this.link(r, hashOf(k));",
+      // R29: link stores the key too now
+      from: "        this.link(r, k, hashOf(k));",
+      to: "        if (r !== 0) this.link(r, k, hashOf(k));",
     },
     by: "dual",
   },

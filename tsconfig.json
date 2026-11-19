@@ -7,6 +7,7 @@
     "corpus/trap/*.ts",
     "corpus/mem/*.ts",
     "corpus/r27/*.ts",
+    "corpus/r29/*.ts",
     "corpus/std/**/*.ts",
     "bench/std/*.ts",
     "corpus/spec/*.ts",

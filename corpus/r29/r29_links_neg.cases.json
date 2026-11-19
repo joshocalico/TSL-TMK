@@ -1,0 +1,10 @@
+[
+  { "fn": "badStore", "args": [5], "trap": 2 },
+  { "fn": "badShrink", "args": [9, 0] },
+  { "fn": "badShrink", "args": [9, 1], "trap": 2 },
+  { "fn": "badSwap", "args": [3], "trap": 2 },
+  { "fn": "outside", "args": [11, 0] },
+  { "fn": "outside", "args": [11, 1], "trap": 2 },
+  { "fn": "reent", "args": [13, 0] },
+  { "fn": "reent", "args": [13, 1], "trap": 2 }
+]

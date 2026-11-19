@@ -31,6 +31,17 @@ export interface Instr {
    * field's block. Outside the canonical text.
    */
   obj?: true;
+  /**
+   * R29 (D79): lowering's note on a call tslc's table-links proof (compiler/host/links.ts) proved in bounds: the callee's
+   * leading bounds check (its compare noted `chk`) can't fire here, so the inliner takes it out of this call's copy. Outside
+   * the canonical text, as `inv` is, so -O0 is what it was.
+   */
+  inb?: true;
+  /**
+   * R29 (D79): lowering's note on the compare of a method's leading bounds check, `if (i >= this.len) trap(Trap.Bounds)`, of
+   * its parameter `chk`: what a call noted `inb` has taken out. Outside the canonical text.
+   */
+  chk?: number;
 }
 
 export interface Edge {
@@ -433,6 +444,8 @@ export function canonicalize(m: Module): Module {
         ...(ins.inv === true ? { inv: true as const } : {}),
         ...(ins.sep === true ? { sep: true as const } : {}),
         ...(ins.obj === true ? { obj: true as const } : {}),
+        ...(ins.inb === true ? { inb: true as const } : {}),
+        ...(ins.chk !== undefined ? { chk: ins.chk } : {}),
       }));
       const tm = b.term;
       let term: Term;

@@ -393,6 +393,17 @@ async function faultSteps(
       },
     },
     {
+      // R29: the inliner's proved-in-bounds copies (inline.ts), on R29's TSL programs natively at -O1 and -O2, against V8
+      // (seconds, so first: R29's inliner bug is caught here, and so may an earlier bug be, which changes only which step
+      // names it).
+      name: "R29's programs natively at -O1 and -O2 (corpus/r29, tools/r29-tests.ts)",
+      run: async () => {
+        const R29 = await import("./r29-tests.ts");
+        const n = await R29.r29Native(accel, jobs, [1, 2]);
+        return n.failures.length === 0 && n.cases > 0;
+      },
+    },
+    {
       // R27: fresh-allocation separation's write summaries and blocks (memory.ts), on R27's TSL programs natively at -O1
       // and -O2, against V8 (seconds, so first: R27's bugs are caught here, and so may an earlier bug be, which changes only
       // which step names it).

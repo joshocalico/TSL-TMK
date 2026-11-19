@@ -31,6 +31,8 @@ import { JsArray } from "./ex-jsrt-array.ts";
 const TOMB: u32 = 0;
 const END: u32 = 1;
 const MOVED: u32 = 0x80000000;
+/** (s - 2) >>> 0 below this: s is a link, 2 to 2^31 - 1. TOMB and END wrap to the top, and so would MOVED | p (R29). */
+const LINKS: u32 = 0x7ffffffe;
 const MIN_BUCKETS: u32 = 4;
 /** Old positions moved in each insert or delete while a move is on: the new table has room for the move to finish first. */
 const STEP: u32 = 4;
@@ -207,7 +209,11 @@ class Tables {
 
 const tables = new Tables(noSteps, noSteps);
 
-/** Where k is in a table, at or above `low`, or -1 as a u32. Positions fall along a chain, so the first below `low` ends it. */
+/**
+ * Where k is in a table, at or above `low`, or -1 as a u32. Positions fall along a chain, so the first below `low` ends it.
+ * Inlined (R29): with no bounds checks left in its steps it's small, and a lookup's call to it cost its caller a frame.
+ */
+/** @tsl.inline */
 function seek<K>(
   heads: JsArray<u32>,
   chain: JsArray<u32>,
@@ -219,12 +225,15 @@ function seek<K>(
   const b = heads.length;
   if (b === 0) return NONE;
   let s: u32 = heads.get((h & wrapU32(b - 1)) >>> 0);
-  while (s > END) {
-    const i: u32 = (s - 2) >>> 0;
+  // R29 (D79): i below LINKS is a link's position, which JsMap's claim proves below the keys' and the chain's lengths, so
+  // neither read below has a bounds check left at -O1 and -O2.
+  let i: u32 = (s - 2) >>> 0;
+  while (i < LINKS) {
     if (i < low) return NONE;
     // SAFETY: comparing keys is a question about values: an integer's, identity, or the key's own sameKey.
     if (keySame(keys.get(i), k)) return i;
     s = chain.get(i);
+    i = (s - 2) >>> 0;
   }
   return NONE;
 }
@@ -245,8 +254,8 @@ function unlink<K>(
   const at: u32 = (h & wrapU32(b - 1)) >>> 0;
   let s: u32 = heads.get(at);
   let prev: u32 = NONE;
-  while (s > END) {
-    const i: u32 = (s - 2) >>> 0;
+  let i: u32 = (s - 2) >>> 0; // as in seek (R29)
+  while (i < LINKS) {
     if (i < low) return NONE;
     const next: u32 = chain.get(i);
     // SAFETY: as in seek.
@@ -258,6 +267,7 @@ function unlink<K>(
     }
     prev = i;
     s = next;
+    i = (s - 2) >>> 0;
   }
   return NONE;
 }
@@ -273,6 +283,12 @@ function unlink<K>(
  * Both tables' arrays are held in place (R3): the map's own, and the old table's, which a move empties. Starting a move
  * gives the table's buffers to the old table's arrays (`adopt`) and makes the table's again; ending it gives the old
  * buffers back, where the map `freesTables`, and otherwise keeps them, as before R3, in arrays nothing else reads.
+ *
+ * R29 (D79): every link either table's `heads` and `chain` hold names a position below that table's `keys` and `chain`
+ * lengths, which tslc proves over every write to them (compiler/host/links.ts), so a lookup's chain steps have no bounds
+ * checks at -O1 and -O2. A table's `chain` is as long as its `heads` (the positions it has room for), not as its `keys`.
+ * @tsl.links heads chain < keys chain
+ * @tsl.links oheads ochain < okeys ochain
  */
 export class JsMap<K, V> {
   private keys: JsArray<K>;
@@ -321,6 +337,7 @@ export class JsMap<K, V> {
     return this.count;
   }
 
+  /** @tsl.inline */
   private find(k: K, h: u32): u32 {
     return seek(this.heads, this.chain, this.keys, k, h, 0);
   }
@@ -390,17 +407,18 @@ export class JsMap<K, V> {
     this.keys.push(k);
     if (this.withVals) this.vals.push(v);
     const s: u32 = heads.get(b);
-    this.chain.push(s > END ? s : END);
+    this.chain.set(at, s > END ? s : END);
     heads.set(b, (at + 2) >>> 0);
     this.count = (this.count + 1) >>> 0;
   }
 
   /**
-   * An array emptied by `adopt` or `trim` made `want` slots again, `live` of them in use, zero (R2). Where a counted object
-   * holds the map (R11), making it takes the counted heap's freeing steps first, and if @tsl/std has nothing left,
-   * everything the counted heap has waiting is freed, its maps' tables with it, before it's asked once more.
+   * Room for `want` slots in an array emptied by `adopt` or `trim` (R2); `grow` gives each its length once all four have
+   * room (R29). Where a counted object holds the map (R11), making it takes the counted heap's freeing steps first, and if
+   * @tsl/std has nothing left, everything the counted heap has waiting is freed, its maps' tables with it, before it's
+   * asked once more.
    */
-  private resize<T>(a: JsArray<T>, want: u32, live: u32): void {
+  private reserveFor<T>(a: JsArray<T>, want: u32): void {
     if (this.counted && a.capacity < toUsize(want)) {
       const steps = tables.steps;
       steps();
@@ -410,7 +428,6 @@ export class JsMap<K, V> {
         a.reserve(want);
       }
     } else a.reserve(want);
-    a.setLength(live);
   }
 
   /**
@@ -465,17 +482,25 @@ export class JsMap<K, V> {
     if (forMove > need) need = forMove;
     let want: u32 = MIN_BUCKETS;
     while (want < need) want = (want << 1) >>> 0;
-    this.resize(this.okeys, want, live);
-    this.resize(this.ovals, this.withVals ? want : 0, this.withVals ? live : 0);
-    this.resize(this.ochain, want, live);
-    this.resize(this.oheads, want, want);
-    // everything allocated: from here nothing can fail
+    this.reserveFor(this.okeys, want);
+    this.reserveFor(this.ovals, this.withVals ? want : 0);
+    this.reserveFor(this.ochain, want);
+    this.reserveFor(this.oheads, want);
+    // everything allocated: from here nothing can fail. The old table's arrays are empty, since the last move ended; their
+    // lengths, the heads' and chain's first, at 0 so tslc's links proof sees no link in them (R29, D79), then what's live
+    // and the room for positions, zero
+    this.oheads.setLength(0);
+    this.ochain.setLength(0);
+    this.okeys.setLength(live);
+    this.ovals.setLength(this.withVals ? live : 0);
+    this.ochain.setLength(want);
+    this.oheads.setLength(want);
     this.keys.swap(this.okeys);
     this.vals.swap(this.ovals);
     this.chain.swap(this.ochain);
     this.heads.swap(this.oheads);
     if (used > 0) this.startMove(used, live);
-    else this.oldGone();
+    else this.oldGone(null);
   }
 
   /** A generation: one reused where the map `freesTables` and one is free (R3), a new one otherwise. */
@@ -507,24 +532,23 @@ export class JsMap<K, V> {
   }
 
   /**
-   * The old table is going: where its move put each position, in its chain, is taken over by the generation that reads
-   * it, if one does (R3). Only the newest generation can: one is made at a move's start, or during it by `genNow`, and
-   * nothing makes another until the move ends or the map clears.
+   * The old table's buffers, given back where the map `freesTables` and kept otherwise: its move has ended (R3). First,
+   * where its move put each position, in its chain, is taken over by the generation `g` that reads it, if one does (R3).
+   * Only the newest generation can: one is made at a move's start, or during it by `genNow`, and nothing makes another
+   * until the move ends or the map clears. (R29: one method, so the old chain left empty and the rest of its table gone
+   * are one step to tslc's links proof.)
    */
-  private keepRanks(g: JsMapGen | null): void {
-    if (g === null || !g.live) return;
-    let r = g.keep;
-    if (r === null) {
-      r = new JsArray(u32, 0, this.giveBack, true);
-      if (this.tables) g.keep = r;
+  private oldGone(g: JsMapGen | null): void {
+    if (g !== null && g.live) {
+      let r = g.keep;
+      if (r === null) {
+        r = new JsArray(u32, 0, this.giveBack, true);
+        if (this.tables) g.keep = r;
+      }
+      r.adopt(this.ochain);
+      g.ranks = r;
+      g.live = false;
     }
-    r.adopt(this.ochain);
-    g.ranks = r;
-    g.live = false;
-  }
-
-  /** The old table's buffers, given back where the map `freesTables` and kept otherwise: its move has ended (R3). */
-  private oldGone(): void {
     if (this.tables) {
       this.okeys.trim();
       this.ovals.trim();
@@ -551,14 +575,13 @@ export class JsMap<K, V> {
       const r: u32 = this.to;
       if (ochain.get(mv) !== TOMB) {
         const k = okeys.get(mv);
-        this.keys.set(r, k);
         if (this.withVals) this.vals.set(r, this.ovals.get(mv));
         // freesTables (R2): the old table no longer holds what the new one does, as the direct route's clears it
         if (this.tables) {
           okeys.zero(mv);
           if (this.withVals) this.ovals.zero(mv);
         }
-        this.link(r, hashOf(k));
+        this.link(r, k, hashOf(k));
         this.to = (r + 1) >>> 0;
       }
       ochain.set(mv, (MOVED | r) >>> 0);
@@ -566,15 +589,16 @@ export class JsMap<K, V> {
       left = (left - 1) >>> 0;
     }
     this.mv = mv;
-    if (mv >= end) {
-      // a generation that reads where the move put each position keeps that, and the old table goes (R3)
-      this.keepRanks(this.gen);
-      this.oldGone();
-    }
+    // a generation that reads where the move put each position keeps that, and the old table goes (R3)
+    if (mv >= end) this.oldGone(this.gen);
   }
 
-  /** A moved entry into its chain, below what's been inserted since the move started, so positions still fall. */
-  private link(r: u32, h: u32): void {
+  /**
+   * A moved entry's key into position r, and r into its chain, below what's been inserted since the move started, so
+   * positions still fall. The key is stored here, before any link to r (R29: so r is known below the keys' length).
+   */
+  private link(r: u32, k: K, h: u32): void {
+    this.keys.set(r, k);
     const heads = this.heads;
     const chain = this.chain;
     const b: u32 = (h & wrapU32(heads.length - 1)) >>> 0;
@@ -745,11 +769,8 @@ export class JsMap<K, V> {
       g.next = fresh;
       this.gen = fresh;
     }
-    if (this.moving) {
-      // a move on: a generation that read the old chain keeps where the move put each position (R3)
-      this.keepRanks(g);
-      this.oldGone();
-    }
+    // a move on: a generation that read the old chain keeps where the move put each position (R3)
+    if (this.moving) this.oldGone(g);
     if (this.tables) {
       // freesTables (R2): emptied in place, its buffers back
       this.keys.trim();

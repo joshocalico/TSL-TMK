@@ -112,6 +112,7 @@ export const OPT_FAULTS = [
   "r28-tag-keep-wrong", // `ref.addr (or x, tag)` folded to the tag's pointer, not x's: the address dropped (R28)
   "r28-shrink-store", // a callee only the no-growth rule lets in is copied without its first store (R28)
   "r28-version-again", // -O2's second versioning pass lets the fast copy run one turn past what its checks allow (R28)
+  "r29-inb-any", // the inliner takes a callee's leading bounds check out of every call, not only those tslc proved in bounds (R29)
 ] as const;
 
 export interface OptOptions {
@@ -288,6 +289,7 @@ export function optimizeModule(
     dropRcStore: faults.has("inline-drop-rc-store"),
     allocaPure: faults.has("inline-alloca-pure-block"),
     shrinkStore: faults.has("r28-shrink-store"),
+    inbAny: faults.has("r29-inb-any"),
   };
   const dceFaults = {
     dropEffect: faults.has("dce-drop-store"),

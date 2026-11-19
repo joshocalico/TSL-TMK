@@ -843,6 +843,8 @@ export class FnLower {
         const ops: Operand[] = [{ t: "sym", name: te.inst.tirName }];
         for (const a of args) ops.push({ t: "v", id: a });
         const rets = this.emit("call", ops, leaves(te.inst.ret));
+        // R29 (D79): a call the table-links proof proved in bounds, noted outside the canonical text (links.ts)
+        if (te.inb === true) this.cur.instrs[this.cur.instrs.length - 1]!.inb = true;
         if (te.inst.ret.k === "never") {
           this.setTerm({ k: "unreachable" });
           this.dead();
@@ -1480,11 +1482,14 @@ export class FnLower {
     if (ty.k === "float") return this.op1(`fcmp.${te.op}.${ty.name}`, ops, "i32");
     const t = leaves(ty)[0] ?? "i32";
     if (te.op === "eq" || te.op === "ne") return this.op1(`icmp.${te.op}.${t}`, ops, "i32");
-    return this.op1(
+    const r = this.op1(
       `icmp.${isSigned(ty) ? "s" : "u"}${te.op === "le" ? "le" : te.op === "lt" ? "lt" : te.op === "gt" ? "gt" : "ge"}.${t}`,
       ops,
       "i32",
     );
+    // R29 (D79): a method's leading bounds check, noted outside the canonical text (links.ts)
+    if (te.chk !== undefined) this.cur.instrs[this.cur.instrs.length - 1]!.chk = te.chk;
+    return r;
   }
 
   logic(te: Extract<TE, { k: "logic" }>): number {

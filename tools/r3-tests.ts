@@ -92,8 +92,9 @@ export const R3_FAULTS: R2Fault[] = [
     where: "library",
     patch: {
       file: "ex-jsrt-map.ts",
-      from: "    if (g === null || !g.live) return;",
-      to: "    if (g === null || g.live) return;",
+      // R29: keepRanks is the start of oldGone now
+      from: "    if (g !== null && g.live) {",
+      to: "    if (g !== null && !g.live) {",
     },
     dirs: ["corpus/lower/rc-tsl"],
   },

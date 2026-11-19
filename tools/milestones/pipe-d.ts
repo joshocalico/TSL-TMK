@@ -2892,6 +2892,41 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     });
   });
 
+  // 77. R29: the table-links proof, where it applies and where it must not.
+  M.unit("77", async () => {
+    const R29 = timedModule("r29", await import("../r29-tests.ts"));
+    const failures: string[] = [];
+    const sh = await R29.r29Shapes();
+    failures.push(...sh.failures);
+    const n = await R29.r29Native(accel, jobs);
+    failures.push(...n.failures);
+    if (n.cases === 0) failures.push("no case of corpus/r29 ran");
+    report({
+      box: "77. R29 (3.5, 4.3, D44, D73, D79): the table-links proof: tslc proves a class's `@tsl.links` claim, that every link its link fields' arrays hold names a position below its bound fields' lengths, over every write to them (a stored link 0, 1, 2^31 up, one read from the group, or a position plus 2 known below every bound; a bound array shorter only where the links are gone; a swap of whole tables; the fields named only in the class's own code; calls that may reach its methods with the claim holding, and nothing known kept across them), and the inliner takes a JsArray read's leading bounds check out of a call it proved in bounds: r29_links.ts's Table and r29_links_neg.ts's Reent proved, BadStore (a link past its key), BadShrink (keys cut with links left), BadSwap (half a table swapped) and Outside (keys cut from outside) refused, r29_links_neg.ts the same build with it on and off at -O1 and -O2, so every check stays, Table's lookups and @tsl/jsrt's JsMap's seek in a lowered map (rc and leak) with no bounds check left at -O2; corpus/r29 natively at -O0, -O1 and -O2 against V8 and JSC (tools/r29-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${sh.rows.join("; ")}; natively ${n.agreed}/${n.cases} (${n.rows.join(", ")})${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 78. R29's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("78", async () => {
+    const R29 = timedModule("r29", await import("../r29-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R29.R29_FAULTS) {
+      const x = await R29.r29Fault(f, accel, jobs);
+      rows.push(`${f.name}: ${caughtText(x)}`);
+      if (x.caught === 0) failures.push(`${f.name} wasn't caught: ${x.first}`);
+    }
+    report({
+      box: `78. R29: each of ${R29.R29_FAULTS.length} bugs is caught by a wrong answer or a trap, with how many cases caught it: tslc's rule letting a stored link past a bound through, missing a bound array getting shorter or half a table swapped, and missing a claimed field named outside its class, and the inliner taking every JsArray read's leading check out, not only those proved in bounds, each over corpus/r29 natively at -O1 and -O2 against V8 (tools/r29-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
   M.vms(
     "8",
     "8. No QEMU process of this run is left, and the owner's UTM and QEMU processes were only observed",

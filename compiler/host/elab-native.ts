@@ -1483,6 +1483,16 @@ export class NativeElaborator extends Elaborator {
         ? { firstIn: (this.layingOut ?? this.curInst?.owner)! }
         : {}),
     };
+    // R29 (D79): `@tsl.links heads chain < keys chain`, a claim links.ts proves or refuses: the fields before `<` hold
+    // links, each below the length of every field after it.
+    for (const m of this.docOf(decl).matchAll(
+      /@tsl\.links[ \t]+([\w \t]+?)[ \t]*<[ \t]*([\w \t]+)/g,
+    ))
+      (c.links ??= []).push({
+        l: m[1]!.trim().split(/\s+/),
+        b: m[2]!.trim().split(/\s+/),
+        text: m[0].trim(),
+      });
     this.classInsts.set(key, c);
     if (tyArgs.length > 0) {
       const n = (this.instanceCounts.get(decl as unknown as Fn) ?? 0) + 1;

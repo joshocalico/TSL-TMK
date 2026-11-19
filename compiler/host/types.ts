@@ -288,6 +288,10 @@ export interface ClassInst {
   // them keeps in its first field. Only a method call reaches through it: a compare of the id per arm, a direct call in
   // each, and a trap (code 4) for an id that isn't one of them.
   iface?: { set: ClassInst[]; ids: number[] };
+  // R29 (D79): the class's `@tsl.links` claims, each a group of its fields: `l` hold links (a link to position p is p + 2,
+  // and 0, 1 and anything from 2^31 up aren't links), `b` are the arrays each link's position is below the length of
+  // (links.ts proves it, or refuses the class).
+  links?: { l: string[]; b: string[]; text: string }[];
 }
 
 /** The real size of an object of a class with a tail of n elements (D69): the fixed part, then the tail, aligned. */
@@ -440,14 +444,17 @@ export type TEK =
   | { k: "bitnot"; a: TE }
   | { k: "neg"; a: TE; loc: string }
   | { k: "not"; a: TE }
-  | { k: "cmp"; op: "eq" | "ne" | "lt" | "le" | "gt" | "ge"; a: TE; b: TE }
+  // chk (R29, D79): the test of a method's leading bounds check, `if (i >= this.len) trap(Trap.Bounds)`, of its parameter
+  // `chk` (links.ts): lowering notes the compare, and a call tslc proved in bounds (`call.inb`) has it taken out when inlined
+  | { k: "cmp"; op: "eq" | "ne" | "lt" | "le" | "gt" | "ge"; a: TE; b: TE; chk?: number }
   | { k: "logic"; op: "and" | "or"; a: TE; b: TE }
   | { k: "cond"; c: TE; a: TE; b: TE }
   | { k: "setvar"; v: Var; val: TE; rc?: "assign" | "raw" } // rc: down-rc.ts's, for a counted local
   | { k: "setglobal"; g: GlobalDef; val: TE }
   | { k: "setindex"; arr: TE; idx: TE; val: TE; loc: string }
   | { k: "seq"; items: TE[]; result: TE }
-  | { k: "call"; inst: FuncInst; args: TE[]; argAts?: string[] }
+  // inb (R29, D79): tslc's table-links proof (links.ts) proved the callee's leading bounds check can't fire here
+  | { k: "call"; inst: FuncInst; args: TE[]; argAts?: string[]; inb?: true }
   | { k: "callind"; fn: TE; args: TE[] }
   | { k: "builtin"; name: string; args: TE[]; loc: string; text?: string; info?: BuiltinInfo }
   // Native TSL (SPEC 3.4, 3.5): class fields, stack `new`, closures, and a receiver's generation check.

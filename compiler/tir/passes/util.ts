@@ -213,6 +213,8 @@ export function cloneInstr(ins: Instr): Instr {
   if (ins.inv === true) c.inv = true;
   if (ins.sep === true) c.sep = true;
   if (ins.obj === true) c.obj = true;
+  if (ins.inb === true) c.inb = true;
+  if (ins.chk !== undefined) c.chk = ins.chk;
   return c;
 }
 

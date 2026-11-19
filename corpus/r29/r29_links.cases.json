@@ -1,0 +1,10 @@
+[
+  { "fn": "build", "args": [0, 7] },
+  { "fn": "build", "args": [5, 7] },
+  { "fn": "build", "args": [150, 2654435761] },
+  { "fn": "build", "args": [200, 3] },
+  { "fn": "longChains", "args": [40] },
+  { "fn": "longChains", "args": [200] },
+  { "fn": "fill", "args": [0] },
+  { "fn": "fill", "args": [25] }
+]

@@ -62,6 +62,7 @@ export interface InlineFaults {
   allocaPure?: boolean; // R20: a block with a frame slot taken as free of effects whatever comes after the slot
   dropAnyStore?: boolean; // R28: the bug above's means, set for that one copy
   shrinkStore?: boolean; // R28: a callee only the no-growth rule lets in copied without its first store
+  inbAny?: boolean; // R29: a callee's leading bounds check taken out of every call's copy, not only a call proved in bounds
 }
 
 export interface InlineContext {
@@ -508,6 +509,30 @@ export function inlineAt(
   };
   const entryAllocas: Instr[] = [];
   const blocks: Block[] = [];
+  // R29 (D79): in a call proved in bounds, the length load the callee's leading check compared with. The receiver is one of
+  // its object's arrays held in place (links.ts), so the load can't fault, and with the check gone nothing needs it run.
+  const lenOfCheck = new Set<Instr>();
+  if (call.inb === true) {
+    const gdefs = new Map<number, Instr>();
+    for (const gb of g.blocks)
+      for (const ins of gb.instrs) for (const r of ins.res) gdefs.set(r, ins);
+    const fromRecv = (v: number): boolean => {
+      for (let cur = v, guard = 0; guard < 8; guard++) {
+        if (cur === g.params[0]) return true;
+        const d = gdefs.get(cur);
+        if (d === undefined || (d.op !== "gep" && !d.op.startsWith("bitcast."))) return false;
+        cur = valueOps(d)[0]!;
+      }
+      return false;
+    };
+    for (const gb of g.blocks)
+      for (const ins of gb.instrs) {
+        if (ins.chk === undefined || valueOps(ins)[0] !== g.params[ins.chk]) continue;
+        const len = gdefs.get(valueOps(ins)[1]!);
+        if (len !== undefined && len.op.startsWith("load.") && fromRecv(valueOps(len)[0]!))
+          lenOfCheck.add(len);
+      }
+  }
   const chains = (ctx.chain ??= new WeakMap());
   const outer = [...(chains.get(call) ?? []), g.name];
   let droppedRcStore = false;
@@ -523,7 +548,7 @@ export function inlineAt(
       if (c.op === "call") chains.set(c, outer);
       for (const o of c.ops) if (o.t === "v") o.id = val(o.id);
       c.res = c.res.map(val);
-      if (ctx.deadAtO0.has(ins)) ctx.deadAtO0.add(c);
+      if (ctx.deadAtO0.has(ins) || lenOfCheck.has(ins)) ctx.deadAtO0.add(c);
       if (
         ctx.faults.dropCheck === true &&
         effectOf(c) === "check" &&
@@ -544,6 +569,19 @@ export function inlineAt(
       ) {
         droppedRcStore = true;
         continue;
+      }
+      // R29 (D79): a call tslc's table-links proof proved in bounds (`inb`, compiler/host/links.ts): the callee's leading
+      // bounds check, the compare of that parameter noted `chk`, can't fire in this copy, so its test is false. Only the
+      // compare of the callee's own parameter: a check something inlined into the callee brought isn't this call's.
+      if (
+        (call.inb === true || ctx.faults.inbAny === true) &&
+        ins.chk !== undefined &&
+        valueOps(ins)[0] === g.params[ins.chk] &&
+        c.res.length === 1
+      ) {
+        c.op = `iconst.${f.types[c.res[0]!]!}`;
+        c.ops = [{ t: "i", val: 0n }];
+        delete c.chk;
       }
       // R20: a partial copy's frame slots are the slow path's, which the plan checked nothing copied uses: left out
       if (c.op === "alloca") {

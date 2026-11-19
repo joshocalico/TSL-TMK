@@ -23,6 +23,7 @@ import { emitJsChecked } from "./jschecked.ts";
 import { lowerToTir } from "./lower.ts";
 import { placeRegion } from "./region.ts";
 import { markSeparatedFields } from "./separate.ts";
+import { markLinkedChecks } from "./links.ts";
 import { r13Off, r14Off, r6Off } from "./down-model.ts";
 import {
   isArchFile,
@@ -454,6 +455,7 @@ function checkNative(
       dropZeroCtorInits(typed);
       markInvariantFields(typed);
       markSeparatedFields(typed);
+      markLinkedChecks(typed);
     } else if (hasNew(typed) && mode === "strict" && !r12Off("strict")) {
       // R12: class printing in `strict`. What escapes its function goes where the direct route puts it, in the call arena
       // the module already has (`__alloc`), which the caller resets (D36): tslc's escape analysis puts it on the heap as
@@ -495,6 +497,7 @@ function checkNative(
       dropZeroCtorInits(typed);
       markInvariantFields(typed);
       markSeparatedFields(typed);
+      markLinkedChecks(typed);
     } else if (hasNew(typed) && mode === "rc") {
       // `rc` (R2): the expansion made the package strict TSL counting with @tsl/gc (D74), checked as any strict package
       // is, and a library's functions, @tsl/jsrt's, keep their own package's mode.
@@ -505,6 +508,7 @@ function checkNative(
       dropZeroCtorInits(typed);
       markInvariantFields(typed);
       markSeparatedFields(typed);
+      markLinkedChecks(typed);
     }
     return { diags: sink.sorted(), typed };
   }
@@ -515,6 +519,7 @@ function checkNative(
     dropZeroCtorInits(typed);
     markInvariantFields(typed);
     markSeparatedFields(typed);
+    markLinkedChecks(typed);
   }
   return { diags: sink.sorted(), typed: sink.list.length > 0 ? null : typed };
 }
