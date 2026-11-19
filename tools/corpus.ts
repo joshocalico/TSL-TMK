@@ -740,6 +740,8 @@ export async function runNative(
   memory?: "leak" | "manual" | "rc",
   rcTest?: { rc: Partial<RcOptionsLike>; harness: RcHarnessLike; suffix: string },
   onlyExc = false,
+  // R27: TSL proper programs from this directory alone, run as `kind`'s are (corpus/r27, as `mem`'s: against V8 and JSC)
+  dirOverride?: string,
 ): Promise<NativeSuiteResult> {
   reapOrphans();
   // `exc`: only the exceptions and classes corpus (D49, D50), lowered as `lower` is.
@@ -751,12 +753,16 @@ export async function runNative(
   const { buildTslImage, tslResults, buildDownImage, downResults, bulkFor } =
     await import("./native-exec.ts");
   // `memory`: TSL proper in packages with a memory mode, whose negative programs are under corpus/neg.
-  const dir = kind === "lower" ? "corpus/lower/pos" : `corpus/${kind}`;
+  const dir = dirOverride ?? (kind === "lower" ? "corpus/lower/pos" : `corpus/${kind}`);
   // `rc` (D74): the reference is the expansion on V8 and JSC, and the source as written on V8 has to agree with it on
   // every case not marked `rcOnly` (one that reads counts or steps, which plain JS doesn't have)
   const outDir = buildPath(
     "corpus/native",
-    memory !== undefined ? `${kind}-${memory}${rcTest?.suffix ?? ""}` : kind,
+    dirOverride !== undefined
+      ? `${kind}-${dirOverride.replace(/\W+/g, "_")}`
+      : memory !== undefined
+        ? `${kind}-${memory}${rcTest?.suffix ?? ""}`
+        : kind,
   );
   let files = onlyExc
     ? listPrograms(join(ROOT, "corpus/lower/exc"), filter)
@@ -769,7 +775,9 @@ export async function runNative(
         ...(memory === "rc" ? listPrograms(join(ROOT, "corpus/lower/rc"), filter) : []),
         // Exceptions and classes (D49, D50) need a memory mode: they're native and in every mode.
         ...(memory !== undefined ? listPrograms(join(ROOT, "corpus/lower/exc"), filter) : []),
-        ...(kind === "mem" ? listPrograms(join(ROOT, "corpus/spec"), filter) : []),
+        ...(kind === "mem" && dirOverride === undefined
+          ? listPrograms(join(ROOT, "corpus/spec"), filter)
+          : []),
       ].filter(
         (f) =>
           (kind !== "mem" && kind !== "memory" && kind !== "std" && kind !== "rc") ||

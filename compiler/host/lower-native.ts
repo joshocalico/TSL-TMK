@@ -457,6 +457,14 @@ export function lowerNativeBuiltin(fl: FnLower, te: TE): number[] {
           // optimiser, outside the canonical text (D73).
           if (te.inv === true && fl.cur === at)
             for (const ins of at.instrs.slice(from)) if (ins.op.startsWith("load.")) ins.inv = true;
+          // R27 (D77): an object's field's bytes, never a separated field's block; and a separated field's read, the
+          // address of such a block (separate.ts). Noted outside the canonical text, as above.
+          if (fl.cur === at)
+            for (const ins of at.instrs.slice(from))
+              if (ins.op.startsWith("load.")) {
+                ins.obj = true;
+                if (te.sep === true) ins.sep = true;
+              }
           if (f.checkedEnum) enumCheck(fl, vals[0]!, f.ty, te.loc);
           return vals;
         }
@@ -477,7 +485,12 @@ export function lowerNativeBuiltin(fl: FnLower, te: TE): number[] {
       const f = te.f;
       const addr = fieldAddr(fl, te.obj, f, te.check, te.loc, te.c);
       const vals = fl.expr(te.val);
+      const at = fl.cur;
+      const from = at.instrs.length;
       storeMem(fl, f.ty, addr, vals, f.be, f.size);
+      // R27 (D77): an object's field's bytes, never a separated field's block (separate.ts)
+      if (fl.cur === at)
+        for (const ins of at.instrs.slice(from)) if (ins.op.startsWith("store.")) ins.obj = true;
       return vals;
     }
     case "new": {

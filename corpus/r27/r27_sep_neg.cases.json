@@ -1,0 +1,9 @@
+[
+  { "fn": "escapeView", "args": [] },
+  { "fn": "escapeBound", "args": [1] },
+  { "fn": "escapeBound", "args": [4], "trap": 2 },
+  { "fn": "storedAndReadBack", "args": [] },
+  { "fn": "callWrites", "args": [10, 20] },
+  { "fn": "callWrites", "args": [10, 4], "trap": 2 },
+  { "fn": "rawThroughField", "args": [] }
+]

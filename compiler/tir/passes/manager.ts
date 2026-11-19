@@ -24,7 +24,7 @@ import {
 import { keepLoads, markDeadAtO0 } from "./keep.ts";
 import { licmFunc, type LicmStats } from "./licm.ts";
 import { loopBoundsFunc, type LoopBoundsStats } from "./loopbounds.ts";
-import { readonlyFunctions } from "./memory.ts";
+import { setSepFaults, writeSummaries } from "./memory.ts";
 import { unswitchFunc, type CopyRound, type UnswitchStats } from "./unswitch.ts";
 import { versionFunc, type VersionStats } from "./version.ts";
 import { simplifyFunc, type FoldFaults, type SimplifyStats } from "./simplify.ts";
@@ -106,6 +106,8 @@ export const OPT_FAULTS = [
   "r26-fcmp-swap", // range.ts decides a float compare of two converted i32s from the integers the other way round (R26)
   "r26-lb-const", // -O1's loopbounds takes `k < c` as false for any constant c, not only 0 (R26)
   "r26-round-swap", // in -O2's second or later copying round, an unswitched loop's two copies take each other's way (R26)
+  "r27-summary-miss", // a call's write summary misses a write: a store anywhere but a frame slot taken as one into a block (R27)
+  "r27-alias-any", // the separation misses an alias: every 64-bit word loaded taken as a separated field's block (R27)
 ] as const;
 
 export interface OptOptions {
@@ -261,6 +263,11 @@ export function optimizeModule(
     relAny: faults.has("r26-rel-any"),
     fcmpSwap: faults.has("r26-fcmp-swap"),
   });
+  // R27: memory.ts's injected bugs, read by every pass this run asks what a write may change
+  setSepFaults({
+    summaryMiss: faults.has("r27-summary-miss"),
+    aliasAny: faults.has("r27-alias-any"),
+  });
   const fold: FoldFaults = {
     wrongFold: faults.has("fold-wrong"),
     dropCheck: faults.has("fold-drop-check"),
@@ -373,7 +380,8 @@ export function optimizeModule(
     !off.has("conds") ||
     !off.has("version")
   ) {
-    const readonly = readonlyFunctions(m);
+    // R27 (D77): what each call may write: nothing outside its frame, or only separated fields' blocks too
+    const { readonly, sepOnly } = writeSummaries(m);
     const gvnFaults = { acrossStore: faults.has("gvn-across-store") };
     const licmFaults = {
       ignoreStores: faults.has("licm-hoist-written"),
@@ -381,7 +389,7 @@ export function optimizeModule(
     };
     const gvn = (f: Func): boolean => {
       if (off.has("gvn")) return false;
-      const c = gvnFunc(f, { readonly, deadAtO0, stats: report.gvn, faults: gvnFaults });
+      const c = gvnFunc(f, { readonly, sepOnly, deadAtO0, stats: report.gvn, faults: gvnFaults });
       if (c) verify("gvn", f);
       return c;
     };
@@ -436,6 +444,7 @@ export function optimizeModule(
       if (
         !licmFunc(f, {
           readonly,
+          sepOnly,
           deadAtO0,
           stats: report.licm,
           faults: licmFaults,
@@ -509,6 +518,7 @@ export function optimizeModule(
             const copied = unswitchFunc(f, {
               deadAtO0,
               readonly,
+              sepOnly,
               stats: report.unswitch,
               limits: UNSWITCH_O2,
               unswitch: !off.has("unswitch"),

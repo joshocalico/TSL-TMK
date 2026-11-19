@@ -19,12 +19,15 @@
 // stands only for another invariant load; a plain load of those bytes isn't taken from it.
 import { buildCfg, type Func, type Instr } from "../ir.ts";
 import {
-  addrOf,
+  accessAddr,
   accessBytes,
   isInvariantLoad,
   isPlainLoad,
   isPlainStore,
   memEffect,
+  SEP_ANY,
+  SEP_SIZE,
+  sepValues,
   writeChanges,
   type Addr,
 } from "./memory.ts";
@@ -44,6 +47,8 @@ export interface GvnFaults {
 
 export interface GvnContext {
   readonly: ReadonlySet<string>;
+  /** R27 (D77): functions that write nothing but their frame and separated fields' blocks (memory.ts's writeSummaries). */
+  sepOnly?: ReadonlySet<string>;
   deadAtO0: WeakSet<Instr>;
   stats: GvnStats;
   faults?: GvnFaults;
@@ -94,15 +99,18 @@ export function gvnFunc(f: Func, ctx: GvnContext): boolean {
     return c;
   };
   const vkey = (v: number): string => constKey.get(v) ?? `%${look(v)}`;
+  // R27: the addresses in separated fields' blocks (memory.ts)
+  const sep = sepValues(f);
 
   // What each block writes: the stores' addresses, and whether anything in it writes everything.
   const writes: { all: boolean; stores: { addr: Addr; size: number }[] }[] = f.blocks.map((b) => {
     const out = { all: false, stores: [] as { addr: Addr; size: number }[] };
     for (const ins of b.instrs) {
-      const e = memEffect(ins, ctx.readonly);
+      const e = memEffect(ins, ctx.readonly, ctx.sepOnly, sep);
       if (e === "all") out.all = true;
+      else if (e === "sep") out.stores.push({ addr: SEP_ANY, size: SEP_SIZE });
       else if (e === "store" && ctx.faults?.acrossStore !== true)
-        out.stores.push({ addr: addrOf(defs, valueOps(ins)[0]!), size: accessBytes(ins.op) });
+        out.stores.push({ addr: accessAddr(defs, ins, sep), size: accessBytes(ins.op) });
     }
     return out;
   });
@@ -194,18 +202,22 @@ export function gvnFunc(f: Func, ctx: GvnContext): boolean {
           changed = true;
           continue;
         }
-        const addr = addrOf(defs, at);
+        const addr = accessAddr(defs, ins, sep);
         // Only a load that ran at -O0, or that can't fault, may stand for later ones.
         if (!ctx.deadAtO0.has(ins) || addr.ident) {
           avail = push(avail, { addr, size: accessBytes(ins.op), key, value: ins.res[0]!, inv });
         }
         continue;
       }
-      const e = memEffect(ins, ctx.readonly);
+      const e = memEffect(ins, ctx.readonly, ctx.sepOnly, sep);
       if (e === "all") avail = avail.filter((a) => a.inv);
+      else if (e === "sep")
+        avail = avail.filter(
+          (a) => !writeChanges(a.addr, a.size, a.inv, { addr: SEP_ANY, size: SEP_SIZE }),
+        );
       else if (e === "store" && isPlainStore(ins) && ctx.faults?.acrossStore !== true) {
         const [at, val] = valueOps(ins) as [number, number];
-        const addr = addrOf(defs, at);
+        const addr = accessAddr(defs, ins, sep);
         const size = accessBytes(ins.op);
         avail = avail.filter((a) => !writeChanges(a.addr, a.size, a.inv, { addr, size }));
         // What a store wrote, a load of the same type there reads back.

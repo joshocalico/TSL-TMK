@@ -57,6 +57,8 @@
         "corpus/std/**",
         "bench/std/**",
         "corpus/mem/**",
+        "corpus/r27/r27_sep.ts",
+        "corpus/r27/r27_sep_neg.ts",
         "corpus/memory/manual/**",
         "corpus/hostonly/**",
         "corpus/memory/leak/pool.ts",

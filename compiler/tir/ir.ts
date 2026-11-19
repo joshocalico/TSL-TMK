@@ -21,6 +21,16 @@ export interface Instr {
    * tirhash are what they were; at -O1 and -O2 the optimiser's first step makes such a load `load.T.inv`, which is.
    */
   inv?: true;
+  /**
+   * R27 (D77): lowering's note on a plain load of a separated field (compiler/host/separate.ts): what it reads is 0 or the
+   * address of a block no object is in, which only its class's code reaches. Outside the canonical text, as `inv` is.
+   */
+  sep?: true;
+  /**
+   * R27 (D77): lowering's note on a plain load or store of an object's field: its bytes are an object's, never a separated
+   * field's block. Outside the canonical text.
+   */
+  obj?: true;
 }
 
 export interface Edge {
@@ -421,6 +431,8 @@ export function canonicalize(m: Module): Module {
           return o;
         }),
         ...(ins.inv === true ? { inv: true as const } : {}),
+        ...(ins.sep === true ? { sep: true as const } : {}),
+        ...(ins.obj === true ? { obj: true as const } : {}),
       }));
       const tm = b.term;
       let term: Term;

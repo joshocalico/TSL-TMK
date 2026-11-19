@@ -1,0 +1,9 @@
+[
+  { "fn": "growMoving", "args": [500] },
+  { "fn": "growMoving", "args": [3000] },
+  { "fn": "objectKeysGrown", "args": [700] },
+  { "fn": "copyInto", "args": [257] },
+  { "fn": "cutWhileCopying", "args": [40, 15] },
+  { "fn": "cutWhileCopying", "args": [40, 50] },
+  { "fn": "growWhileReading", "args": [300] }
+]

@@ -112,13 +112,21 @@ function routes(job: RoutesJob): void {
             (b, i, all) => all.indexOf(b) === i,
           );
     parentPort!.postMessage(
-      { id: job.id, heapMb: heapMb(), routes: r, compileMs: performance.now() - t0, imageMs: 0 },
+      {
+        id: job.id,
+        heapMb: heapMb(),
+        ...memNote(),
+        routes: r,
+        compileMs: performance.now() - t0,
+        imageMs: 0,
+      },
       buffers as ArrayBuffer[],
     );
   } catch (e) {
     parentPort!.postMessage({
       id: job.id,
       heapMb: heapMb(),
+      ...memNote(),
       error: e instanceof Error ? (e.stack ?? e.message) : String(e),
     });
   }
@@ -130,6 +138,16 @@ function routes(job: RoutesJob): void {
  */
 function heapMb(): number {
   return getHeapStatistics().used_heap_size / 2 ** 20;
+}
+
+/** R27: with TMK_POOL_LOG set (compile-pool.ts's measurement), this worker's heap as V8 holds it, not only what's in use. */
+function memNote(): { mem?: string } {
+  if (process.env.TMK_POOL_LOG === undefined) return {};
+  const h = getHeapStatistics();
+  const mb = (x: number): string => (x / 2 ** 20).toFixed(0);
+  return {
+    mem: `total ${mb(h.total_heap_size)} physical ${mb(h.total_physical_size)} external ${mb(h.external_memory)} malloced ${mb(h.malloced_memory)} limit ${mb(h.heap_size_limit)}`,
+  };
 }
 
 parentPort?.on("message", (job: BuildJob | RoutesJob) => {
@@ -154,6 +172,7 @@ function build(job: BuildJob): void {
       parentPort!.postMessage({
         id: job.id,
         heapMb: heapMb(),
+        ...memNote(),
         o: slim(o),
         compileMs: t1 - t0,
         imageMs: 0,
@@ -179,6 +198,7 @@ function build(job: BuildJob): void {
       {
         id: job.id,
         heapMb: heapMb(),
+        ...memNote(),
         o: slim(o),
         cases,
         built: { image, placements: built.placements },
@@ -191,6 +211,7 @@ function build(job: BuildJob): void {
     parentPort!.postMessage({
       id: job.id,
       heapMb: heapMb(),
+      ...memNote(),
       error: e instanceof Error ? (e.stack ?? e.message) : String(e),
     });
   }

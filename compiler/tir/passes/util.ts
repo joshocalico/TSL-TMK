@@ -211,6 +211,8 @@ export function predCounts(f: Func): Map<number, number> {
 export function cloneInstr(ins: Instr): Instr {
   const c: Instr = { op: ins.op, ops: ins.ops.map((o) => ({ ...o })), res: [...ins.res] };
   if (ins.inv === true) c.inv = true;
+  if (ins.sep === true) c.sep = true;
+  if (ins.obj === true) c.obj = true;
   return c;
 }
 

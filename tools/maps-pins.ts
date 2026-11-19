@@ -21,6 +21,7 @@ import { r22Moved } from "./r22-moved.ts";
 import { r24Moved } from "./r24-moved.ts";
 import { r25Moved } from "./r25-moved.ts";
 import { r26Moved } from "./r26-moved.ts";
+import { r27Moved } from "./r27-moved.ts";
 import { clsidMoved } from "./clsid-moved.ts";
 import { r1dMoved } from "./r1d-moved.ts";
 import { r1fMoved } from "./r1f-moved.ts";
@@ -396,6 +397,7 @@ export const INT_MOVED: Record<string, string> = {
  * R25's (tools/r25-moved.ts, written by tools/r25-pins.ts).
  */
 export const mapsMoved = (k: string): boolean =>
+  r27Moved(k) ||
   r26Moved(k) ||
   r25Moved(k) ||
   r24Moved(k) ||

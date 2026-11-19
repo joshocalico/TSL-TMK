@@ -9,7 +9,7 @@ import { afterExhaustion } from "./r9-tests.ts";
 import { buildPath } from "./build-dir.ts";
 import { guardedRun, pool } from "./guarded-run.ts";
 import { inStableOrder, naturalCompare, sortedCounts } from "./stable.ts";
-import { bothRoutesOnWorker } from "./compile-pool.ts";
+import { bothRoutesOnWorker, releaseIdleWorkers } from "./compile-pool.ts";
 import { bothRoutes, type BuiltImages } from "./dual-build.ts";
 import type { LowerCase } from "./lower-exec.ts";
 import { bulkFor, downResults } from "./native-exec.ts";
@@ -576,6 +576,8 @@ export async function dualRoute(o: {
   inStableOrder(failures);
   inStableOrder(allowed);
   tally.divergences = sortedCounts(tally.divergences);
+  // R27: the run's workers go with it, and what their isolates hold (compile-pool.ts)
+  releaseIdleWorkers();
   return { programs, rows, failures, allowed, hvfSkipped, printed: tally };
 }
 

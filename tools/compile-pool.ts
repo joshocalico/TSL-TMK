@@ -1,5 +1,6 @@
 // Compiles and links on worker threads, so a suite's jobs aren't queued behind one another on the test process's event loop
 // (SPEC 9.3, D45). At most one job per worker, and each job has a hard timeout: past it, its worker is terminated and replaced.
+import { appendFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { Worker } from "node:worker_threads";
 import type { ImageOutput } from "../compiler/backend-aarch64/image.ts";
@@ -63,6 +64,7 @@ function spawnSlot(): Slot {
       m: Built & {
         id: number;
         heapMb?: number;
+        mem?: string;
         error?: string;
         compileMs: number;
         imageMs: number;
@@ -70,8 +72,11 @@ function spawnSlot(): Slot {
       },
     ) => {
       const t = slot.busy;
+      if (POOL_LOG !== undefined) poolLog(slot, m.heapMb ?? 0, t, m.mem);
       // R16: a worker whose heap has grown past RECYCLE_HEAP_MB goes now, with its garbage, rather than wait for more work
-      if ((m.heapMb ?? 0) > RECYCLE_HEAP_MB) retire(slot);
+      // R27: and so does one finishing while the process as a whole is past RECYCLE_RSS_MB: what a worker's isolate holds
+      // beyond its live heap (its heap's room, compiled code) only goes back when the worker does
+      if ((m.heapMb ?? 0) > RECYCLE_HEAP_MB || overRss()) retire(slot);
       else release(slot);
       if (t === null) return;
       if (m.error !== undefined) t.reject(new Error(m.error));
@@ -98,12 +103,55 @@ function spawnSlot(): Slot {
 const IDLE_MS = 10_000;
 
 /**
+ * R27: with TMK_POOL_LOG naming a file, a line for each job a worker finishes: when, which worker, its heap after the job,
+ * the process's RSS, and the job. A measurement, for finding what holds a suite's memory; nothing reads it.
+ */
+const POOL_LOG = process.env.TMK_POOL_LOG;
+const poolT0 = Date.now();
+const workerIds = new WeakMap<Worker, number>();
+let nextWorker = 1;
+function poolLog(slot: Slot, heapMb: number, t: Waiting | null, mem?: string): void {
+  let id = workerIds.get(slot.w);
+  if (id === undefined) workerIds.set(slot.w, (id = nextWorker++));
+  const j = t?.job as { file?: string; mode?: string; level?: number; kind?: string } | undefined;
+  appendFileSync(
+    POOL_LOG!,
+    `${((Date.now() - poolT0) / 1000).toFixed(1)}\tw${id}\theap ${heapMb.toFixed(0)}\trss ${(process.memoryUsage().rss / 2 ** 20).toFixed(0)}\tworkers ${slots.length}\t${mem ?? ""}\t${j?.kind ?? "build"} ${j?.file ?? "?"} ${j?.mode ?? ""} ${j?.level ?? ""}\n`,
+  );
+}
+
+/**
  * R16: a worker whose heap is past this after a job is let go at once and a fresh one takes the next job. The 640 MiB limit
  * above doesn't hold in a job run with `--max-old-space-size` (the gate's nested milestones, MILESTONE_NODE), which Node lets
  * override a worker's own: there a worker's heap grew past 1 GiB of garbage over a suite (native-e box 3, 2.84 GiB in R15's
  * gate, two such workers and the test process). Only when it's used: nothing a worker makes depends on which worker it is.
  */
 export const RECYCLE_HEAP_MB = 512;
+
+/**
+ * R27: a worker that finishes a job while the process's RSS is past this goes too, and a fresh one takes the next job. pipe-d
+ * box 48's four runs of the dual route, one after another in one process, peaked at 2.70 GiB in R26's gate against the 3 GiB
+ * watchdog, rising run by run, with the test process's own heap at about 30 MiB and each worker's live heap under 400 MiB
+ * after a job: the rest was what the workers' isolates held beyond that (M5's R27 record). Nothing a worker makes depends
+ * on which worker it is, so this changes only when work is done.
+ */
+export const RECYCLE_RSS_MB = 1536;
+
+/**
+ * At most one worker goes for that every RECYCLE_RSS_GAP_MS: a fresh worker loads the compiler again, and letting every worker
+ * go after every job while the process sat just past the limit restarted 509 workers in box 48 alone, about 45% longer under
+ * a gate's load, for 2.07 GiB where this gives 2.12 (M5's R27 record).
+ */
+export const RECYCLE_RSS_GAP_MS = 3_000;
+let lastRssRetire = 0;
+
+function overRss(): boolean {
+  if (process.memoryUsage.rss() <= RECYCLE_RSS_MB * 2 ** 20) return false;
+  const now = Date.now();
+  if (now - lastRssRetire < RECYCLE_RSS_GAP_MS) return false;
+  lastRssRetire = now;
+  return true;
+}
 
 /** A worker let go now (R16's recycling): what `release` does, then the worker goes rather than wait. */
 function retire(slot: Slot): void {
@@ -189,6 +237,22 @@ function dispatch(t: Waiting, give: () => void, routes: boolean): void {
     replace(held, new Error(`compiling ${t.job.file}: over ${JOB_TIMEOUT_MS} ms`));
   }, JOB_TIMEOUT_MS);
   slot.w.postMessage(t.job);
+}
+
+/**
+ * R27: every worker with no job goes now, with all its isolate holds, as one idle for IDLE_MS would. The dual route calls it
+ * when a run of it ends: pipe-d box 48 runs it four times in one process, and its peak rose run by run (M5's R27 record).
+ * Only when work is done changes: the next job finds a fresh worker.
+ */
+export function releaseIdleWorkers(): void {
+  for (let i = slots.length - 1; i >= 0; i--) {
+    const slot = slots[i]!;
+    if (slot.busy !== null) continue;
+    if (slot.timer !== null) clearTimeout(slot.timer);
+    slot.timer = null;
+    slots.splice(i, 1);
+    void slot.w.terminate();
+  }
 }
 
 /** Lowers a program and links its test image, on a worker. `built` is null if it has diagnostics or a fallback left. */

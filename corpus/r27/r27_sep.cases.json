@@ -1,0 +1,10 @@
+[
+  { "fn": "copyAll", "args": [100] },
+  { "fn": "copyAll", "args": [3] },
+  { "fn": "copyCut", "args": [50, 60] },
+  { "fn": "copyCut", "args": [50, 20], "trap": 2 },
+  { "fn": "fillThroughCall", "args": [64] },
+  { "fn": "growAsFilled", "args": [40] },
+  { "fn": "adoptMidFill", "args": [30] },
+  { "fn": "readPast", "args": [10], "trap": 2 }
+]

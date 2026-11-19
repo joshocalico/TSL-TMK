@@ -19,11 +19,15 @@
 import { buildCfg, type Block, type Cfg, type Func, type Instr, type Term } from "../ir.ts";
 import { ensurePreheader, findLoops, type Loop } from "./loops.ts";
 import {
+  accessAddr,
   addrOf,
   accessBytes,
   isInvariantLoad,
   isPlainLoad,
   memEffect,
+  SEP_ANY,
+  SEP_SIZE,
+  sepValues,
   writeChanges,
   type Addr,
 } from "./memory.ts";
@@ -44,6 +48,8 @@ export interface LicmFaults {
 
 export interface LicmContext {
   readonly: ReadonlySet<string>;
+  /** R27 (D77): functions that write nothing but their frame and separated fields' blocks (memory.ts's writeSummaries). */
+  sepOnly?: ReadonlySet<string>;
   deadAtO0: WeakSet<Instr>;
   stats: LicmStats;
   faults?: LicmFaults;
@@ -77,15 +83,19 @@ function hoistLoop(f: Func, l0: Loop, ctx: LicmContext): boolean {
   const inLoop = new Set<number>();
   let all = false;
   const stores: { addr: Addr; size: number }[] = [];
+  // R27: the addresses in separated fields' blocks (memory.ts)
+  const sep = sepValues(f);
   for (const at of l0.blocks) {
     const b = f.blocks[at]!;
     for (const p of b.params) inLoop.add(p);
     for (const ins of b.instrs) {
       for (const r of ins.res) inLoop.add(r);
-      const e = memEffect(ins, ctx.readonly);
+      const e = memEffect(ins, ctx.readonly, ctx.sepOnly, sep);
       if (e === "all") all = true;
+      else if (e === "sep" && ctx.faults?.ignoreStores !== true)
+        stores.push({ addr: SEP_ANY, size: SEP_SIZE });
       else if (e === "store" && ctx.faults?.ignoreStores !== true)
-        stores.push({ addr: addrOf(defs, valueOps(ins)[0]!), size: accessBytes(ins.op) });
+        stores.push({ addr: accessAddr(defs, ins, sep), size: accessBytes(ins.op) });
     }
   }
   const moved = new Set<number>();
@@ -96,7 +106,7 @@ function hoistLoop(f: Func, l0: Loop, ctx: LicmContext): boolean {
   const unwritten = (ins: Instr): boolean => {
     const inv = isInvariantLoad(ins);
     if (all && writeChanges(addrOf(defs, valueOps(ins)[0]!), 0, inv, "all")) return false;
-    const a = addrOf(defs, valueOps(ins)[0]!);
+    const a = accessAddr(defs, ins, sep);
     const s = accessBytes(ins.op);
     return !stores.some((w) => writeChanges(a, s, inv, w));
   };

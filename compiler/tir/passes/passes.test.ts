@@ -1326,3 +1326,166 @@ ${LOOP(`%8 = call @g %4
   assert.doesNotMatch(on, /call @h/, on);
   assert.match(fn(r26Off("inline", () => opt(src, 1)).text, "f"), /call @h/);
 });
+
+// R27 (D77): fresh-allocation separation. Lowering notes a separated field's load (`sep`) and an object's field's access
+// (`obj`) outside the text, so these tests note them on the parsed module: every `load.ix.na` (a length) is an object's
+// field, and in @f the first `load.i64.na` (the array's block) is an object's field and a separated one's; `more` notes
+// what else a test needs.
+function optNoted(
+  text: string,
+  more: (m: Module) => void = () => {},
+  level: OptLevel = 2,
+  faults: string[] = [],
+  sep = true,
+): string {
+  const lines = (text + TRAPS).split("\n").filter((l) => l.trim() !== "");
+  const m = canonicalize(parseModule(lines.join("\n") + "\n"));
+  for (const f of m.funcs) {
+    const all = f.blocks.flatMap((b) => b.instrs);
+    for (const ins of all) if (ins.op === "load.ix.na") ins.obj = true;
+    const data = all.find((ins) => ins.op === "load.i64.na");
+    if (f.name === "f" && data !== undefined) {
+      data.obj = true;
+      if (sep) data.sep = true;
+    }
+  }
+  more(m);
+  return printModule(optimizeModule(m, { level, verifyEach: true, faults }).module);
+}
+
+// An array's length read, an element stored through its block, the length read again.
+const SEP_SRC = (
+  between: string,
+  callee = "",
+): string => `${callee}func @f(%0: i64, %1: ix, %2: i64) -> (ix, ix) export {
+bb0:
+  %3 = bitcast.ptr %0
+  %4 = iconst.ix 0
+  %5 = gep %3, %4, 1, 8
+  %6 = load.ix.na %5
+  %7 = load.i64.na %3
+  %8 = bitcast.ptr %7
+  %9 = gep %8, %1, 4, 0
+  %10 = iconst.i32 7
+  ${between}
+  %11 = load.ix.na %5
+  ret %6, %11
+}
+`;
+const lenLoads = (t: string): number => (fn(t, "f").match(/load\.ix\.na/g) ?? []).length;
+
+test("R27: an object's field read either side of a store into a separated field's block is read once", () => {
+  const src = SEP_SRC("store.i32.na %9, %10");
+  assert.equal(lenLoads(optNoted(src)), 1);
+  // not noted as a separated field's block, or the separation off: the store may write the length
+  assert.equal(lenLoads(optNoted(src, () => {}, 2, [], false)), 2);
+  const was = process.env.TMK_R27_OFF;
+  process.env.TMK_R27_OFF = "sep";
+  try {
+    assert.equal(lenLoads(optNoted(src)), 2);
+  } finally {
+    if (was === undefined) delete process.env.TMK_R27_OFF;
+    else process.env.TMK_R27_OFF = was;
+  }
+});
+
+test("R27: a store at an address from elsewhere still may change it; the injected r27-alias-any misses that", () => {
+  // through a parameter's address
+  const other = SEP_SRC(`%12 = bitcast.ptr %2
+  store.i32.na %12, %10`);
+  assert.equal(lenLoads(optNoted(other)), 2);
+  // through a word read from another field, not a separated one: r27-alias-any takes it as a block's
+  const loaded = SEP_SRC(`%12 = gep %3, %4, 1, 16
+  %13 = load.i64.na %12
+  %14 = bitcast.ptr %13
+  store.i32.na %14, %10`);
+  assert.equal(lenLoads(optNoted(loaded)), 2);
+  assert.equal(
+    lenLoads(optNoted(loaded, () => {}, 2, ["r27-alias-any"])),
+    1,
+    "the bug lets it through",
+  );
+});
+
+test("R27: a call writing only separated fields' blocks keeps a field read; one writing a field doesn't", () => {
+  const fills = `func @g(%0: i64, %1: ix) -> () noinline {
+bb0:
+  %2 = bitcast.ptr %0
+  %3 = load.i64.na %2
+  %4 = bitcast.ptr %3
+  %5 = gep %4, %1, 4, 0
+  %6 = iconst.i32 9
+  store.i32.na %5, %6
+  ret
+}
+`;
+  const noteG = (m: Module): void => {
+    const g = m.funcs.find((x) => x.name === "g")!;
+    for (const ins of g.blocks.flatMap((b) => b.instrs))
+      if (ins.op === "load.i64.na") {
+        ins.obj = true;
+        ins.sep = true;
+      }
+  };
+  const call = SEP_SRC("call @g %0, %1", fills);
+  assert.equal(lenLoads(optNoted(call, noteG)), 1);
+  assert.equal(lenLoads(optNoted(call, noteG, 1)), 1, "-O1's value numbering too");
+  // g's block not noted: it may write anything
+  assert.equal(lenLoads(optNoted(call)), 2);
+  // the callee writes the length too
+  const sets = `func @g(%0: i64, %1: ix) -> () noinline {
+bb0:
+  %2 = bitcast.ptr %0
+  %3 = iconst.ix 0
+  %4 = gep %2, %3, 1, 8
+  store.ix.na %4, %1
+  ret
+}
+`;
+  const noteStore = (m: Module): void => {
+    const g = m.funcs.find((x) => x.name === "g")!;
+    for (const ins of g.blocks.flatMap((b) => b.instrs))
+      if (ins.op === "store.ix.na") ins.obj = true;
+  };
+  const call2 = SEP_SRC("call @g %0, %1", sets);
+  assert.equal(lenLoads(optNoted(call2, noteStore)), 2);
+  // the injected r27-summary-miss misses that write
+  assert.equal(
+    lenLoads(optNoted(call2, noteStore, 2, ["r27-summary-miss"])),
+    1,
+    "the bug lets it through",
+  );
+});
+
+test("R27: an address worked out from a block in a loop, through a block parameter, is still the block's", () => {
+  const src = `func @f(%0: i64, %1: ix) -> (ix, ix) export {
+bb0:
+  %2 = bitcast.ptr %0
+  %3 = iconst.ix 0
+  %4 = gep %2, %3, 1, 8
+  %5 = load.ix.na %4
+  %6 = load.i64.na %2
+  %7 = bitcast.ptr %6
+  %8 = gep %7, %1, 4, 0
+  %9 = bitcast.i64 %8
+  %10 = gep %7, %3, 4, 0
+  %11 = bitcast.i64 %10
+  br bb1(%11)
+bb1(%12: i64):
+  %13 = icmp.ult.i64 %12, %9
+  brif %13, bb2, bb3
+bb2:
+  %14 = bitcast.ptr %12
+  %15 = iconst.i32 0
+  store.i32.na %14, %15
+  %16 = iconst.i64 4
+  %17 = add.chk.u.i64 %12, %16, t1
+  br bb1(%17)
+bb3:
+  %18 = load.ix.na %4
+  ret %5, %18
+}
+`;
+  assert.equal(lenLoads(optNoted(src)), 1);
+  assert.equal(lenLoads(optNoted(src, () => {}, 2, [], false)), 2);
+});

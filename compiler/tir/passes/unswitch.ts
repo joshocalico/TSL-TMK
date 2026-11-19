@@ -26,11 +26,14 @@ import {
 } from "../ir.ts";
 import { dominates, ensurePreheader, findLoops, type Loop } from "./loops.ts";
 import {
-  addrOf,
+  accessAddr,
   accessBytes,
   isInvariantLoad,
   isPlainLoad,
   memEffect,
+  SEP_ANY,
+  SEP_SIZE,
+  sepValues,
   writeChanges,
   type Addr,
 } from "./memory.ts";
@@ -60,6 +63,8 @@ export interface UnswitchLimits {
 export interface CopyContext {
   deadAtO0: WeakSet<Instr>;
   readonly: ReadonlySet<string>;
+  /** R27 (D77): functions that write nothing but their frame and separated fields' blocks (memory.ts's writeSummaries). */
+  sepOnly?: ReadonlySet<string>;
   stats: UnswitchStats;
   limits: UnswitchLimits;
   unswitch: boolean;
@@ -414,12 +419,15 @@ function peelable(f: Func, cfg: Cfg, l: Loop, ctx: CopyContext): boolean {
   const inLoop = definedIn(f, l.blocks);
   const stores: { addr: Addr; size: number }[] = [];
   let all = false;
+  // R27: the addresses in separated fields' blocks (memory.ts)
+  const sep = sepValues(f);
   for (const at of l.blocks) {
     for (const ins of f.blocks[at]!.instrs) {
-      const e = memEffect(ins, ctx.readonly);
+      const e = memEffect(ins, ctx.readonly, ctx.sepOnly, sep);
       if (e === "all") all = true;
+      else if (e === "sep") stores.push({ addr: SEP_ANY, size: SEP_SIZE });
       else if (e === "store")
-        stores.push({ addr: addrOf(defs, valueOps(ins)[0]!), size: accessBytes(ins.op) });
+        stores.push({ addr: accessAddr(defs, ins, sep), size: accessBytes(ins.op) });
     }
   }
   // Invariant: from outside the loop, or a pure operation in it of invariant values (licm.ts leaves cheap ones there).
@@ -443,7 +451,7 @@ function peelable(f: Func, cfg: Cfg, l: Loop, ctx: CopyContext): boolean {
       if (!isPlainLoad(ins) || ctx.deadAtO0.has(ins)) continue;
       const p = valueOps(ins)[0]!;
       if (!invariant(p)) continue;
-      const a = addrOf(defs, p);
+      const a = accessAddr(defs, ins, sep);
       if (a.ident) continue; // licm.ts moves those
       // A loop that writes everything leaves only a class id's load unwritten (memory.ts).
       const inv = isInvariantLoad(ins);

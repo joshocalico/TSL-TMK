@@ -453,7 +453,17 @@ export type TEK =
   // Native TSL (SPEC 3.4, 3.5): class fields, stack `new`, closures, and a receiver's generation check.
   // inv: a field nothing writes after construction (3.4's "Class ids don't change", tslc's markInvariantFields), whose
   // load is invariant at -O1 and -O2 (D73)
-  | { k: "ofield"; obj: TE; c: ClassInst; f: ClsField; check: GenCheck; loc: string; inv?: true }
+  // sep: a separated field (R27, D77, separate.ts): a block no object can be in, which lowering notes for the optimiser
+  | {
+      k: "ofield";
+      obj: TE;
+      c: ClassInst;
+      f: ClsField;
+      check: GenCheck;
+      loc: string;
+      inv?: true;
+      sep?: true;
+    }
   | { k: "osetfield"; obj: TE; c: ClassInst; f: ClsField; val: TE; check: GenCheck; loc: string }
   | {
       k: "new";

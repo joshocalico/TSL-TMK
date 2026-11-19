@@ -2810,6 +2810,49 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     });
   });
 
+  // 73. R27: fresh-allocation separation, where it applies and where it must not.
+  M.unit("73", async () => {
+    const R27 = timedModule("r27", await import("../r27-tests.ts"));
+    const failures: string[] = [];
+    const sh = await R27.r27Shapes();
+    failures.push(...sh.failures);
+    const n = await R27.r27Native(accel, jobs);
+    failures.push(...n.failures);
+    if (n.cases === 0) failures.push("no case of corpus/r27 ran");
+    const d = await R27.r27Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of corpus/lower/r27 ran");
+    if (d.agreed !== d.cases)
+      failures.push(`${d.cases - d.agreed} cases differ through the two routes`);
+    for (const mode of ["rc", "leak"])
+      if (!d.printed.includes(`${R27.R27_LOWER_DIR}/r27_fill.ts@${mode}`))
+        failures.push(`r27_fill.ts doesn't class-print in ${mode}`);
+    report({
+      box: "73. R27 (3.5, 4.3, D44, D73, D77): fresh-allocation separation: tslc proves a class's u64 field holds only blocks no object can be in (fresh from the allocator, 0, or moved from such a field, and every address worked out from one used only by the class's own element reads and writes, copies, fills and the allocator's give-back), and the optimiser takes a store into such a block, or a call that writes only such blocks and its own frame, as unable to change any object's field: r27_sep.ts's Buf and r27_sep_neg.ts's Arr separated, Escapes (its block's address given outside), Kept (stored in another object's field) and Ref (set from outside) refused, @tsl/jsrt's JsArray separated in a lowered map in rc and leak, JsMap's growth (`steps`, `link`) and r27_sep.ts's fills changed by it at -O2, and each of r27_sep_neg.ts's functions the same build with it on and off at -O1 and -O2, so every check it had stays; corpus/r27 natively at -O0, -O1 and -O2 against V8 and JSC; corpus/lower/r27 (maps grown while moving, arrays filled while one grows or is cut) through both routes with class printing forced in rc and leak at -O0, -O1 and -O2 against V8, and the printed TSL on V8 and JSC (tools/r27-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${sh.rows.join("; ")}; natively ${n.agreed}/${n.cases} (${n.rows.join(", ")}); through both routes ${d.agreed}/${d.cases}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 74. R27's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("74", async () => {
+    const R27 = timedModule("r27", await import("../r27-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R27.R27_FAULTS) {
+      const x = await R27.r27Fault(f, accel, jobs);
+      rows.push(`${f.name}: ${caughtText(x)}`);
+      if (x.answers === 0) failures.push(`${f.name} wasn't caught: ${x.first}`);
+    }
+    report({
+      box: `74. R27: each of ${R27.R27_FAULTS.length} bugs is caught by a wrong answer, with how many cases caught it: a call's write summary missing a write (a call that cuts a length taken as writing only blocks, so get's check after it goes), an alias the separation misses (every 64-bit word loaded taken as a block's, so a raw store through an address read from a field doesn't change a view's word), and a check removed where a reference escapes (tslc letting a block's address leave its class, so a view's store into the block isn't seen and a bound kept there is read stale), each over corpus/r27 natively at -O1 and -O2 against V8 (tools/r27-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
   M.vms(
     "8",
     "8. No QEMU process of this run is left, and the owner's UTM and QEMU processes were only observed",

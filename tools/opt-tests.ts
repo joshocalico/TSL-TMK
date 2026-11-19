@@ -382,6 +382,17 @@ async function faultSteps(
   const engines = defaultEngines();
   return [
     {
+      // R27: fresh-allocation separation's write summaries and blocks (memory.ts), on R27's TSL programs natively at -O1
+      // and -O2, against V8 (seconds, so first: R27's bugs are caught here, and so may an earlier bug be, which changes only
+      // which step names it).
+      name: "R27's programs natively at -O1 and -O2 (corpus/r27, tools/r27-tests.ts)",
+      run: async () => {
+        const R27 = await import("./r27-tests.ts");
+        const n = await R27.r27Native(accel, jobs, [1, 2]);
+        return n.failures.length === 0 && n.cases > 0;
+      },
+    },
+    {
       // R26: range.ts's signed tests and float compares, -O1's loopbounds and -O2's copying rounds, on R26's program and
       // R25's strings through both routes in rc and leak at -O1 and -O2, against V8 (seconds, so first: R26's bugs are caught
       // here, and so may an earlier bug be, which changes only which step names it).
