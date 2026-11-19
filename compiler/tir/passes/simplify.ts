@@ -12,6 +12,7 @@ import {
   signedConst,
   substitute,
   valueOps,
+  r28Off,
 } from "./util.ts";
 
 type Const = { k: "int"; t: TirType; v: bigint } | { k: "float"; t: "f32" | "f64"; bits: bigint };
@@ -82,6 +83,7 @@ export interface FoldFaults {
   selfCompare?: boolean; // an integer compared with itself folds as though they differed
   pow2Mask?: boolean; // an unsigned remainder by 2^k becomes an and with 2^k, not 2^k - 1 (R1f)
   shiftBack?: boolean; // a shift left and back is taken as lossless whatever the value's width (R1f)
+  tagKeepWrong?: boolean; // `ref.addr (or x, tag)` keeps the tag and drops the address (R28)
 }
 
 export function simplifyFunc(f: Func, stats: SimplifyStats, faults: FoldFaults = {}): boolean {
@@ -156,6 +158,36 @@ function foldOnce(f: Func, stats: SimplifyStats, faults: FoldFaults): boolean {
       const p = opParts(ins.op);
       const base = p[0]!;
       if (base === "iconst" || base === "fconst") continue;
+      // R28: a reference's pointer is its low 48 bits, so a tag or'd into the top 16 doesn't change it: `ref.addr (or x,
+      // y)` is `ref.addr x` where y has no bit below 48 (a constant tag, as a static's 0xffff, or a value shifted left by
+      // 48 or more, as a slot's generation is put on its address). The tag's own work is then left for DCE.
+      if (
+        ins.op === "ref.addr" &&
+        ins.ops.length === 1 &&
+        ins.ops[0]?.t === "v" &&
+        !r28Off("tag")
+      ) {
+        const d = defs.get(ins.ops[0].id);
+        if (d !== undefined && d.op === "or.i64" && d.ops.length === 2) {
+          const [a, c] = valueOps(d) as [number, number];
+          const high = (v: number): boolean => {
+            const k = intConst(v);
+            if (k !== undefined) return BigInt.asUintN(64, k) % (1n << 48n) === 0n;
+            const s = defs.get(v);
+            if (s === undefined || s.op !== "shl.i64") return false;
+            const n = intConst(valueOps(s)[1]!);
+            return n !== undefined && BigInt.asUintN(64, n) >= 48n && BigInt.asUintN(64, n) < 64n;
+          };
+          let keep = high(c) ? a : high(a) ? c : undefined;
+          // the injected bug (R28): the tag kept and the address dropped
+          if (keep !== undefined && faults.tagKeepWrong === true) keep = keep === a ? c : a;
+          if (keep !== undefined) {
+            ins.ops = [{ t: "v", id: keep }];
+            stats.identities++;
+            changed = true;
+          }
+        }
+      }
       if (mergeMasks && ins.op === "ref.addr" && ins.ops.length === 1 && ins.ops[0]?.t === "v") {
         const key = `${ins.op} ${ins.ops[0].id}`;
         const had = masked.get(key);

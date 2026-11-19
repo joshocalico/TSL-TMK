@@ -30,6 +30,7 @@ export class JsRoomArray<T> {
   }
 
   /** The first room: `holder`'s tail of n elements, zeroed, which this array is in place in. At least its length. */
+  /** @tsl.inline */
   // SAFETY: the holder was just made with a tail of n of this array's elements (its element's size), which lives as long
   // as the holder, and this array, in place in it, never outlives it.
   attach<H extends object>(holder: H, n: usize): void {
@@ -208,8 +209,11 @@ export class JsRoomArray<T> {
     const dbl = this.cap * 2;
     const ncap = dbl < need ? need : dbl;
     const size = elemSize(this.elem);
-    const words = idiv(ncap * size + 7, 8);
-    const next = roomMake(words, this.holes ? idiv(this.len * size, 8) : words);
+    // R28: an element of a word is a word: the same counts with no rounding (size is a constant, so one arm is left; cap
+    // and so ncap are below 2^33, as a tail's length is below 2^32, so neither form traps where the other wouldn't)
+    const words = size === 8 ? ncap : idiv(ncap * size + 7, 8);
+    const keep = size === 8 ? this.len : idiv(this.len * size, 8);
+    const next = roomMake(words, this.holes ? keep : words);
     const at = roomAddr(next);
     copyBytes(at, this.data, this.len * size);
     const old = this.room;

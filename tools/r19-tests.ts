@@ -103,11 +103,12 @@ export const R19_FAULTS: {
   },
   {
     name: "fresh-slot-overlap",
-    what: "a fresh slot cut from its size class's page only half a slot past the last, so two objects share memory",
+    what: "a fresh slot cut from its size class's page only half a slot past the last, so two objects share memory (R28: in pageSlot and in pageCut, make's and tailFast's in-line cut, alike)",
     patch: {
       file: RC,
       from: "  at.write(BigInt.asUintN(64, slot + size));",
       to: "  at.write(BigInt.asUintN(64, slot + size / 2n));",
+      times: 2,
     },
     by: "dual",
   },

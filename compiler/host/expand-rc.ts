@@ -195,6 +195,7 @@ interface Val {
   root: Root; // where a borrowed value hangs from
   simple: boolean; // re-evaluating the text is free and has no effect
   local?: ts.Symbol; // the value is exactly this local
+  global?: ts.Symbol; // R28: the value is exactly this module variable, read as it is
 }
 
 type Root = "param" | "this" | "global" | "temp" | "owned" | "null" | "none" | ts.Symbol;
@@ -747,6 +748,105 @@ class Expander {
     };
     walk(f);
     return sources.every((e) => isPath(e, this));
+  }
+
+  /**
+   * R28: whether a module variable is written only by its module's `__init` (the printing's literals, `strlit_k`, and
+   * module state set once there), which nothing in the program calls: the runtime runs it once, before any export. Such a
+   * variable's value, once set, is never overwritten while anything else runs, so a count of its own holds it as long as
+   * the program does, and a call given it borrowed needs no count of its own around the call (its object can't go while
+   * the call runs: only overwriting the variable could drop that count). Every write is found by the checker's symbols over
+   * the program's `rc` modules: an assignment of any kind, `++`/`--`, or a destructuring target; one anywhere but a
+   * top-level `function __init` of the variable's own module, or a reference to that `__init` other than its declaration,
+   * and the variable isn't one. `TMK_TEST_RC_TSL=r28-init-any` (an injected bug) takes every module variable as one.
+   */
+  initOnly(sym: ts.Symbol): boolean {
+    if ((process.env.TMK_R28_OFF ?? "").split(",").includes("initonly")) return false;
+    if (fault() === "r28-init-any") return true;
+    if (this.initOnlySyms === null) this.initOnlySyms = this.findInitOnly();
+    return this.initOnlySyms.has(sym);
+  }
+
+  initOnlySyms: Set<ts.Symbol> | null = null;
+
+  private findInitOnly(): Set<ts.Symbol> {
+    const out = new Set<ts.Symbol>();
+    const bad = new Set<ts.Symbol>();
+    const inits = new Set<ts.Node>(); // each module's top-level `function __init`
+    for (const sf of this.modules)
+      for (const st of sf.statements)
+        if (ts.isFunctionDeclaration(st) && st.name?.text === "__init" && st.body !== undefined) {
+          inits.add(st);
+          // a module variable it writes may be one, unless something calls it, or names it at all
+          const fs = this.symOf(st.name);
+          if (fs !== undefined) {
+            for (const m of this.modules) {
+              const walk = (n: ts.Node): void => {
+                if (
+                  ts.isIdentifier(n) &&
+                  n !== st.name &&
+                  n.text === "__init" &&
+                  this.symOf(n) === fs
+                )
+                  inits.delete(st);
+                ts.forEachChild(n, walk);
+              };
+              walk(m);
+            }
+          }
+        }
+    const target = (e: ts.Expression, at: ts.Node): void => {
+      let x: ts.Expression = e;
+      while (ts.isParenthesizedExpression(x) || ts.isNonNullExpression(x)) x = x.expression;
+      if (ts.isIdentifier(x)) {
+        const s = this.symOf(x);
+        if (s === undefined) return;
+        const d = s.valueDeclaration;
+        if (d === undefined || !ts.isVariableDeclaration(d) || this.isLocal(x)) return;
+        let fn: ts.Node | undefined = at;
+        while (fn !== undefined && !ts.isFunctionLike(fn)) fn = fn.parent;
+        // its own module's top-level __init, and no function inside it (a closure could run later)
+        const ok =
+          fn !== undefined &&
+          inits.has(fn) &&
+          fn.getSourceFile() === d.getSourceFile() &&
+          ts.isSourceFile(fn.parent);
+        if (ok) out.add(s);
+        else bad.add(s);
+      } else if (ts.isObjectLiteralExpression(x) || ts.isArrayLiteralExpression(x)) {
+        for (const el of ts.isArrayLiteralExpression(x) ? x.elements : x.properties) {
+          if (ts.isSpreadElement(el)) target(el.expression, at);
+          else if (ts.isPropertyAssignment(el)) target(el.initializer, at);
+          else if (ts.isShorthandPropertyAssignment(el)) target(el.name, at);
+          else if (ts.isSpreadAssignment(el)) target(el.expression, at);
+          else if (ts.isExpression(el)) target(el, at);
+        }
+      } else if (ts.isBinaryExpression(x) && x.operatorToken.kind === ts.SyntaxKind.EqualsToken)
+        target(x.left, at);
+    };
+    for (const sf of this.modules) {
+      const walk = (n: ts.Node): void => {
+        if (
+          ts.isBinaryExpression(n) &&
+          n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+          n.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+        )
+          target(n.left, n);
+        else if (
+          (ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n)) &&
+          (n.operator === ts.SyntaxKind.PlusPlusToken ||
+            n.operator === ts.SyntaxKind.MinusMinusToken)
+        )
+          target(n.operand, n);
+        else if (ts.isForInStatement(n) || ts.isForOfStatement(n)) {
+          if (!ts.isVariableDeclarationList(n.initializer)) target(n.initializer, n);
+        }
+        ts.forEachChild(n, walk);
+      };
+      walk(sf);
+    }
+    for (const s of bad) out.delete(s);
+    return out;
   }
 
   isQuiet(d: ts.Node | undefined): boolean {
@@ -1556,7 +1656,8 @@ class FnExpand {
         if (l.moved) throw new Unsupported(e, `rc: ${l.name} is read after its last use moved it`);
         return { ...v, root: l.owned ? s : l.sym, local: s };
       }
-      return { ...v, root: this.isLocalSym(s) ? s : "global" };
+      if (this.isLocalSym(s)) return { ...v, root: s };
+      return { ...v, root: "global", global: s };
     }
     if (ts.isPropertyAccessExpression(e)) {
       const base = this.expr(e.expression);
@@ -1707,7 +1808,8 @@ class FnExpand {
         v.root !== "null" &&
         v.local === undefined &&
         v.root !== "param" &&
-        v.root !== "this"
+        v.root !== "this" &&
+        !(v.global !== undefined && this.x.initOnly(v.global))
       ) {
         t = this.borrowed({
           ...v,

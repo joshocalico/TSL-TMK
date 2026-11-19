@@ -2853,6 +2853,45 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     });
   });
 
+  // 75. R28: fresh slots cut in line, references with no tag, init-only module variables borrowed, tails zeroed in line,
+  // and the optimiser's no-growth inlining, constant operands, tag folding and second versioning pass.
+  M.unit("75", async () => {
+    const R28 = timedModule("r28", await import("../r28-tests.ts"));
+    const failures: string[] = [];
+    const d = await R28.r28Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of corpus/lower/r28 ran");
+    if (d.agreed !== d.cases)
+      failures.push(`${d.cases - d.agreed} cases differ through the two routes`);
+    for (const mode of ["rc", "leak"])
+      if (!d.printed.includes(`${R28.R28_DIR}/r28_rc.ts@${mode}`))
+        failures.push(`r28_rc.ts doesn't class-print in ${mode}`);
+    report({
+      box: "75. R28 (3.5, 4.3, D44, D73, D78): @tsl/gc's fresh slot cut in line where its page has room (pageCut, make's and tailFast's fast paths); a lowered rc package's heap class's references with no tag, read and counted with no mask, freeing's release call handing each class its own object (callRelease's arms); a module variable only __init writes given to a call borrowed; placeTail's zeroing a word at a time in line up to 128 bytes; the inliner taking a callee no bigger than its call past the growth limit; a tag or'd into a reference's top 16 bits taken off before ref.addr; dominating conditions taking two equal constants as one operand; and -O2's loops the first versioning pass left versioned after the copying rounds: corpus/lower/r28/r28_rc.ts (a module variable overwritten by the call it's given to, literals read in loops, objects and arrays kept fresh across pages, several classes holding each other freed, arrays grown, cut and grown with holes read, one constant index tested and another read with the lowering's pinned traps, a view scanned to and one past its length, eight loops of checked reads) agrees with V8 natively and through both routes with class printing forced in rc and leak at -O0, -O1 and -O2, and the printed TSL on V8 and JSC with the source (tools/r28-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `through both routes ${d.agreed}/${d.cases}, ${d.handled} builds class-printed${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 76. R28's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("76", async () => {
+    const R28 = timedModule("r28", await import("../r28-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R28.R28_FAULTS) {
+      const x = await R28.r28Fault(f, accel, jobs);
+      rows.push(`${f.name}: ${caughtText(x)}`);
+      if (x.caught === 0) failures.push(`${f.name} wasn't caught: ${x.first}`);
+    }
+    report({
+      box: `76. R28: each of ${R28.R28_FAULTS.length} bugs is caught by a wrong answer or a trap, with how many cases caught it: callRelease's arm handing a class with no tag its object tagged, every class's references read with no mask, every module variable taken as written only by __init, placeTail's zeroing in line a word short, the in-line cut not testing its page's end, dominating conditions taking any two constants as one operand, ref.addr's tag fold keeping the tag, a callee only the no-growth rule lets in copied without its first store, and the second versioning pass's guard one turn too loose, each over corpus/lower/r28, r26 and r27 in rc through both routes at the bug's levels, @tsl/gc's also over corpus/rc/rc_steps*.ts natively (tools/r28-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
   M.vms(
     "8",
     "8. No QEMU process of this run is left, and the owner's UTM and QEMU processes were only observed",

@@ -329,6 +329,24 @@ function pageSlot(k: usize): u64 {
 }
 
 /**
+ * R28: pageSlot's common case alone, for `make`'s and `tailFast`'s fast paths in line: a slot of size class k cut from the
+ * page its class is being cut from, where it's a small class and that page has room; 0 otherwise, and nothing changed, so
+ * the caller goes on to `tryMakeAfter` or `tailMakeAfter`, whose pageSlot finds the same and takes a fresh page. A fresh
+ * object was a call out of line (`tryMakeAfter`, 59 instructions to the direct route's `__rc_small` 34 at -O2, R26).
+ */
+/** @tsl.inline */
+// SAFETY: as pageSlot's: where cutting is only ever moves forward over slots handed out, within the page.
+function pageCut(k: usize): u64 {
+  const size = BigInt.asUintN(64, toU64(1) << toU64(k));
+  if (size > toU64(PAGE_CUT)) return 0n;
+  const at = ptrAt(u64, cuts).add(k);
+  const slot = at.read();
+  if (slot === 0n || BigInt.asUintN(64, slot + size) > at.add(CLASSES).read()) return 0n;
+  at.write(BigInt.asUintN(64, slot + size));
+  return slot;
+}
+
+/**
  * R19: slotFor where the caller has just found size class k's list empty after its freeing steps, with nothing run since
  * (`make`'s and `tailFast`'s fast paths, before `tryMakeAfter` and `tailMakeAfter`): without the collector that's what
  * takeSlot would find too, so a fresh slot from its page straight away; and with no memory, slotDrained, as slotFor.
@@ -651,8 +669,9 @@ function freeAlloc(n: usize): u64 {
       stepping = true;
       spare = BigInt.asUintN(64, left - 1n);
       const rel = ptrAt(u32, entry).read();
-      const item = objectAt<Counted0>(head);
-      s = callRelease(rel, item, 0, Visit.Drop);
+      // R28: the object made in the call, so each release function's arm makes its own class's (an address, for a lowered
+      // package's class, with no generation read or put on, or masked off again)
+      s = callRelease(rel, objectAt<Counted0>(head), 0, Visit.Drop);
       left = spare;
       spare = 0n;
       stepping = false;
@@ -1679,11 +1698,18 @@ export class Rc<T extends object> {
       }
       const k = this.tk;
       const head = ptrAt(u64, heads).add(k);
-      const slot = head.read();
+      let slot = head.read();
+      if (slot !== 0n) head.write(countAt(slot).read());
+      else if (!cyclesLinked()) {
+        // R28: without the collector, a fresh slot cut in line where its page has room, as tailMakeAfter cuts it
+        slot = pageCut(k);
+        if (slot !== 0n) genAt(slot).write(0);
+      }
       if (slot !== 0n) {
-        head.write(countAt(slot).read());
         const gen = this.claim(slot, this.tw);
         const fast = keep === 0 ? placeTail(slot, gen, n, item) : placeTail(slot, gen, n, item, keep);
+        // as make's: learn has nothing to do but on the host for a fresh slot's
+        if (cycleGroup<T>() === GROUP_UNKNOWN) this.learn(fast);
         if (cyclesLinked() && rest !== 0) restIfWork();
         return fast;
       }
@@ -1760,6 +1786,16 @@ export class Rc<T extends object> {
         const fast = placeObject(slot, this.claim(slot, this.owner), item);
         if (cyclesLinked() && rest !== 0) restIfWork();
         return fast;
+      }
+      // R28: without the collector, a fresh slot cut in line where its page has room: tryMakeAfter's slot and steps
+      if (!cyclesLinked()) {
+        const cut = pageCut(this.k);
+        if (cut !== 0n) {
+          genAt(cut).write(0);
+          const fresh = placeObject(cut, this.claim(cut, this.owner), item);
+          if (cycleGroup<T>() === GROUP_UNKNOWN) this.learn(fresh);
+          return fresh;
+        }
       }
       const after = this.tryMakeAfter(item);
       if (after === null) trap(Trap.OutOfMemory);

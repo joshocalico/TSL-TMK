@@ -33,8 +33,9 @@ export const R4_FAULTS: R2Fault[] = [
     where: "library",
     patch: {
       file: "ex-gc-roomarray.ts",
-      from: "this.holes ? idiv(this.len * size, 8) : words",
-      to: "this.holes ? idiv(this.len * size, 8) + 1 : words",
+      // R28: grow names what's kept `keep` (a word count with no rounding where an element is a word)
+      from: "this.holes ? keep : words",
+      to: "this.holes ? keep + 1 : words",
     },
     dirs: ["corpus/lower/rc-tsl"],
   },

@@ -17,7 +17,7 @@
 // where the answer is already known, or stays as it is. Floats aren't touched (NaN answers every ordered compare false).
 import { buildCfg, type Func, type Instr } from "../ir.ts";
 import { removeUnreachable } from "./cfg.ts";
-import { opParts, substitute, valueOps } from "./util.ts";
+import { opParts, r28Off, substitute, valueOps } from "./util.ts";
 
 export interface CondsStats {
   branches: number; // branches on a known value made jumps
@@ -28,6 +28,8 @@ export interface CondsStats {
 export interface CondsFaults {
   /** Injected (R15): a fact from an edge is taken where the edge's block is reached from elsewhere too, so doesn't dominate. */
   notDominating?: boolean;
+  /** Injected (R28): any two integer constants of one type are taken as the same operand, whatever their values. */
+  constsAny?: boolean;
 }
 
 // What a relation that holds also gives, and its opposite.
@@ -114,14 +116,27 @@ export function condsFunc(f: Func, stats: CondsStats, faults: CondsFaults = {}):
     const [a, b] = valueOps(d) as [number, number];
     return { t: p[2]!, p: v === 1 ? p[1]! : NOT[p[1]!]!, a, b };
   };
+  // R28: two operands are the same if they're one value, or two integer constants of one type and value (a test above
+  // and `get`'s own of `i < len` for a constant i each make their own constant, and -O1's value numbering leaves them be)
+  const same = (x: number, y: number): boolean => {
+    if (x === y) return true;
+    if (r28Off("consts")) return false;
+    const dx = def.get(x);
+    const dy = def.get(y);
+    if (dx === undefined || dy === undefined || dx.op !== dy.op || !dx.op.startsWith("iconst."))
+      return false;
+    const ix = dx.ops[0];
+    const iy = dy.ops[0];
+    return ix?.t === "i" && iy?.t === "i" && (ix.val === iy.val || faults.constsAny === true);
+  };
   // Whether x q y (of type t) is decided by the relations known: 1 true, 0 false, null not known.
   const decide = (t: string, q: string, x: number, y: number): 0 | 1 | null => {
     for (let i = rels.length - 1; i >= 0; i--) {
       const r = rels[i]!;
       if (r.t !== t) continue;
       let qq: string;
-      if (r.a === x && r.b === y) qq = q;
-      else if (r.a === y && r.b === x) qq = SWAP[q]!;
+      if (same(r.a, x) && same(r.b, y)) qq = q;
+      else if (same(r.a, y) && same(r.b, x)) qq = SWAP[q]!;
       else continue;
       const imp = IMPLIES[r.p]!;
       if (imp.includes(qq)) return 1;

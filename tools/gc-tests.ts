@@ -31,9 +31,17 @@ export const GC_FAULTS: Fault[] = [
     // R19: and freeFlat's, the same visit in the same words, which takes an object freeing starts with the cursor idle
     // (freeSteps then takes only an object part freed, or one a scan gave up): both, or the bug wouldn't be where freeing is.
     // R24: and freeAlloc's, the same visit in the same words, which an allocation without the collector linked takes
-    times: 3,
+    // R28: freeAlloc's now makes the object in the call (each release function's arm its own class's), so it's patched too
+    times: 2,
     from: "s = callRelease(rel, item, 0, Visit.Drop);",
     to: "s = 0;",
+    more: [
+      {
+        file: RC,
+        from: "s = callRelease(rel, objectAt<Counted0>(head), 0, Visit.Drop);",
+        to: "s = 0;",
+      },
+    ],
   },
   {
     name: "freeing not bounded: a make frees everything waiting",
@@ -297,12 +305,13 @@ export async function gcFaultRun(
   jobs: number,
   engines: Engines,
 ): Promise<{ caught: number; answers: number; first: string; broken: boolean }> {
-  process.env.TSL_TEST_PATCH = patchEnv({
+  const main = {
     file: f.file,
     from: f.from,
     to: f.to,
     ...(f.times !== undefined ? { times: f.times } : {}),
-  });
+  };
+  process.env.TSL_TEST_PATCH = patchEnv(f.more !== undefined ? [main, ...f.more] : main);
   try {
     const r = await runNative("std", [accel], jobs, "rc_gc", engines);
     faultFailures(r.failures, f.name);

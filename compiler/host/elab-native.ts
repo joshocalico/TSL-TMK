@@ -1,7 +1,7 @@
 // TSL proper with memory: plain classes, layout classes, non-escaping closures, raw pointers and whole-program
 // compilation (SPEC 3.4, 3.5, Appendix A). A program using none of them goes through the base Elaborator and
 // gets exactly the TIR it always did. Containers are ordinary classes here: nothing below knows about a Vec.
-import { isCountedExactly } from "./expand-rc.ts";
+import { isCountedExactly, loweredRcHeapClass, untaggedCounted } from "./expand-rc.ts";
 import { cycleGraph, cycleGroupOf } from "./cycle-graph.ts";
 import ts from "typescript";
 import { isHandleParam } from "./consume.ts";
@@ -4155,7 +4155,26 @@ export class NativeElaborator extends Elaborator {
         // Closed-world dispatch (D70's form, R1d): the number compared with each release function's in turn, each arm a
         // direct call, and trap 18 for a number that's none of them, which only memory written unsafely can give.
         const idx = this.coerce(this.expr(a[0]!, T.u32), T.u32, a[0]!);
+        // R28: given `objectAt<C>(slot)` itself, the slot is taken, and each arm makes its own class's object from it, as
+        // `objectAt` of that class makes it: a class whose references have no tag (lower-native.ts's untaggedRcClass) its
+        // address, with no generation read or put on and none masked off again; any other class as before. Given anything
+        // else, the object, and an arm for such a class has it masked (`rc.untag`).
+        let given = a[1]!;
+        while (ts.isParenthesizedExpression(given)) given = given.expression;
+        let slotArg: ts.Expression | null = null;
+        if (
+          ts.isCallExpression(given) &&
+          ts.isIdentifier(given.expression) &&
+          given.arguments.length === 1 &&
+          !(process.env.TMK_R28_OFF ?? "").split(",").includes("untag")
+        ) {
+          const sym = this.symbolOf(given.expression);
+          if (sym !== undefined && this.isUnsafeSymbol(sym) && sym.name === "objectAt")
+            slotArg = given.arguments[0]!;
+        }
         const item = this.expr(a[1]!);
+        const slotTE =
+          slotArg !== null ? this.coerce(this.expr(slotArg, T.u64), T.u64, slotArg) : null;
         const at = usizeArg(2);
         const op = this.expr(a[3]!);
         if (this.dry || item.ty.k === "unk" || op.ty.k === "unk") return mk(T.usize, { k: "err" });
@@ -4166,12 +4185,14 @@ export class NativeElaborator extends Elaborator {
             ? this.releaseShown.map((d) => this.instance(d, [], e))
             : this.releaseInsts(e);
         const vi = this.newHidden(T.u32);
-        const vo = this.newHidden(item.ty);
+        const vo = this.newHidden(slotTE !== null ? T.u64 : item.ty);
         const va = this.newHidden(T.usize);
         const vp = this.newHidden(op.ty);
         const items: TE[] = [
           mk(T.u32, { k: "setvar", v: vi, val: idx }),
-          mk(item.ty, { k: "setvar", v: vo, val: item }),
+          slotTE !== null
+            ? mk(T.u64, { k: "setvar", v: vo, val: slotTE })
+            : mk(item.ty, { k: "setvar", v: vo, val: item }),
           mk(T.usize, { k: "setvar", v: va, val: at }),
           mk(op.ty, { k: "setvar", v: vp, val: op }),
         ];
@@ -4181,12 +4202,37 @@ export class NativeElaborator extends Elaborator {
         for (let i = fns.length - 1; i >= 0; i--) {
           const g = fns[wrong ? (i + 1) % fns.length : i]!;
           const p0 = g.params[0]!.ty;
+          // R28: the object is an objectAt<Counted0>, tagged; a class whose references have no tag (a lowered `rc`
+          // package's heap class, lower-native.ts's untaggedRcClass) is given it masked, so every reference to one is its
+          // address. `tmk milestone pipe-d`'s injected bug hands it over tagged. Never set otherwise.
+          const untag =
+            p0.k === "cls" &&
+            untaggedCounted(p0.c.decl) &&
+            loweredRcHeapClass(p0.c.decl) &&
+            !(process.env.TMK_R28_OFF ?? "").split(",").includes("untag") &&
+            process.env.TMK_TEST_TSL !== "r28-untag-arm";
+          let arg: TE;
+          if (slotTE !== null) {
+            // each arm's own object from the slot: `rc.objectAt` is `objectAt` (lower-native.ts), named apart so the
+            // analyses that read `objectAt` see what they saw before, the generic object (escape.ts, tslc's invariance)
+            // (`text` says which: "untagged", the address; "tagged", with the slot's generation, as objectAt<Counted0>)
+            arg = mk(p0, {
+              k: "builtin",
+              name: "rc.objectAt",
+              args: [mk(T.u64, { k: "var", v: vo })],
+              loc,
+              text: untag ? "untagged" : "tagged",
+            });
+          } else {
+            const obj = mk(p0, { k: "var", v: vo });
+            arg = untag ? mk(p0, { k: "builtin", name: "rc.untag", args: [obj], loc }) : obj;
+          }
           const call = this.at(
             mk(T.usize, {
               k: "call",
               inst: g,
               args: [
-                mk(p0, { k: "var", v: vo }),
+                arg,
                 mk(T.usize, { k: "var", v: va }),
                 mk(g.params[2]!.ty, { k: "var", v: vp }),
               ],

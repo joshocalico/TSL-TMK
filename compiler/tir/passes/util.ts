@@ -352,3 +352,8 @@ export function termCost(t: Block["term"]): number {
 export function r26Off(part: string): boolean {
   return (process.env.TMK_R26_OFF ?? "").split(",").includes(part);
 }
+
+/** R28's parts turned off, a measurement only (`TMK_R28_OFF=grow`, say). */
+export function r28Off(part: string): boolean {
+  return (process.env.TMK_R28_OFF ?? "").split(",").includes(part);
+}

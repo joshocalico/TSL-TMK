@@ -30,7 +30,7 @@ import { versionFunc, type VersionStats } from "./version.ts";
 import { simplifyFunc, type FoldFaults, type SimplifyStats } from "./simplify.ts";
 import { sroaFunc, type SroaStats } from "./sroa.ts";
 import { removeUnreached, type UnreachedStats } from "./unreached.ts";
-import { cloneModule, r26Off } from "./util.ts";
+import { cloneModule, r26Off, r28Off } from "./util.ts";
 
 export type { OptLevel, Remark } from "./inline.ts";
 
@@ -108,6 +108,10 @@ export const OPT_FAULTS = [
   "r26-round-swap", // in -O2's second or later copying round, an unswitched loop's two copies take each other's way (R26)
   "r27-summary-miss", // a call's write summary misses a write: a store anywhere but a frame slot taken as one into a block (R27)
   "r27-alias-any", // the separation misses an alias: every 64-bit word loaded taken as a separated field's block (R27)
+  "r28-consts-any", // dominating conditions take any two integer constants of a type as the same operand (R28)
+  "r28-tag-keep-wrong", // `ref.addr (or x, tag)` folded to the tag's pointer, not x's: the address dropped (R28)
+  "r28-shrink-store", // a callee only the no-growth rule lets in is copied without its first store (R28)
+  "r28-version-again", // -O2's second versioning pass lets the fast copy run one turn past what its checks allow (R28)
 ] as const;
 
 export interface OptOptions {
@@ -274,6 +278,7 @@ export function optimizeModule(
     selfCompare: faults.has("fold-self-compare"),
     pow2Mask: faults.has("fold-pow2-mask"),
     shiftBack: faults.has("fold-shift-back"),
+    tagKeepWrong: faults.has("r28-tag-keep-wrong"),
   };
   const inlineFaults: InlineFaults = {
     swapArgs: faults.has("inline-swap-args"),
@@ -282,6 +287,7 @@ export function optimizeModule(
     impurePrefix: faults.has("inline-impure-prefix"),
     dropRcStore: faults.has("inline-drop-rc-store"),
     allocaPure: faults.has("inline-alloca-pure-block"),
+    shrinkStore: faults.has("r28-shrink-store"),
   };
   const dceFaults = {
     dropEffect: faults.has("dce-drop-store"),
@@ -418,7 +424,10 @@ export function optimizeModule(
       return c;
     };
     // R15: a test a test above it answered, at -O1 and -O2: one walk down the dominator tree (conds.ts).
-    const condsFaults = { notDominating: faults.has("conds-not-dominating") };
+    const condsFaults = {
+      notDominating: faults.has("conds-not-dominating"),
+      constsAny: faults.has("r28-consts-any"),
+    };
     const conds = (f: Func): boolean => {
       if (off.has("conds")) return false;
       const c = condsFunc(f, report.conds, condsFaults);
@@ -486,12 +495,14 @@ export function optimizeModule(
         // doesn't change moves out of it in turn.
         // -O2 (R15): a loop with checks a guard before it can prove gets a fast copy without them, the loop as it was the
         // fallback; then what the copy no longer checks is shared and moved as anywhere else.
+        const versioned = new Set<number>();
         if (o.level >= 2 && !off.has("version")) {
           const before = process.env.TMK_OPT_DEBUG === "1" ? printFunc(f) : "";
           const copied = versionFunc(
             f,
             { deadAtO0, stats: report.version, limits: VERSION_O2, faults: versionFaults },
             new Set(),
+            versioned,
           );
           if (copied) {
             try {
@@ -540,6 +551,33 @@ export function optimizeModule(
             if (licm(f)) gvn(f);
             if (checks(f)) gvn(f);
             local(f);
+          }
+          // R28: the loops the rounds made (an unswitched copy, a peeled loop's rest), each a loop of its own whose checks a
+          // guard before it may now prove, versioned as the first pass versions (a view's scan, its start and its buffer's
+          // length from outside the loop once unswitching has taken the view's way); a loop the first pass versioned, its
+          // fast copy or its fallback, isn't looked at again.
+          if (o.level >= 2 && !off.has("version") && !r28Off("version")) {
+            const copied = versionFunc(
+              f,
+              {
+                deadAtO0,
+                stats: report.version,
+                limits: VERSION_O2,
+                faults: faults.has("r28-version-again")
+                  ? { ...versionFaults, offByOne: true }
+                  : versionFaults,
+              },
+              new Set(versioned),
+            );
+            if (copied) {
+              verify("version", f);
+              local(f);
+              gvn(f);
+              if (licm(f)) gvn(f);
+              if (checks(f)) gvn(f);
+              conds(f);
+              local(f);
+            }
           }
         }
       }

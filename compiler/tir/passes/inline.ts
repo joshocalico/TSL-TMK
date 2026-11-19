@@ -29,6 +29,7 @@ import {
   newBlockId,
   newValue,
   r26Off,
+  r28Off,
   termCost,
   valueOps,
 } from "./util.ts";
@@ -59,6 +60,8 @@ export interface InlineFaults {
   impurePrefix?: boolean; // partial inlining treats stores as free of effects, so a bail runs them twice
   dropRcStore?: boolean; // the first store of an inlined `__rc_` function is left out: a count missed
   allocaPure?: boolean; // R20: a block with a frame slot taken as free of effects whatever comes after the slot
+  dropAnyStore?: boolean; // R28: the bug above's means, set for that one copy
+  shrinkStore?: boolean; // R28: a callee only the no-growth rule lets in copied without its first store
 }
 
 export interface InlineContext {
@@ -534,9 +537,9 @@ export function inlineAt(
         }
       }
       if (
-        ctx.faults.dropRcStore === true &&
+        (ctx.faults.dropRcStore === true || ctx.faults.dropAnyStore === true) &&
         !droppedRcStore &&
-        g.name.startsWith("__rc_") &&
+        (g.name.startsWith("__rc_") || ctx.faults.dropAnyStore === true) &&
         c.op.startsWith("store.")
       ) {
         droppedRcStore = true;
@@ -743,7 +746,10 @@ function inlineInto(
         }
         const grown = cost + gc - callOverhead(g);
         if (gc <= threshold) {
-          if (grown > HARD_CAP || (!forced && grown > softCap)) {
+          // R28: a callee no bigger than its call doesn't grow the caller, so the growth limit doesn't refuse it (forced
+          // copies can take a caller past its soft limit, and then a three-instruction method was left a call)
+          const shrinks = gc <= callOverhead(g) && !r28Off("grow");
+          if (grown > HARD_CAP || (!forced && !shrinks && grown > softCap)) {
             no(
               `the caller would grow past its limit (${grown} > ${forced ? HARD_CAP : softCap})`,
               gc,
@@ -752,7 +758,11 @@ function inlineInto(
             continue;
           }
           const had = keepLoops ? new Set(f.blocks.map((x) => x.id)) : null;
-          inlineAt(f, bi, ii, g, ctx, null);
+          // R28's injected bug: a callee only the no-growth rule let in, copied without its first store
+          const onlyShrink = !forced && shrinks && grown > softCap;
+          if (onlyShrink && ctx.faults.shrinkStore === true)
+            inlineAt(f, bi, ii, g, { ...ctx, faults: { ...ctx.faults, dropAnyStore: true } }, null);
+          else inlineAt(f, bi, ii, g, ctx, null);
           // R26: a call in a loop's block leaves that block split, its copy of the callee and the rest of the block new
           // blocks: they're in the loop as the block was, so a call after this one in the block is still a call in a loop
           if (had !== null && loops.has(b.id))

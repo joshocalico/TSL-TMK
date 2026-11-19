@@ -12,6 +12,7 @@ export interface Fault {
   from: string;
   to: string;
   times?: number; // R19: how many times `from` is in the file, each replaced (test-patch.ts); 1 unless said
+  more?: { file: string; from: string; to: string; times?: number }[]; // R28: the same bug where it's written otherwise
 }
 
 // R18 (SPEC 8.3's fault rule): ExactMap and Map share their code's text, so a bug's text there is the same in both, and a

@@ -16,13 +16,38 @@ import {
   type TypedModule,
   type Var,
 } from "./types.ts";
-import { stackTagged, untaggedCounted } from "./expand-rc.ts";
+import { loweredRcHeapClass, stackTagged, untaggedCounted } from "./expand-rc.ts";
 import { tslOptOff } from "./program.ts";
 import { walkStmts, walkTE } from "./walk.ts";
 
 // A slot is [next free slot: u64][generation: u32][owner: u32][object]. gen.chk only reads the word before the
 // object, so it, and a static object's one-word prefix, don't depend on the rest of this.
 const SLOT_PREFIX = 16;
+
+/**
+ * R28: whether every reference to a class's objects is its object's address, with no tag in its top bits, so a field is
+ * read and written through it with no mask (relative_import's one `ubfx` a read, R19). A class of a lowered `rc` package
+ * (`loweredRcHeapClass`: counted exactly, never `@tsl.stack`, every object in a slot a store's `make` placed) whose
+ * references are untagged (R8's `untaggedCounted`). Its references come from: `placeObject` and `placeTail`, which give the
+ * address for such a class; `objectAt<C>`, likewise; and freeing's and the collector's release call, whose object is an
+ * `objectAt<Counted0>`, tagged, which `callRelease`'s arm for such a class hands over masked (`rc.untag`, elab-native.ts).
+ * A lowered package can't import @tsl/unsafe (TSL1023), so it has no other way to make one, and the libraries that hold
+ * them (`JsRoomArray`, `JsMap`, `Weak`) only store and load them whole. 3.5's "References with no tag", D78.
+ */
+function untaggedRcClass(c: ClassInst | undefined): boolean {
+  if (c === undefined || r28LowerOff("untag")) return false;
+  // `tmk milestone pipe-d`'s injected bug: every class's references read with no mask. Never set otherwise.
+  if (process.env.TMK_TEST_TSL === "r28-untag-any") return true;
+  return untaggedCounted(c.decl) && loweredRcHeapClass(c.decl);
+}
+
+/** R28: the most bytes placeTail zeroes in line, a word at a time (4 instructions a word, to the routine's 3 and its 18). */
+const ZERO_INLINE = 128;
+
+/** R28's lowering put back as it was, a measurement and tools/r28-pins.ts's (`TMK_R28_OFF=zero`). */
+function r28LowerOff(part: string): boolean {
+  return (process.env.TMK_R28_OFF ?? "").split(",").includes(part);
+}
 
 export function thunkName(name: string): string {
   return `${name}$thunk`;
@@ -148,9 +173,12 @@ function fieldAddr(
   c?: ClassInst,
 ): number {
   const ref = fl.expr(obj)[0]!;
-  // A plain class's references have no tag (D64): the pointer is the reference, with nothing to mask.
+  // A plain class's references have no tag (D64): the pointer is the reference, with nothing to mask. R28: nor has a
+  // lowered `rc` package's heap class's (untaggedRcClass): every reference to one is its object's address.
   const base =
-    c?.plain === true && check === false ? fl.i64ToPtr(ref) : refChecked(fl, ref, check, loc);
+    (c?.plain === true || untaggedRcClass(c)) && check === false
+      ? fl.i64ToPtr(ref)
+      : refChecked(fl, ref, check, loc);
   return fl.memAddr(base, f.off);
 }
 
@@ -651,7 +679,9 @@ function builtin(fl: FnLower, te: Extract<TE, { k: "builtin" }>): number[] {
       const lenAt = c.tail!.f.off;
       const dst = fl.memAddr(slot, SLOT_PREFIX);
       const bytes = tailSizeIx(fl, c, n, loc);
-      if (lenAt > 0) {
+      const keepGiven = te.args.length > 4;
+      const inlineZero = !r28LowerOff("zero");
+      if (lenAt > 0 && (keepGiven || !inlineZero)) {
         fl.emit(
           "intrinsic",
           [{ t: "name", name: "mem.copy" }, v(dst), v(fl.refAddr(item)), v(fl.iconst("ix", lenAt))],
@@ -665,7 +695,35 @@ function builtin(fl: FnLower, te: Extract<TE, { k: "builtin" }>): number[] {
           [],
         );
       };
-      if (te.args.length > 4) {
+      // R28: up to ZERO_INLINE bytes zeroed a word at a time in line, where what's zeroed starts at a multiple of 8 from
+      // the slot's 16-aligned fields and is a multiple of 8 long: a short tail's zeroing was a call to the fill routine and
+      // its setup, about 18 instructions before its first store. Longer, the routine, which stores 16 bytes a turn.
+      const zeroWords = (from: number, len: number): void => {
+        const small = fl.op1("icmp.ule.ix", [v(len), v(fl.iconst("ix", ZERO_INLINE))], "i32");
+        const inl = fl.newBlock();
+        const call = fl.newBlock();
+        const done = fl.newBlock();
+        fl.brif(small, inl, call);
+        fl.seal(inl);
+        fl.seal(call);
+        fl.cur = call;
+        fill(from, len);
+        fl.br(done);
+        fl.cur = inl;
+        const words = fl.op1("lshr.ix", [v(len), v(fl.iconst("ix", 3))], "ix");
+        // `tmk milestone pipe-d`'s injected bug: a word short. Never set otherwise.
+        const to =
+          process.env.TMK_TEST_TSL === "r28-zero-short"
+            ? fl.op1("sub.ix", [v(words), v(fl.iconst("ix", 1))], "ix")
+            : words;
+        loop(fl, fl.iconst("ix", 0), to, (i) =>
+          fl.emit("store.i64.na", [v(gep(fl, from, i, 8)), v(fl.iconst("i64", 0))], []),
+        );
+        fl.br(done);
+        fl.seal(done);
+        fl.cur = done;
+      };
+      if (keepGiven) {
         // R4: the tail's first `keep` elements are the caller's to write before anything reads them, so only what's
         // after them is zeroed, and the fixed part from the length to the tail. More than n traps 2.
         const keep = fl.expr(te.args[4]!)[0]!;
@@ -680,10 +738,31 @@ function builtin(fl: FnLower, te: Extract<TE, { k: "builtin" }>): number[] {
           [v(big), v(fl.iconst("ix", 0)), v(fl.op1("sub.ix", [v(bytes), v(from)], "ix"))],
           "ix",
         );
-        fill(
-          fl.op1("gep", [v(dst), v(from), { t: "i", val: 1n }, { t: "i", val: 0n }], "ptr"),
-          len,
+        const at = fl.op1(
+          "gep",
+          [v(dst), v(from), { t: "i", val: 1n }, { t: "i", val: 0n }],
+          "ptr",
         );
+        // keep elements of a multiple of 8 bytes from a tail at a multiple of 8 leave the rest a multiple of 8 from there
+        if (inlineZero && t.esize % 8 === 0 && t.at % 8 === 0) zeroWords(at, len);
+        else fill(at, len);
+      } else if (inlineZero) {
+        // R28: from the word the length is in to the end, then the fields before the length copied over that word's
+        // first bytes (the item is the caller's, never the slot, so the order can't show)
+        const z = lenAt - (lenAt % 8);
+        zeroWords(fl.memAddr(dst, z), fl.op1("sub.ix", [v(bytes), v(fl.iconst("ix", z))], "ix"));
+        if (lenAt > 0) {
+          fl.emit(
+            "intrinsic",
+            [
+              { t: "name", name: "mem.copy" },
+              v(dst),
+              v(fl.refAddr(item)),
+              v(fl.iconst("ix", lenAt)),
+            ],
+            [],
+          );
+        }
       } else
         fill(fl.memAddr(dst, lenAt), fl.op1("sub.ix", [v(bytes), v(fl.iconst("ix", lenAt))], "ix"));
       fl.memStore(dst, { t: "i32", off: lenAt }, fl.op1("trunc.i32", [v(n)], "i32"));
@@ -791,6 +870,19 @@ function builtin(fl: FnLower, te: Extract<TE, { k: "builtin" }>): number[] {
       if (untaggedCounted(info.c!.decl)) return [fl.ptrToI64(dst)];
       return [tagged(fl, dst, fl.op1("zext.i64", [v(gen)], "i64"))];
     }
+    case "rc.objectAt": {
+      // R28: callRelease's arm's object from the slot (elab-native.ts): its address for a class whose references have no
+      // tag, or with the slot's generation, as `objectAt<Counted0>` made it before
+      const slot = fl.i64ToPtr(fl.expr(te.args[0]!)[0]!);
+      if (te.text === "untagged") return [fl.ptrToI64(fl.memAddr(slot, SLOT_PREFIX))];
+      const gen = fl.memLoad(slot, { t: "i32", off: SLOT_PREFIX - 8 });
+      return [tagged(fl, fl.memAddr(slot, SLOT_PREFIX), fl.op1("zext.i64", [v(gen)], "i64"))];
+    }
+    case "rc.untag": {
+      // R28: a reference with its tag masked off, for callRelease's arm of a class whose references have none (elab-native.ts)
+      const r = fl.expr(te.args[0]!)[0]!;
+      return [fl.ptrToI64(fl.refAddr(r))];
+    }
     case "unsafe.objectAt": {
       const slot = fl.i64ToPtr(fl.expr(te.args[0]!)[0]!);
       if (te.ty.k === "cls" && untaggedCounted(te.ty.c.decl))
@@ -803,7 +895,9 @@ function builtin(fl: FnLower, te: Extract<TE, { k: "builtin" }>): number[] {
       // `TMK_TEST_TSL=slot-live-checked` checks it as slotOf does, for measuring what the check cost.
       if (process.env.TMK_TEST_TSL !== "slot-live-checked") {
         const r = fl.expr(te.args[0]!)[0]!;
-        const addr = fl.ptrToI64(fl.refAddr(r));
+        // R28: a reference with no tag (untaggedRcClass) is its address already, with nothing to mask
+        const a0 = te.args[0]!.ty;
+        const addr = a0.k === "cls" && untaggedRcClass(a0.c) ? r : fl.ptrToI64(fl.refAddr(r));
         return [fl.op1("sub.i64", [v(addr), v(fl.iconst("i64", SLOT_PREFIX))], "i64")];
       }
     }

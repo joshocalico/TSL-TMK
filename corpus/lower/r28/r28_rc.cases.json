@@ -1,0 +1,20 @@
+[
+  { "fn": "overwriteWhileBorrowed", "args": [12] },
+  { "fn": "literals", "args": [50] },
+  { "fn": "literals", "args": [301] },
+  { "fn": "freshKept", "args": [3, 40] },
+  { "fn": "freshKept", "args": [17, 30] },
+  { "fn": "releaseMixed", "args": [60] },
+  { "fn": "regrowHoles", "args": [5] },
+  { "fn": "regrowHoles", "args": [33] },
+  { "fn": "constIndexes", "args": [4, 3] },
+  { "fn": "constIndexes", "args": [2, 1], "lowered_trap": 2 },
+  { "fn": "constIndexes", "args": [3, 2], "lowered_trap": 2 },
+  { "fn": "constIndexes", "args": [1, 0], "lowered_trap": 2 },
+  { "fn": "viewScan", "args": [40, 0] },
+  { "fn": "viewScan", "args": [41, 1] },
+  { "fn": "viewScan", "args": [300, 0] },
+  { "fn": "manyLoops", "args": [20, 20] },
+  { "fn": "manyLoops", "args": [20, 21], "lowered_trap": 2 },
+  { "fn": "manyLoops", "args": [9, 5] }
+]

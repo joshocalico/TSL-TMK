@@ -382,6 +382,17 @@ async function faultSteps(
   const engines = defaultEngines();
   return [
     {
+      // R28: the no-growth inlining rule, -O2's second versioning pass, dominating conditions on equal constants and the
+      // tag taken off before ref.addr, on R28's program through both routes in rc at -O1 and -O2, against V8 (seconds, so
+      // first: R28's bugs are caught here, and so may an earlier bug be, which changes only which step names it).
+      name: "R28's program through both routes at -O1 and -O2 (corpus/lower/r28, tools/r28-tests.ts)",
+      run: async () => {
+        const R28 = await import("./r28-tests.ts");
+        const d = await R28.r28Dual([accel], jobs, [1, 2], false, undefined, ["rc"]);
+        return d.failures.length === 0 && d.cases > 0;
+      },
+    },
+    {
       // R27: fresh-allocation separation's write summaries and blocks (memory.ts), on R27's TSL programs natively at -O1
       // and -O2, against V8 (seconds, so first: R27's bugs are caught here, and so may an earlier bug be, which changes only
       // which step names it).

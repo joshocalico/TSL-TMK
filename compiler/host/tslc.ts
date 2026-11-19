@@ -1052,9 +1052,15 @@ export const AUTO_MAPS = false;
 /**
  * R10: whether `auto` builds a lowered `rc` program with strings through the TSL route, its strings the program's own JsStr
  * counted by tslc's expansion (emit-rcstr.ts): only once every `rc` string benchmark is no slower than the direct route at
- * -O1 and -O2 in two quiet runs (M5's R10 record).
+ * -O1 and -O2 in two quiet runs (M5's R10 record). On since R28 (M5's R28 record): appends, short joins, substrings, scans
+ * and split and join all at or under 1.00 at -O1 and -O2, by instruction counts. `TMK_R28_OFF=strings` puts it back off, for
+ * tools/r28-pins.ts's comparison; never set otherwise.
  */
-export const AUTO_RC_STRINGS = false;
+export const AUTO_RC_STRINGS = true;
+
+function autoRcStrings(): boolean {
+  return AUTO_RC_STRINGS && !(process.env.TMK_R28_OFF ?? "").split(",").includes("strings");
+}
 
 /**
  * Whether `auto` builds lowered `rc` programs through the TSL route (R2): class printing in a lowered `rc` package, counted by
@@ -1969,7 +1975,7 @@ function lowerFileIn(file: string, opts: LowerOptions): LowerOutput {
             process.env.TMK_EMIT_STRS !== undefined
               ? process.env.TMK_EMIT_STRS === "1"
               : memory === "rc"
-                ? AUTO_RC_STRINGS
+                ? autoRcStrings()
                 : AUTO_STRINGS;
           // Maps as JsMap (D72) likewise; TMK_EMIT_MAPS=0 or 1 says otherwise. In `rc`, AUTO_RC's: the number-keyed and
           // object-keyed maps benchmarks are among the rc benchmarks it was measured on (R4).

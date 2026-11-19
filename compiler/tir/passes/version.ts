@@ -68,7 +68,12 @@ interface Check {
 }
 
 /** Versions the loops it can, innermost first. Returns whether anything changed. */
-export function versionFunc(f: Func, ctx: VersionContext, done: Set<number>): boolean {
+export function versionFunc(
+  f: Func,
+  ctx: VersionContext,
+  done: Set<number>,
+  ok?: Set<number>, // R28: the loops versioned (both copies' headers), for a later pass to leave alone
+): boolean {
   let worth = false;
   for (const b of f.blocks) {
     if (b.term.k === "trap") worth = true;
@@ -94,6 +99,8 @@ export function versionFunc(f: Func, ctx: VersionContext, done: Set<number>): bo
       }
       done.add(hid);
       done.add(copied);
+      ok?.add(hid);
+      ok?.add(copied);
       grown += c;
       ctx.stats.loops++;
       ctx.stats.cost += c;

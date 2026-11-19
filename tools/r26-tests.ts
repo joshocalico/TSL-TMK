@@ -63,11 +63,12 @@ export const R26_FAULTS: {
   },
   {
     name: "r26-page-half",
-    what: "@tsl/gc's fresh slot of size class k cut half its size, so two objects share bytes",
+    what: "@tsl/gc's fresh slot of size class k cut half its size, so two objects share bytes (R28: in pageSlot and in pageCut, make's and tailFast's in-line cut, alike)",
     patch: {
       file: RC,
       from: "  const size = BigInt.asUintN(64, toU64(1) << toU64(k));\n",
       to: "  const size = BigInt.asUintN(64, (toU64(1) << toU64(k)) >> 1n);\n",
+      times: 2,
     },
   },
 ];
