@@ -676,8 +676,14 @@ export function coldCalls(f: Func): Set<Instr> {
   f.blocks.forEach((b, i) => {
     if (b.term.k === "ret" && cfg.idom.has(i)) all.push(i);
   });
+  // R31: a block that makes only the constants it returns is as quick (`if (count === 0) return 0;`): the JPEG decoder's
+  // readBits and receiveExtend stored and loaded a value around the call past such a test on every call, and at -O1 the
+  // decoder was 0.4% slower than with no split at all.
+  const consts = !r31Off("split");
   const quick = (i: number): boolean =>
-    f.blocks[i]!.instrs.length === 0 &&
+    f.blocks[i]!.instrs.every(
+      (ins) => consts && (ins.op.startsWith("iconst.") || ins.op.startsWith("fconst.")),
+    ) &&
     cfg.preds[i]!.length > 0 &&
     cfg.preds[i]!.every((p) => f.blocks[p]!.term.k === "brif");
   const rets = all.some((i) => !quick(i)) ? all.filter((i) => !quick(i)) : all;
@@ -696,6 +702,14 @@ export function coldCalls(f: Func): Set<Instr> {
     }
   });
   return out;
+}
+
+/**
+ * R31's coldness put back as R30 had it, for tools/r31-tests.ts (`TMK_R31_OFF=split`): only a block with no instructions a
+ * quick way out.
+ */
+export function r31Off(part: string): boolean {
+  return (globalThis.process?.env?.TMK_R31_OFF ?? "").split(",").includes(part);
 }
 
 /** `trap.code`: a call as far as registers go, but it never comes back, so nothing needs to be kept across it. */

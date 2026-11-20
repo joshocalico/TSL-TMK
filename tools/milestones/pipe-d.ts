@@ -2965,6 +2965,44 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     });
   });
 
+  // 81. R31: the cold-call split's quick ways out, and @tsl/gc's chunks from the page source.
+  M.unit("81", async () => {
+    const R31 = timedModule("r31", await import("../r31-tests.ts"));
+    const failures: string[] = [];
+    const sh = await R31.r31Shapes();
+    failures.push(...sh.failures);
+    const n = await R31.r31Native(accel, jobs);
+    failures.push(...n.failures);
+    if (n.cases === 0) failures.push("no case of corpus/r31 ran");
+    const d = await R31.r31Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of corpus/lower/r31 ran");
+    report({
+      box: "81. R31 (3.5, 4.4, D39, D41, D80): at -O1 and -O2 a block that makes only the constants it returns is a quick way out of a function, as an empty one is, so a call past it isn't cold: r31_split.ts's quick and quickF with no cold call, and each with one with R31 off (TMK_R31_OFF=split); @tsl/gc's chunks taken from the page source straight (chunkPages, 3.5), the same pages the heap gave; corpus/r31 natively at -O0, -O1 and -O2 against V8 and JSC; corpus/lower/r31 through the dual route with class printing forced in rc at -O0 and -O2 (tools/r31-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${sh.rows.join("; ")}; natively ${n.agreed}/${n.cases} (${n.rows.join(", ")}); dual ${d.agreed}/${d.cases}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 82. R31's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("82", async () => {
+    const R31 = timedModule("r31", await import("../r31-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R31.R31_FAULTS) {
+      const x = await R31.r31Fault(f, accel, jobs);
+      rows.push(`${f.name}: ${caughtText(x)}`);
+      if (x.caught === 0) failures.push(`${f.name} wasn't caught: ${x.first}`);
+    }
+    report({
+      box: `82. R31: each of ${R31.R31_FAULTS.length} bugs is caught by a wrong answer or a trap, with how many cases caught it: @tsl/gc's chunkPages giving every chunk one page, over corpus/lower/r31 through the dual route at -O2, against V8 (tools/r31-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
   M.vms(
     "8",
     "8. No QEMU process of this run is left, and the owner's UTM and QEMU processes were only observed",

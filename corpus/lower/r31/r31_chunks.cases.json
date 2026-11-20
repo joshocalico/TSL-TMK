@@ -1,0 +1,8 @@
+[
+  { "fn": "pairs", "args": [0, 10] },
+  { "fn": "pairs", "args": [3, 600] },
+  { "fn": "pairs", "args": [6, 1100] },
+  { "fn": "pairs", "args": [4, 2100] },
+  { "fn": "churn", "args": [5, 700] },
+  { "fn": "churn", "args": [12, 1500] }
+]

@@ -24,6 +24,7 @@ import { r26Moved } from "./r26-moved.ts";
 import { r27Moved } from "./r27-moved.ts";
 import { r29Moved } from "./r29-moved.ts";
 import { r30Moved } from "./r30-moved.ts";
+import { r31Moved } from "./r31-moved.ts";
 import { clsidMoved } from "./clsid-moved.ts";
 import { r1dMoved } from "./r1d-moved.ts";
 import { r1fMoved } from "./r1f-moved.ts";
@@ -396,10 +397,11 @@ export const INT_MOVED: Record<string, string> = {
  * and R19's (tools/r16-moved.ts, tools/r17-moved.ts, tools/r18-moved.ts and tools/r19-moved.ts, written by their pins tools); and R20's
  * and R21's (tools/r20-moved.ts and tools/r21-moved.ts, written by tools/r20-pins.ts and tools/r21-pins.ts); and R22's
  * (tools/r22-moved.ts, written by tools/r22-pins.ts); and R24's (tools/r24-moved.ts, written by tools/r24-pins.ts); and
- * R25's (tools/r25-moved.ts, written by tools/r25-pins.ts); and R26's, R27's, R29's and R30's (tools/r26-moved.ts,
- * r27-moved.ts, r29-moved.ts and r30-moved.ts, written by their pins tools).
+ * R25's (tools/r25-moved.ts, written by tools/r25-pins.ts); and R26's, R27's, R29's, R30's and R31's (tools/r26-moved.ts,
+ * r27-moved.ts, r29-moved.ts, r30-moved.ts and r31-moved.ts, written by their pins tools).
  */
 export const mapsMoved = (k: string): boolean =>
+  r31Moved(k) ||
   r30Moved(k) ||
   r29Moved(k) ||
   r27Moved(k) ||

@@ -1,0 +1,19 @@
+[
+  { "fn": "invariant", "args": [0, 3] },
+  { "fn": "invariant", "args": [40, 1] },
+  { "fn": "invariant", "args": [200, 7] },
+  { "fn": "invariant", "args": [300, 0] },
+  { "fn": "invariant", "args": [123, -4] },
+  { "fn": "invariantF", "args": [0, 2] },
+  { "fn": "invariantF", "args": [50, 3] },
+  { "fn": "invariantF", "args": [77, 0] },
+  { "fn": "quick", "args": [0, 9] },
+  { "fn": "quick", "args": [5, 9] },
+  { "fn": "quick", "args": [-123456, 789] },
+  { "fn": "quickF", "args": [0] },
+  { "fn": "quickF", "args": [2.5] },
+  { "fn": "quickF", "args": [-1e10] },
+  { "fn": "outer", "args": [10, 3] },
+  { "fn": "outer", "args": [33, 1] },
+  { "fn": "outer", "args": [0, 0] }
+]

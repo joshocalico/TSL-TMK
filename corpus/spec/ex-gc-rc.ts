@@ -1,6 +1,6 @@
 // file: ex-gc-rc.ts
 import { idiv, tail, toU32, toU64, toUsize, Trap, trap, u32, u64, type bool, type usize } from "@tsl/core";
-import { Heap } from "@tsl/alloc";
+import { Heap, PAGE } from "@tsl/alloc";
 import {
   callRelease,
   copyBytes,
@@ -278,16 +278,35 @@ function setUp(): bool {
   return true;
 }
 
+/**
+ * R31: a chunk's pages: what `heap.allocBytes(bytes)` gives for a chunk, which is always more than the heap's largest size
+ * class (2048 bytes), so its whole pages from the page source, without the heap's walk up its classes (a loop of checked
+ * doublings, 136 instructions a call, twice in each allocation that finds memory out: cyc_exhaust's trapping cases).
+ */
+/** @tsl.inline */
+// SAFETY: the heap is set up before any chunk is asked for (setUp's first allocBytes sets it up, and takeSlot calls setUp
+// first), and a set-up heap's allocBytes of more than its largest class is exactly the page source's run of the pages that
+// cover it: the same zeroed run, never the heap's to give back. `bytes` is a slot of a size class below CLASSES and its
+// chunk's head, at most 2^47 + 32, so rounding it up to whole pages can't wrap: a wrapping add, where the checked one and
+// the division's were a dozen instructions.
+function chunkPages(bytes: usize): u64 {
+  return pages(toUsize(BigInt.asUintN(64, toU64(bytes) + toU64(PAGE - 1)) / toU64(PAGE)));
+}
+
 /** With the collector, a fresh slot of size class k, cut from that class's newest chunk, or a new one; 0 if there's none. */
-// SAFETY: a chunk is a fresh block of the heap's, CHUNK bytes or one slot's worth, recorded in its class's list before a
-// slot is cut from it, and its end only ever moves forward over slots handed out.
+// SAFETY: a chunk is a fresh run of pages (chunkPages), CHUNK bytes or one slot's worth, recorded in its class's list
+// before a slot is cut from it, and its end only ever moves forward over slots handed out.
 function cutSlot(k: usize): u64 {
   const rec = ptrAt(u64, ccChunks).add(k * 3);
-  const size = toU64(1) << toU64(k);
+  // R31: k is a size class, below CLASSES (its chunk record is read above), so the shift loses nothing, and a slot's size
+  // and the chunk's head can't wrap: wrapping arithmetic, as pageSlot's and chunkCut's, where the checks were a test after
+  // each (an allocation that finds memory out comes here twice)
+  const size = BigInt.asUintN(64, toU64(1) << toU64(k)); // a size class's slot: nothing lost
   let slot = rec.add(1).read();
-  if (slot === 0n || slot + size > rec.add(2).read()) {
-    const bytes: usize = toUsize(size) + CHUNK_HEAD <= CHUNK ? CHUNK : toUsize(size) + CHUNK_HEAD;
-    const c = heap.allocBytes(bytes);
+  if (slot === 0n || BigInt.asUintN(64, slot + size) > rec.add(2).read()) {
+    const need = BigInt.asUintN(64, size + toU64(CHUNK_HEAD));
+    const bytes: usize = need <= toU64(CHUNK) ? CHUNK : toUsize(need);
+    const c = chunkPages(bytes);
     if (c === 0n) return 0n;
     ptrAt(u64, c).write(rec.read());
     rec.write(c);
@@ -915,12 +934,16 @@ function collectAll(): void {
   drainAll();
   if (stepping) return;
   ccRun(); // the scan under way, then what it let go
-  // the table, until a round frees nothing: what one round frees can make candidates of what it held
-  let live = BigInt.asUintN(64, liveCount() + 1n);
-  while (ccTop !== 0 && liveCount() !== live) {
-    live = liveCount();
-    ccStart();
-    ccRun();
+  // the table, until a round frees nothing: what one round frees can make candidates of what it held. R31: the count of
+  // what's live, which only reads the stores' entries, is taken only where the table has a candidate, so a round may run
+  // (an allocation that finds memory out with nothing in the table, cyc_exhaust's trapping cases, took it for nothing)
+  if (ccTop !== 0) {
+    let live = BigInt.asUintN(64, liveCount() + 1n);
+    while (ccTop !== 0 && liveCount() !== live) {
+      live = liveCount();
+      ccStart();
+      ccRun();
+    }
   }
   if (ccLost && walking) {
     ccLost = false;
