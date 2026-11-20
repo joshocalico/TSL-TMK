@@ -1,0 +1,9 @@
+[
+  { "fn": "chain", "args": [40, 1] },
+  { "fn": "chain", "args": [40, 2] },
+  { "fn": "chain", "args": [40, 3] },
+  { "fn": "chain", "args": [40, 32] },
+  { "fn": "batch", "args": [30, 1] },
+  { "fn": "batch", "args": [30, 2] },
+  { "fn": "batch", "args": [30, 5] }
+]

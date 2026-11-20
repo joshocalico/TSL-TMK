@@ -53,8 +53,9 @@ export const R24_FAULTS: {
     what: "freeRest visiting an object's slots from 2, so slot 1's child is never let go of",
     patch: {
       file: RC,
-      from: "  let a: usize = 1;\n  stepping = true;\n  while (a < s && left !== 0n) {",
-      to: "  let a: usize = 2;\n  stepping = true;\n  while (a < s && left !== 0n) {",
+      // R33: freeRest's start matched by what comes before it, as `stepping` is set where a release function may read it
+      from: "  let left = n;\n  let a: usize = 1;",
+      to: "  let left = n;\n  let a: usize = 2;",
     },
   },
   {

@@ -1,0 +1,8 @@
+[
+  { "fn": "keepMany", "args": [500] },
+  { "fn": "keepMany", "args": [1] },
+  { "fn": "rings", "args": [60] },
+  { "fn": "rings", "args": [2] },
+  { "fn": "twice", "args": [200] },
+  { "fn": "twice", "args": [1] }
+]

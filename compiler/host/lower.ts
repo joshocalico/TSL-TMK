@@ -1,6 +1,7 @@
 // Typed tree to TIR. SSA comes from Braun et al.'s construction: variables are read and written per
 // block, and block parameters appear only where a read actually needs a merge.
 import { RT_SIGS } from "./down-rt.ts";
+import { releaseTouchFacts, resolveReleaseTouches } from "./release-touch.ts";
 import {
   canonicalize,
   cmpStr,
@@ -2355,6 +2356,10 @@ export function lowerToTir(tm: TypedModule): Module {
   // Hand-written runtime functions keep their own trap numbers, far above the generated ones.
   if (tm.extraTraps !== undefined) ctx.m.traps.push(...tm.extraTraps);
   if (tm.externs !== undefined) ctx.m.externs.push(...tm.externs);
+  // R33: `@tsl/gc`'s questions of which release functions may touch a module variable, answered now every call is known
+  if (process.env.TMK_R33_FACTS === "1")
+    for (const l of releaseTouchFacts(ctx.m)) console.error(`r33-facts ${l}`);
+  resolveReleaseTouches(ctx.m);
   ctx.m.funcs.sort((a, b) => cmpStr(a.name, b.name));
   return canonicalize(ctx.m);
 }

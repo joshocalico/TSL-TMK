@@ -3042,6 +3042,48 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     });
   });
 
+  // 85. R33: `stepping` and `spare` set around a release call only where a release function may see them, the release
+  // dispatch ordered by how many places make each class, and freeing's loops over an object's slots.
+  M.unit("85", async () => {
+    const R33 = timedModule("r33", await import("../r33-tests.ts"));
+    const failures: string[] = [];
+    const sh = await R33.r33Shapes();
+    failures.push(...sh.failures);
+    const d = await R33.r33Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of corpus/lower/r33 ran");
+    const sd = await R33.r33Std(accel, jobs);
+    failures.push(...sd.failures);
+    if (sd.cases === 0) failures.push("no case of corpus/std/rc_r33_*.ts ran");
+    const st = await R33.r33Steps(accel, jobs);
+    failures.push(...st.failures);
+    if (st.cases === 0) failures.push("no case of corpus/rc's rc_steps programs ran");
+    report({
+      box: "85. R33 (3.5, D39, D41): @tsl/gc sets `stepping` and `spare` around a release call only where a release function may read or write them (`releasesTouch`, answered over the whole program's call graph once its TIR is built: a function that takes the variable's address, makes an indirect call or calls out of the program may, and so does one that calls one that may); the release dispatch's chain has the classes made in the most places first; freeing's loops over an object's slots test the budget inside and make the object in each call: r33_free.ts's freeAlloc through the TSL route in rc at -O1 writes no `stepping`, and with R33 off (TMK_R33_OFF=touch) writes it; corpus/std/rc_r33_make.ts's, whose release function makes an object, writes it; r33_cycles.ts's chain at -O0 reaches a string's release function first, and with R33 off (TMK_R33_OFF=order) doesn't; corpus/lower/r33 through the dual route with class printing forced in rc and leak at -O0, -O1 and -O2; corpus/std/rc_r33_make.ts, rc_r33_hook.ts and rc_r33_quiet.ts (a make inside a release function, by a direct call and through a function value, and release functions that only visit) natively at -O0 and -O2; rc_r33_quiet.ts's freeAlloc writes neither `stepping` nor `spare`; corpus/rc's rc_steps programs natively in rc (tools/r33-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${sh.rows.join("; ")}; dual ${d.agreed}/${d.cases}; std ${sd.agreed}/${sd.cases}; rc_steps ${st.agreed}/${st.cases}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 86. R33's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("86", async () => {
+    const R33 = timedModule("r33", await import("../r33-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R33.R33_FAULTS) {
+      const x = await R33.r33Fault(f, accel, jobs);
+      rows.push(`${f.name}: ${caughtText(x)}`);
+      if (x.caught === 0) failures.push(`${f.name} wasn't caught: ${x.first}`);
+    }
+    report({
+      box: `86. R33: each of ${R33.R33_FAULTS.length} bugs is caught by a wrong answer or a trap, with how many cases caught it: the call graph's answer taking each function's own instructions alone, taking an indirect call as reaching nothing, or every answer false; the numbers stores register in R25's order against the chain in R33's; freeSteps' loop over an object's slots without its budget test; freeAlloc's slot 0 visit not counting its step where no release function sees \`spare\`; each over corpus/rc's rc_steps programs natively, corpus/std/rc_r33_make.ts, rc_r33_hook.ts and rc_r33_quiet.ts natively at -O2, and corpus/lower/r33 through the dual route at -O2; against V8 (tools/r33-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
   M.vms(
     "8",
     "8. No QEMU process of this run is left, and the owner's UTM and QEMU processes were only observed",

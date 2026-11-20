@@ -32,14 +32,17 @@ export const GC_FAULTS: Fault[] = [
     // (freeSteps then takes only an object part freed, or one a scan gave up): both, or the bug wouldn't be where freeing is.
     // R24: and freeAlloc's, the same visit in the same words, which an allocation without the collector linked takes
     // R28: freeAlloc's now makes the object in the call (each release function's arm its own class's), so it's patched too
+    // R33: freeSteps' and freeFlat's make it in the call too, and each visit is written twice, `spare` set around the call
+    // where a release function may see it and not where none may, so each of the six is patched
     times: 2,
-    from: "s = callRelease(rel, item, 0, Visit.Drop);",
+    from: "s = callRelease(rel, objectAt<Counted0>(c), 0, Visit.Drop);",
     to: "s = 0;",
     more: [
       {
         file: RC,
         from: "s = callRelease(rel, objectAt<Counted0>(head), 0, Visit.Drop);",
         to: "s = 0;",
+        times: 4,
       },
     ],
   },
@@ -92,10 +95,18 @@ export const RC_TSL_FAULTS: (Fault & {
     file: RC,
     // R17: put into freeSteps' loop over an object's slots after its first. (From R4 to R16 its text was runSteps' before R4,
     // which TSL_TEST_PATCH couldn't find, so the patch threw, and the box counted the thrown build as caught.) R19: and into
-    // freeFlat's, the same loop in the same words (see the bug above)
-    times: 2,
-    from: "        callRelease(rel, item, a, Visit.Drop);\n        left = spare;\n        spare = 0n;\n        a++;\n      }",
-    to: "        callRelease(rel, item, a, Visit.Drop);\n        for (let j = a + 1; j < s; j++) callRelease(rel, item, j, Visit.Drop);\n        left = spare;\n        spare = 0n;\n        a = s;\n      }",
+    // freeFlat's, the same loop in the same words (see the bug above). R33: each loop's visit is written twice, `spare` set
+    // around the call where a release function may see it and not where none may, and makes the object in the call, so the
+    // bug is put into both ways of each, freeSteps' (`c`) and freeFlat's (`head`)
+    from: "          callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);\n          left = spare;\n          spare = 0n;\n        } else {\n          callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);\n          left = BigInt.asUintN(64, left - 1n);\n        }\n        a++;",
+    to: "          callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);\n          for (let j = a + 1; j < s; j++) callRelease(rel, objectAt<Counted0>(c), j, Visit.Drop);\n          left = spare;\n          spare = 0n;\n        } else {\n          callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);\n          for (let j = a + 1; j < s; j++) callRelease(rel, objectAt<Counted0>(c), j, Visit.Drop);\n          left = BigInt.asUintN(64, left - 1n);\n        }\n        a = s;",
+    more: [
+      {
+        file: RC,
+        from: "          callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);\n          left = spare;\n          spare = 0n;\n        } else {\n          callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);\n          left = BigInt.asUintN(64, left - 1n);\n        }\n        a++;",
+        to: "          callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);\n          for (let j = a + 1; j < s; j++) callRelease(rel, objectAt<Counted0>(head), j, Visit.Drop);\n          left = spare;\n          spare = 0n;\n        } else {\n          callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);\n          for (let j = a + 1; j < s; j++) callRelease(rel, objectAt<Counted0>(head), j, Visit.Drop);\n          left = BigInt.asUintN(64, left - 1n);\n        }\n        a = s;",
+      },
+    ],
   },
   {
     // B3: with no collector linked (every class in no cycle), an allocation frees everything waiting at once, not
@@ -259,13 +270,16 @@ export async function rcTslFaultRun(
   else if (f.tslEnv !== undefined) process.env.TMK_TEST_TSL = f.tslEnv;
   else if (f.optFault !== undefined) process.env.TMK_OPT_FAULT = f.optFault;
   // a patch checked against the source first (SPEC 8.3): one that doesn't apply throws, failing the box, never caught
-  else
-    process.env.TSL_TEST_PATCH = patchEnv({
+  else {
+    const main = {
       file: f.file,
       from: f.from,
       to: f.to,
       ...(f.times !== undefined ? { times: f.times } : {}),
-    });
+    };
+    // R33: with the same bug where it's written otherwise too, as gcFaultRun takes it (faults.ts lists both)
+    process.env.TSL_TEST_PATCH = patchEnv(f.more !== undefined ? [main, ...f.more] : main);
+  }
   try {
     const r = await runNative("rc", [accel], jobs, undefined, engines);
     const failures = [...r.failures];

@@ -543,6 +543,7 @@ export interface BuiltinInfo {
   n?: number;
   size?: number;
   fns?: FuncInst[]; // unsafe.releaseIndex: @tsl/gc's release functions, numbered from 1 (R1d)
+  global?: string; // unsafe.releasesTouch: the module variable asked about, its TIR name (R33)
 }
 
 export type Stmt =

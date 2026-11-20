@@ -388,6 +388,15 @@ export function releaseIsEmpty<F extends (item: never, at: usize, op: never) => 
 ): boolean {
   return false;
 }
+/**
+ * R33: whether any release function of the closed set may read or write the module variable `v`, named here, not read:
+ * natively a constant, worked out over the whole program's call graph once every call is known (a function that takes v's
+ * address, makes an indirect call or calls out of the program may; so does one that calls one that may); on the host always
+ * true, so `@tsl/gc` does there what it did before.
+ */
+export function releasesTouch<V>(_v: V): boolean {
+  return true;
+}
 export function callRelease<O>(i: u32, item: object, at: usize, op: O): usize {
   const f = hostReleases[i - 1] as ((item: object, at: usize, op: O) => usize) | undefined;
   if (f === undefined) throw new TslTrap(18);

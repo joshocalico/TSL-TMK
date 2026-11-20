@@ -81,13 +81,16 @@ export const R19_FAULTS: {
     patch: [
       {
         file: RC,
-        from: "    let a: usize = 1;\n    stepping = true;",
-        to: "    let a: usize = 2;\n    stepping = true;",
+        // R33: `stepping` is set where a release function may read it, on a line of its own, so freeFlat's start is
+        // matched by what comes before it
+        from: "    let s: usize = 0;\n    let a: usize = 1;",
+        to: "    let s: usize = 0;\n    let a: usize = 2;",
       },
       {
         file: RC,
-        from: "  let a: usize = 1;\n  stepping = true;\n  while (a < s && left !== 0n) {",
-        to: "  let a: usize = 2;\n  stepping = true;\n  while (a < s && left !== 0n) {",
+        // R33: and freeRest's, by what comes before it
+        from: "  let left = n;\n  let a: usize = 1;",
+        to: "  let left = n;\n  let a: usize = 2;",
       },
     ],
     by: "dual",

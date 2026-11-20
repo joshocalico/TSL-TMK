@@ -1,0 +1,8 @@
+[
+  { "fn": "words", "args": [200] },
+  { "fn": "words", "args": [3] },
+  { "fn": "people", "args": [150] },
+  { "fn": "people", "args": [1] },
+  { "fn": "nested", "args": [40] },
+  { "fn": "nested", "args": [1] }
+]

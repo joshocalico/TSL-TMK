@@ -282,6 +282,7 @@ export class NativeElaborator extends Elaborator {
   ifaceReported = new Set<ts.Symbol>(); // an interface whose problem was reported, once
   releaseFns: ts.FunctionDeclaration[] = []; // @tsl/gc's release functions, numbered from 1 (R1d)
   releaseShown: ts.FunctionDeclaration[] = []; // the same, in the order the program shows them (R25's injected bug)
+  releaseR25: ts.FunctionDeclaration[] = []; // the same, in R25's order, before R33's (R33's injected bug)
 
   constructor(program: ts.Program, root: ts.SourceFile, sink: DiagSink, modules: ts.SourceFile[]) {
     super(program, root, sink);
@@ -1156,6 +1157,72 @@ export class NativeElaborator extends Elaborator {
         ...this.releaseFns.filter((d) => !isEmptyRelease(d)),
         ...this.releaseFns.filter((d) => isEmptyRelease(d)),
       ];
+    this.releaseR25 = [...this.releaseFns];
+    // R33: of those that do something, the classes made in the most places first (ties in the order above): a static
+    // estimate of which objects freeing meets most, so the compare chain reaches theirs sooner. A string, made by every
+    // function of the runtime that makes one, came after each of the program's own classes, each made in one or two places,
+    // and a string program frees strings far more often. The same functions, called with the same arguments, in another
+    // order of compares. `TMK_R33_OFF=order` keeps R25's.
+    if (!(process.env.TMK_R33_OFF ?? "").split(",").includes("order")) {
+      const made = this.constructionSites();
+      const sites = (d: ts.FunctionDeclaration): number => {
+        if (isEmptyRelease(d)) return -1;
+        const p = d.parameters[0];
+        if (p === undefined) return 0;
+        const t = this.checker.getTypeAtLocation(p);
+        const decl = t.getSymbol()?.declarations?.find(ts.isClassDeclaration);
+        return decl !== undefined ? (made.get(decl) ?? 0) : 0;
+      };
+      const key = new Map(this.releaseFns.map((d, i) => [d, { n: sites(d), i }]));
+      this.releaseFns = [...this.releaseFns].sort((x, y) => {
+        const a = key.get(x)!;
+        const b = key.get(y)!;
+        return a.n !== b.n ? b.n - a.n : a.i - b.i;
+      });
+    }
+  }
+
+  /**
+   * R33: in how many places the program makes each class C, over every module: each `new C(…)`, and each call of the function
+   * or method a `new C(…)` is in (one level: the runtime makes every string in two functions, which everything else calls).
+   */
+  constructionSites(): Map<ts.ClassDeclaration, number> {
+    const out = new Map<ts.ClassDeclaration, number>();
+    const makers = new Map<ts.Node, ts.ClassDeclaration[]>(); // a function or method, and the classes it makes
+    const calls = new Map<ts.Node, number>(); // a function or method, and how many calls of it there are
+    const declOf = (e: ts.Expression): ts.Declaration | undefined => {
+      const raw = this.checker.getSymbolAtLocation(e);
+      const sym =
+        raw !== undefined && raw.flags & ts.SymbolFlags.Alias
+          ? this.checker.getAliasedSymbol(raw)
+          : raw;
+      return sym?.declarations?.[0];
+    };
+    const visit = (n: ts.Node, fn: ts.Node | null): void => {
+      if (ts.isNewExpression(n)) {
+        const d = declOf(n.expression);
+        if (d !== undefined && ts.isClassDeclaration(d)) {
+          out.set(d, (out.get(d) ?? 0) + 1);
+          if (fn !== null) makers.set(fn, [...(makers.get(fn) ?? []), d]);
+        }
+      } else if (ts.isCallExpression(n)) {
+        const callee = ts.isPropertyAccessExpression(n.expression)
+          ? n.expression.name
+          : n.expression;
+        const d = declOf(callee);
+        if (d !== undefined && (ts.isFunctionDeclaration(d) || ts.isMethodDeclaration(d)))
+          calls.set(d, (calls.get(d) ?? 0) + 1);
+      }
+      const inner =
+        ts.isFunctionDeclaration(n) || ts.isMethodDeclaration(n) || ts.isConstructorDeclaration(n)
+          ? n
+          : fn;
+      ts.forEachChild(n, (c) => visit(c, inner));
+    };
+    for (const sf of this.modules) visit(sf, null);
+    for (const [fn, cs] of makers)
+      for (const c of cs) out.set(c, (out.get(c) ?? 0) + (calls.get(fn) ?? 0));
+    return out;
   }
 
   /** The release functions as instances, with the order an injected bug may rotate (`release-wrong-arm`, R1d). */
@@ -4135,12 +4202,18 @@ export class NativeElaborator extends Elaborator {
         const f = this.expr(a[0]!);
         if (f.ty.k === "unk") return mk(T.u32, { k: "err" });
         if (this.dry) return mk(T.u32, { k: "err" });
+        // R33's injected bug: the numbers stores register by R25's order, the chain by R33's, so a number reaches another
+        // class's release function where the two orders differ. Never set otherwise.
+        const fns =
+          process.env.TMK_TEST_TSL === "r33-order-index"
+            ? this.releaseR25.map((d) => this.instance(d, [], e))
+            : this.releaseInsts(e);
         return mk(T.u32, {
           k: "builtin",
           name: "unsafe.releaseIndex",
           args: [f],
           loc,
-          info: { fns: this.releaseInsts(e) },
+          info: { fns },
         });
       }
       case "releaseIsEmpty": {
@@ -4160,6 +4233,29 @@ export class NativeElaborator extends Elaborator {
           info: { fns },
         });
         return mk(T.bool, { k: "cmp", op: "ne", a: idx, b: mk(T.u32, { k: "lit", value: 0 }) });
+      }
+      case "releasesTouch": {
+        // R33: whether any release function of the closed set may read or write a module variable, by the whole program's
+        // call graph. The variable is named, not read: the question is answered once the module's TIR is built and every
+        // call is known (release-touch.ts), true wherever it can't be told.
+        const va = a[0];
+        if (va === undefined) return mk(T.bool, { k: "err" });
+        const g = this.expr(va);
+        if (g.ty.k === "unk") return mk(T.bool, { k: "err" });
+        if (g.k !== "global" || g.g.array !== undefined || g.g.object !== undefined || !g.g.mutable)
+          return this.err(
+            va,
+            "TSL5009",
+            "releasesTouch takes a module variable by name: the question is whether release functions read or write it",
+          );
+        if (this.dry) return mk(T.bool, { k: "err" });
+        return mk(T.bool, {
+          k: "builtin",
+          name: "unsafe.releasesTouch",
+          args: [],
+          loc,
+          info: { fns: this.releaseInsts(e), global: g.g.name },
+        });
       }
       case "callRelease": {
         // Closed-world dispatch (D70's form, R1d): the number compared with each release function's in turn, each arm a

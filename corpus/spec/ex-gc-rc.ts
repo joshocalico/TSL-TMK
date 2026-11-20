@@ -17,6 +17,7 @@ import {
   ptrAt,
   releaseIndex,
   releaseIsEmpty,
+  releasesTouch,
   retireObject,
   slotOf,
   slotOfLive,
@@ -475,7 +476,9 @@ function giveBack(slot: u64, owner: u32, entry: u64): void {
 // nothing else reaches it; its store's entry has the release function of the class it holds.
 function freeSteps(n: usize): u64 {
   if (stepping) return 0n;
-  stepping = true;
+  // R33: set only where a release function may read it (releasesTouch, by the call graph); where none may, nothing called
+  // here can see it, and it's still false when this returns, as it was when it was tested
+  if (releasesTouch(stepping)) stepping = true;
   let c = cur;
   let a: usize = 0;
   let s: usize = 0;
@@ -498,22 +501,36 @@ function freeSteps(n: usize): u64 {
     // one a scan gave up may still be in its list, whose link is in the owner word's top byte
     const entry = entryOf(cyclesLinked() ? (owner % 0x100_0000) >>> 8 : owner >>> 8);
     const rel = ptrAt(u32, entry).read();
-    const item = objectAt<Counted0>(c);
+    // R33: the object made in each call, as freeAlloc makes it (R28), so an arm whose class's references have no tag has its
+    // address, with no generation read for it; and `spare` set around a release call only where a release function may
+    // read or write it, as `stepping`
     if (a === 0) {
       // slot 0's visit, a step, which also says how many there are: with none, that step gives the block back
-      spare = BigInt.asUintN(64, left - 1n);
-      s = callRelease(rel, item, 0, Visit.Drop);
-      left = spare;
-      spare = 0n;
+      if (releasesTouch(spare)) {
+        spare = BigInt.asUintN(64, left - 1n);
+        s = callRelease(rel, objectAt<Counted0>(c), 0, Visit.Drop);
+        left = spare;
+        spare = 0n;
+      } else {
+        s = callRelease(rel, objectAt<Counted0>(c), 0, Visit.Drop);
+        left = BigInt.asUintN(64, left - 1n);
+      }
       a = 1;
     }
     if (s !== 0) {
-      // the rest of its slots, one a step
-      while (a < s && left !== 0n) {
-        spare = BigInt.asUintN(64, left - 1n);
-        callRelease(rel, item, a, Visit.Drop);
-        left = spare;
-        spare = 0n;
+      // the rest of its slots, one a step (R33: the budget tested inside, so the loop's own test is `a < s` alone, which
+      // the optimiser sees in its body)
+      while (a < s) {
+        if (left === 0n) break;
+        if (releasesTouch(spare)) {
+          spare = BigInt.asUintN(64, left - 1n);
+          callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);
+          left = spare;
+          spare = 0n;
+        } else {
+          callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);
+          left = BigInt.asUintN(64, left - 1n);
+        }
         a++;
       }
       // every slot visited, and the budget has room for giving the block back, a step of its own
@@ -534,7 +551,7 @@ function freeSteps(n: usize): u64 {
   }
   const took = BigInt.asUintN(64, all - left);
   stepsTaken = BigInt.asUintN(64, stepsTaken + took);
-  stepping = false;
+  if (releasesTouch(stepping)) stepping = false;
   return took;
 }
 
@@ -608,29 +625,41 @@ function freeFlat(n: usize): u64 {
     const entry = entryOf(cyclesLinked() ? (owner % 0x100_0000) >>> 8 : owner >>> 8);
     waiting = w;
     const rel = ptrAt(u32, entry).read();
-    const item = objectAt<Counted0>(head);
     let s: usize = 0;
     let a: usize = 1;
-    stepping = true;
+    // R33: `stepping` and `spare` set around release calls only where a release function may see them (freeSteps')
+    if (releasesTouch(stepping)) stepping = true;
     if ((ptrAt(u64, entry).read() & EMPTY) === 0n) {
       // slot 0's visit, a step, which also says how many there are
-      spare = BigInt.asUintN(64, left - 1n);
-      s = callRelease(rel, item, 0, Visit.Drop);
-      left = spare;
-      spare = 0n;
+      if (releasesTouch(spare)) {
+        spare = BigInt.asUintN(64, left - 1n);
+        s = callRelease(rel, objectAt<Counted0>(head), 0, Visit.Drop);
+        left = spare;
+        spare = 0n;
+      } else {
+        s = callRelease(rel, objectAt<Counted0>(head), 0, Visit.Drop);
+        left = BigInt.asUintN(64, left - 1n);
+      }
     } else left = BigInt.asUintN(64, left - 1n);
     if (s > 1) {
       // the rest of its slots, one a step, as freeSteps visits them (R21: an object of one slot has no rest, and isn't
-      // dispatched on its release function a second time to find that out)
-      while (a < s && left !== 0n) {
-        spare = BigInt.asUintN(64, left - 1n);
-        callRelease(rel, item, a, Visit.Drop);
-        left = spare;
-        spare = 0n;
+      // dispatched on its release function a second time to find that out; R33: the object made in the call, and the
+      // budget tested inside, as freeSteps')
+      while (a < s) {
+        if (left === 0n) break;
+        if (releasesTouch(spare)) {
+          spare = BigInt.asUintN(64, left - 1n);
+          callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
+          left = spare;
+          spare = 0n;
+        } else {
+          callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
+          left = BigInt.asUintN(64, left - 1n);
+        }
         a++;
       }
     }
-    stepping = false;
+    if (releasesTouch(stepping)) stepping = false;
     if (s !== 0) {
       // every slot visited, and the budget has room for giving the block back, a step of its own; or the cursor left where
       // freeSteps would have it, for the next freeing to take on
@@ -706,16 +735,22 @@ function freeAlloc(n: usize): u64 {
     waiting = w;
     let s: usize = 0;
     if ((ptrAt(u64, entry).read() & EMPTY) === 0n) {
-      // slot 0's visit, a step, which also says how many there are
-      stepping = true;
-      spare = BigInt.asUintN(64, left - 1n);
+      // slot 0's visit, a step, which also says how many there are (R33: `stepping` and `spare` set around it only where
+      // a release function may see them, as freeSteps sets them)
+      if (releasesTouch(stepping)) stepping = true;
       const rel = ptrAt(u32, entry).read();
       // R28: the object made in the call, so each release function's arm makes its own class's (an address, for a lowered
       // package's class, with no generation read or put on, or masked off again)
-      s = callRelease(rel, objectAt<Counted0>(head), 0, Visit.Drop);
-      left = spare;
-      spare = 0n;
-      stepping = false;
+      if (releasesTouch(spare)) {
+        spare = BigInt.asUintN(64, left - 1n);
+        s = callRelease(rel, objectAt<Counted0>(head), 0, Visit.Drop);
+        left = spare;
+        spare = 0n;
+      } else {
+        s = callRelease(rel, objectAt<Counted0>(head), 0, Visit.Drop);
+        left = BigInt.asUintN(64, left - 1n);
+      }
+      if (releasesTouch(stepping)) stepping = false;
       if (s !== 0) {
         // R32: no step left, whatever its slots: the cursor left where freeFlat leaves it, at slot 1, for the next freeing
         // to take on; then the rest of its slots if it has more (freeRest), out of line, so the common one-slot object
@@ -751,18 +786,25 @@ function freeAlloc(n: usize): u64 {
 // SAFETY: as freeFlat: head is off the queue, its object still in its slot, and its store's entry, `entry`, is its class's.
 function freeRest(head: u64, entry: u64, s: usize, n: u64): u64 {
   const rel = ptrAt(u32, entry).read();
-  const item = objectAt<Counted0>(head);
   let left = n;
   let a: usize = 1;
-  stepping = true;
-  while (a < s && left !== 0n) {
-    spare = BigInt.asUintN(64, left - 1n);
-    callRelease(rel, item, a, Visit.Drop);
-    left = spare;
-    spare = 0n;
+  // R33: `stepping` and `spare` set as freeSteps sets them, only where a release function may see them; the object made in
+  // the call, and the budget tested inside, as freeSteps'
+  if (releasesTouch(stepping)) stepping = true;
+  while (a < s) {
+    if (left === 0n) break;
+    if (releasesTouch(spare)) {
+      spare = BigInt.asUintN(64, left - 1n);
+      callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
+      left = spare;
+      spare = 0n;
+    } else {
+      callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
+      left = BigInt.asUintN(64, left - 1n);
+    }
     a++;
   }
-  stepping = false;
+  if (releasesTouch(stepping)) stepping = false;
   if (a < s || left === 0n) {
     cur = head;
     at = a;
@@ -856,9 +898,10 @@ function quickFree(slot: u64): u64 {
   // R17: a store whose release function does nothing gives 0 for it without the call (EMPTY), as runSteps takes it
   let s: usize = 0;
   if ((ptrAt(u64, entry).read() & EMPTY) === 0n) {
-    stepping = true;
+    // R33: `stepping` set around the call only where a release function may read it (freeSteps'); `spare` is 0 here
+    if (releasesTouch(stepping)) stepping = true;
     s = callRelease(ptrAt(u32, entry).read(), objectAt<Counted0>(slot), 0, Visit.Drop);
-    stepping = false;
+    if (releasesTouch(stepping)) stepping = false;
   }
   if (s === 1) {
     // its one slot visited: the second step gives its block back, as runSteps' would
@@ -879,9 +922,9 @@ function quickFree(slot: u64): u64 {
     // R22: the second step, the visit of the slot at the cursor (slot 1), taken here as runSteps(1) took it (freeSteps with
     // a budget of one: `spare` 0 while the slot is visited, then the cursor one on), without the two calls and freeSteps'
     // frame; a thrown object (five slots) took both for every allocation that freed it
-    stepping = true;
+    if (releasesTouch(stepping)) stepping = true;
     callRelease(ptrAt(u32, entry).read(), objectAt<Counted0>(slot), at, Visit.Drop);
-    stepping = false;
+    if (releasesTouch(stepping)) stepping = false;
     at++;
     stepsTaken = BigInt.asUintN(64, stepsTaken + 1n);
     return 2n;

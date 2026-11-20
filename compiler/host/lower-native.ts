@@ -806,6 +806,22 @@ function builtin(fl: FnLower, te: Extract<TE, { k: "builtin" }>): number[] {
       }
       return [out];
     }
+    case "unsafe.releasesTouch": {
+      // R33: whether any release function of the closed set may read or write the module variable, a question answered
+      // once the module's TIR is built and every call is known (release-touch.ts)
+      const fns = info.fns ?? [];
+      return [
+        fl.op1(
+          "intrinsic",
+          [
+            { t: "name", name: "release.touches" },
+            { t: "sym", name: info.global! },
+            ...fns.map((g) => ({ t: "sym" as const, name: g.tirName })),
+          ],
+          "i32",
+        ),
+      ];
+    }
     // R6: the per-call region is the module's call arena, from where `__arena_use` began it (`mem.base`) to its top; in a
     // package tslc placed nothing in it, nothing is (region.ts).
     case "unsafe.inCallRegion":
