@@ -183,12 +183,27 @@ export async function r19Shapes(): Promise<{ ok: boolean; rows: string[]; failur
       continue;
     }
     const tir = printModule(compileTyped(c.typed, { opt }).tir);
-    const n = (f: string): number => funcOf(tir, f).match(/load\.i32\.inv/g)?.length ?? 0;
-    if (n("fixed") === 0)
+    // R30: scalar replacement now writes a new Fixed's fields straight into its slot, so `fixed` reads its kind as the
+    // value it was made with, and has no load of it left to mark. tslc's rule is checked as before on the same program
+    // built with R30's scalar replacement off (TMK_R30_OFF=sroa); a field retarget stores is checked in both builds.
+    const c0 = checkFile(join(ROOT, R19_FIELDS));
+    if (c0.typed === null) continue;
+    const wasOff = process.env.TMK_R30_OFF;
+    process.env.TMK_R30_OFF = "sroa";
+    let tirOff = "";
+    try {
+      tirOff = printModule(compileTyped(c0.typed, { opt }).tir);
+    } finally {
+      if (wasOff === undefined) delete process.env.TMK_R30_OFF;
+      else process.env.TMK_R30_OFF = wasOff;
+    }
+    const n = (t: string, f: string): number => funcOf(t, f).match(/load\.i32\.inv/g)?.length ?? 0;
+    if (n(tirOff, "fixed") === 0)
       failures.push(`-O${opt}: Fixed's kind, stored by its constructor alone, isn't invariant`);
-    for (const f of ["switching", "around"])
-      if (n(f) > 0)
-        failures.push(`-O${opt}: ${f}'s kind, which retarget stores, is loaded invariant`);
+    for (const t of [tir, tirOff])
+      for (const f of ["switching", "around"])
+        if (n(t, f) > 0)
+          failures.push(`-O${opt}: ${f}'s kind, which retarget stores, is loaded invariant`);
     rows.push(`-O${opt}: r19_fields Fixed's kind invariant, Pick's not`);
   }
   return { ok: failures.length === 0, rows, failures };

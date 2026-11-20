@@ -28,7 +28,7 @@ import { setSepFaults, writeSummaries } from "./memory.ts";
 import { unswitchFunc, type CopyRound, type UnswitchStats } from "./unswitch.ts";
 import { versionFunc, type VersionStats } from "./version.ts";
 import { simplifyFunc, type FoldFaults, type SimplifyStats } from "./simplify.ts";
-import { sroaFunc, type SroaStats } from "./sroa.ts";
+import { r30Off, sroaFunc, type SroaStats } from "./sroa.ts";
 import { removeUnreached, type UnreachedStats } from "./unreached.ts";
 import { cloneModule, r26Off, r28Off } from "./util.ts";
 
@@ -62,6 +62,7 @@ export const PASSES = [
   "layout",
   "nullchecks", // R7: an explicit null check left to the next load's fault (shape.ts's implicitNullChecks)
   "shrinkwrap", // R21: the entry's quick way out before the prologue (emit.ts's shrinkWrap)
+  "coldsplit", // R30: values live across cold calls only kept in their slots around them (regalloc.ts's coldCalls)
 ] as const;
 
 /** Bugs that can be put into the passes, to show the tests catch them (`tmk milestone opt-a`, D46). */
@@ -113,6 +114,10 @@ export const OPT_FAULTS = [
   "r28-shrink-store", // a callee only the no-growth rule lets in is copied without its first store (R28)
   "r28-version-again", // -O2's second versioning pass lets the fast copy run one turn past what its checks allow (R28)
   "r29-inb-any", // the inliner takes a callee's leading bounds check out of every call, not only those tslc proved in bounds (R29)
+  "r30-copy-stale", // a copy out of a promoted frame slot stores each field as the fill left it, not its last value (R30)
+  "r30-split-norestore", // a value split around a cold call is stored before it but never loaded back after (R30)
+  "r30-split-save-late", // a value split around a cold call is stored after the call's arguments are moved, not before (R30)
+  "r30-split-callee-free", // a value across cold calls only takes a callee-saved register the prologue doesn't save (R30)
 ] as const;
 
 export interface OptOptions {
@@ -229,7 +234,7 @@ export function optimizeModule(
     simplify: { folded: 0, identities: 0, checks: 0, params: 0 },
     cfg: { branches: 0, merged: 0, forwarded: 0, removed: 0 },
     dce: { instrs: 0, params: 0 },
-    sroa: { promoted: 0, loads: 0, stores: 0 },
+    sroa: { promoted: 0, loads: 0, stores: 0, copies: 0 },
     gvn: { pure: 0, checks: 0, loads: 0, params: 0 },
     licm: { pure: 0, loads: 0, checks: 0 },
     unswitch: { loops: 0, peeled: 0, cost: 0 },
@@ -370,10 +375,19 @@ export function optimizeModule(
       });
     });
   }
+  // R30: -O1 takes scalar replacement of a new object placed in its slot only (sroa.ts's placedOnly), its frame slot
+  // written straight into the slot; the rest of scalar replacement, and the cleanup round after inlining, stay -O2's.
+  if (o.level === 1 && !off.has("sroa") && !r30Off("sroa")) {
+    timed("sroa", () => {
+      const sroaFaults = { copyStale: faults.has("r30-copy-stale") };
+      for (const f of m.funcs) if (sroaFunc(f, report.sroa, sroaFaults, true)) local(f);
+    });
+  }
   if (o.level >= 2) {
     if (!off.has("sroa")) {
       timed("sroa", () => {
-        for (const f of m.funcs) if (sroaFunc(f, report.sroa)) local(f);
+        const sroaFaults = { copyStale: faults.has("r30-copy-stale") };
+        for (const f of m.funcs) if (sroaFunc(f, report.sroa, sroaFaults)) local(f);
       });
     }
     cleanupAll("cleanup after inlining");

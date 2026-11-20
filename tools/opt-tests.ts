@@ -382,6 +382,17 @@ async function faultSteps(
   const engines = defaultEngines();
   return [
     {
+      // R30: scalar replacement's copy out of a frame slot (sroa.ts) and values split around cold calls (regalloc.ts), on
+      // R30's TSL programs natively at -O1 and -O2, against V8 (seconds, so first: R30's bugs are caught here, and so may an
+      // earlier bug be, which changes only which step names it).
+      name: "R30's programs natively at -O1 and -O2 (corpus/r30, tools/r30-tests.ts)",
+      run: async () => {
+        const R30 = await import("./r30-tests.ts");
+        const n = await R30.r30Native(accel, jobs, [1, 2]);
+        return n.failures.length === 0 && n.cases > 0;
+      },
+    },
+    {
       // R28: the no-growth inlining rule, -O2's second versioning pass, dominating conditions on equal constants and the
       // tag taken off before ref.addr, on R28's program through both routes in rc at -O1 and -O2, against V8 (seconds, so
       // first: R28's bugs are caught here, and so may an earlier bug be, which changes only which step names it).

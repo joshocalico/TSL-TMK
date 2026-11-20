@@ -8,5 +8,7 @@
   { "fn": "numMoves", "args": [40] },
   { "fn": "numMoves", "args": [2] },
   { "fn": "slowPaths", "args": [500] },
-  { "fn": "slowPaths", "args": [3] }
+  { "fn": "slowPaths", "args": [3] },
+  { "fn": "slowPathsHeavy", "args": [500] },
+  { "fn": "slowPathsHeavy", "args": [3] }
 ]

@@ -1,0 +1,20 @@
+[
+  { "fn": "repeats", "args": [0, "x", "ab"] },
+  { "fn": "repeats", "args": [12, "z", "abc"] },
+  { "fn": "repeats", "args": [40, "é", "😀a"] },
+  { "fn": "longRepeat", "args": [0, "ab"] },
+  { "fn": "longRepeat", "args": [1, "q"] },
+  { "fn": "longRepeat", "args": [3000, "x"] },
+  { "fn": "longRepeat", "args": [777, "abcdefg"] },
+  { "fn": "longRepeat", "args": [50, ""] },
+  { "fn": "pads", "args": [0, "ab", "-"] },
+  { "fn": "pads", "args": [30, "abc", "xy"] },
+  { "fn": "pads", "args": [70, "", "123"] },
+  { "fn": "pads", "args": [20, "héllo", "😀"] },
+  { "fn": "records", "args": [0] },
+  { "fn": "records", "args": [5] },
+  { "fn": "records", "args": [400] },
+  { "fn": "sometimes", "args": [100, 1] },
+  { "fn": "sometimes", "args": [500, 7] },
+  { "fn": "sometimes", "args": [0, 3] }
+]

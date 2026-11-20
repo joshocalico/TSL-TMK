@@ -1,8 +1,13 @@
 // Scalar replacement of frame slots (SPEC 4.3, D46): the simplest form, for what inlining leaves. A stack object whose
 // constructor and methods were inlined is an `alloca`, a `mem.fill` with zero, and loads and stores at constant offsets.
 // Where that's all it is, each field becomes an SSA value, with block parameters where paths join, and the slot goes.
-// A slot is left alone if anything else sees its address: a call, a store of the address itself, a check, a copy, an index
-// that isn't constant, accesses that overlap without being the same field, or no zero fill before the first access.
+// A slot is left alone if anything else sees its address: a call, a store of the address itself, a check, a copy into it, an
+// index that isn't constant, accesses that overlap without being the same field, or no zero fill before the first access.
+//
+// R30: a copy out of the slot (`mem.copy` from it, of a constant length within it, to anywhere else) is what placing a new
+// object in its counted slot is (`placeObject`, `placeTail`): it becomes a store of each field's value at that point, at its
+// offset from the copy's destination, and a store of zero for each run of bytes between fields, which the fill left zero. The
+// same bytes are written in the same place; the slot, and the frame it took, go.
 import { buildCfg, edgesOf, type Block, type Func, type Instr, type TirType } from "../ir.ts";
 import { removeUnreachable } from "./cfg.ts";
 import { intImm, newValue, substitute, valueOps } from "./util.ts";
@@ -11,6 +16,8 @@ export interface SroaStats {
   promoted: number;
   loads: number;
   stores: number;
+  /** R30: copies out of a slot written as stores */
+  copies: number;
 }
 
 const SIZE: Record<TirType, number> = {
@@ -27,9 +34,11 @@ const SIZE: Record<TirType, number> = {
 interface Access {
   ins: Instr;
   block: number; // id
-  kind: "load" | "store" | "fill" | "gep";
+  kind: "load" | "store" | "fill" | "fillpart" | "gep" | "copy";
   off: number;
   t?: TirType;
+  /** a copy out of the slot: how many bytes, from offset 0 */
+  len?: number;
 }
 
 interface Slot {
@@ -37,9 +46,24 @@ interface Slot {
   size: number;
   accesses: Access[];
   fields: { off: number; t: TirType }[];
+  /** R30: the position of the block the fill is in, which dominates every access */
+  fillBlock: number;
 }
 
-export function sroaFunc(f: Func, stats: SroaStats): boolean {
+/**
+ * R30's SROA put back as it was, for tools/r30-pins.ts (`TMK_R30_OFF=sroa`): no copy out of a slot, and the fill a `mem.fill`
+ * or one store in the entry block. Never set otherwise.
+ */
+export function r30Off(part: string): boolean {
+  return (process.env.TMK_R30_OFF ?? "").split(",").includes(part);
+}
+
+export function sroaFunc(
+  f: Func,
+  stats: SroaStats,
+  faults: { copyStale?: boolean } = {},
+  placedOnly = false, // R30, -O1: only a slot copied out, a new object placed, and nothing else of -O2's
+): boolean {
   const entry = f.blocks[0]!;
   const allocas = entry.instrs.filter((i) => i.op === "alloca");
   if (allocas.length === 0) return false;
@@ -64,12 +88,12 @@ export function sroaFunc(f: Func, stats: SroaStats): boolean {
   }
   const slots: Slot[] = [];
   for (const a of allocas) {
-    const s = analyse(f, a, users, termUse, consts);
-    if (s !== null) slots.push(s);
+    const s = analyse(f, a, users, termUse, consts, r30Off("sroa"));
+    if (s !== null && (!placedOnly || s.accesses.some((x) => x.kind === "copy"))) slots.push(s);
   }
   if (slots.length === 0) return false;
   removeUnreachable(f);
-  for (const s of slots) promote(f, s, stats);
+  for (const s of slots) promote(f, s, stats, faults.copyStale === true);
   return true;
 }
 
@@ -79,6 +103,7 @@ function analyse(
   users: Map<number, { ins: Instr; block: number }[]>,
   termUse: Set<number>,
   consts: Map<number, bigint>,
+  off: boolean,
 ): Slot | null {
   const p = a.res[0]!;
   const size = Number(intImm(a, 0));
@@ -117,6 +142,20 @@ function analyse(
       }
     }
     if (direct(p, 0, ins, u.block)) continue;
+    // R30: a copy of its first `len` bytes out to somewhere else, as placing a new object in its slot is
+    if (
+      !off &&
+      ins.op === "intrinsic" &&
+      ins.ops[0]?.t === "name" &&
+      ins.ops[0].name === "mem.copy"
+    ) {
+      const [dst, src, len] = valueOps(ins);
+      if (src !== p || dst === p || len === p) return null;
+      const n = consts.get(len!);
+      if (n === undefined || n <= 0n || n > BigInt(size)) return null;
+      accesses.push({ ins, block: u.block, kind: "copy", off: 0, len: Number(n) });
+      continue;
+    }
     if (ins.op === "intrinsic" && ins.ops[0]?.t === "name" && ins.ops[0].name === "mem.fill") {
       const [dst, byte, len] = valueOps(ins);
       if (dst !== p || byte === p || len === p) return null;
@@ -138,6 +177,57 @@ function analyse(
     }
     return null;
   }
+  // The fill: the first access in a block that dominates every block with an access (the entry block, before R30), so every
+  // load reads something written. R30: with no fill as such, that block's first accesses may be stores of zero that between
+  // them cover the slot exactly, each byte once, as a new object's fields are cleared a word at a time: the first stands for
+  // the fill, and the rest go with it. Fields are zero from the entry on (promote), which only matters where nothing reads.
+  const cfg = buildCfg(f);
+  const posOf = new Map<number, number>();
+  f.blocks.forEach((b, i) => posOf.set(b.id, i));
+  const dominates = (x: number, y0: number): boolean => {
+    let y = y0;
+    for (let guard = 0; guard <= f.blocks.length; guard++) {
+      if (y === x) return true;
+      const up = cfg.idom.get(y);
+      if (up === undefined) return !cfg.idom.has(y); // unreachable: removed before promotion
+      if (up === y) return false;
+      y = up;
+    }
+    return false;
+  };
+  const real = accesses.filter((x) => x.kind !== "gep");
+  const blocks = [...new Set(real.map((x) => posOf.get(x.block)!))];
+  const fb = blocks.find((x) => blocks.every((y) => dominates(x, y)));
+  if (fb === undefined) return null;
+  const inOrder: Access[] = [];
+  for (const i of f.blocks[fb]!.instrs) {
+    const x = real.find((y) => y.ins === i);
+    if (x !== undefined) inOrder.push(x);
+  }
+  const fills = real.filter((x) => x.kind === "fill");
+  if (fills.length > 1) return null;
+  if (fills.length === 1) {
+    if (inOrder[0] !== fills[0]) return null;
+  } else {
+    if (off) return null;
+    const covered = new Uint8Array(size);
+    const parts: Access[] = [];
+    for (const x of inOrder) {
+      if (x.kind !== "store" || consts.get(valueOps(x.ins)[1]!) !== 0n) break;
+      const w = SIZE[x.t!];
+      if (x.off < 0 || x.off + w > size) return null;
+      if (covered.subarray(x.off, x.off + w).some((k) => k !== 0)) break;
+      covered.fill(1, x.off, x.off + w);
+      parts.push(x);
+      if (covered.every((k) => k === 1)) break;
+    }
+    if (parts.length === 0 || !covered.every((k) => k === 1)) return null;
+    parts.forEach((x, i) => {
+      x.kind = i === 0 ? "fill" : "fillpart";
+      x.t = undefined;
+    });
+  }
+  if (off && fb !== 0) return null;
   // Fields: each access is a whole field, the same type at the same offset, overlapping no other, inside the slot.
   const fields: { off: number; t: TirType }[] = [];
   for (const x of accesses) {
@@ -152,17 +242,12 @@ function analyse(
     for (const y of fields) if (x.off < y.off + SIZE[y.t] && y.off < x.off + w) return null;
     fields.push({ off: x.off, t: x.t });
   }
-  // A zero fill in the entry block, before any access in it: every load then reads something written.
-  const entry = f.blocks[0]!;
-  const fillAt = entry.instrs.findIndex((i) =>
-    accesses.some((x) => x.kind === "fill" && x.ins === i),
-  );
-  if (fillAt < 0) return null;
-  for (let i = 0; i < fillAt; i++)
-    if (accesses.some((x) => x.ins === entry.instrs[i] && x.kind !== "gep")) return null;
-  if (accesses.filter((x) => x.kind === "fill").length !== 1) return null;
   fields.sort((x, y) => x.off - y.off);
-  return { alloca: a, size, accesses, fields };
+  // R30: a copy takes whole fields: none may run past its end
+  for (const x of accesses)
+    if (x.kind === "copy")
+      for (const y of fields) if (y.off < x.len! && y.off + SIZE[y.t] > x.len!) return null;
+  return { alloca: a, size, accesses, fields, fillBlock: fb };
 }
 
 function zeroOf(f: Func, t: TirType): Instr {
@@ -172,8 +257,80 @@ function zeroOf(f: Func, t: TirType): Instr {
   return { op: `iconst.${t}`, ops: [{ t: "i", val: 0n }], res: [r] };
 }
 
+/**
+ * R30: a copy of the slot's first `len` bytes to `dst`, as stores: each field inside it its value now (`cur`), at its offset,
+ * and zero over each run of bytes no field covers, which only the fill has written, in the widest stores its alignment from
+ * the start allows. The injected bug (`r30-copy-stale`, in `OPT_FAULTS`) stores each field's value from the fill, not its last.
+ */
+function copyOut(
+  f: Func,
+  s: Slot,
+  dst: number,
+  len: number,
+  cur: number[],
+  stale: boolean,
+): Instr[] {
+  const out: Instr[] = [];
+  const zeroIx = newValue(f, "ix");
+  out.push({ op: "iconst.ix", ops: [{ t: "i", val: 0n }], res: [zeroIx] });
+  const at = (off: number): number => {
+    const g = newValue(f, "ptr");
+    out.push({
+      op: "gep",
+      ops: [
+        { t: "v", id: dst },
+        { t: "v", id: zeroIx },
+        { t: "i", val: 1n },
+        { t: "i", val: BigInt(off) },
+      ],
+      res: [g],
+    });
+    return g;
+  };
+  let o = 0;
+  const fields = s.fields.filter((x) => x.off < len);
+  for (let fi = 0; fi <= fields.length; fi++) {
+    const next = fi < fields.length ? fields[fi]!.off : len;
+    // the gap before the next field: zero, in the widest aligned stores that fit
+    while (o < next) {
+      const w = [8, 4, 2, 1].find((k) => o % k === 0 && o + k <= next)!;
+      const t: TirType = w === 8 ? "i64" : w === 4 ? "i32" : w === 2 ? "i16" : "i8";
+      const z = newValue(f, t);
+      out.push({ op: `iconst.${t}`, ops: [{ t: "i", val: 0n }], res: [z] });
+      out.push({
+        op: `store.${t}.na`,
+        ops: [
+          { t: "v", id: at(o) },
+          { t: "v", id: z },
+        ],
+        res: [],
+      });
+      o += w;
+    }
+    if (fi === fields.length) break;
+    const x = fields[fi]!;
+    const all = s.fields.indexOf(x);
+    let val = cur[all]!;
+    if (stale) {
+      const z = zeroOf(f, x.t);
+      out.push(z);
+      val = z.res[0]!;
+    }
+    out.push({
+      op: `store.${x.t}.na`,
+      ops: [
+        { t: "v", id: at(x.off) },
+        { t: "v", id: val },
+      ],
+      res: [],
+    });
+    o = x.off + SIZE[x.t];
+  }
+  return out;
+}
+
 /** Classic SSA construction for each field: parameters at the iterated dominance frontier of the stores, then renaming. */
-function promote(f: Func, s: Slot, stats: SroaStats): void {
+function promote(f: Func, s: Slot, stats: SroaStats, copyStale: boolean): void {
   const cfg = buildCfg(f);
   const posOf = new Map<number, number>();
   f.blocks.forEach((b, i) => posOf.set(b.id, i));
@@ -231,6 +388,12 @@ function promote(f: Func, s: Slot, stats: SroaStats): void {
   const drop = new Set<Instr>([s.alloca]);
   // Renaming, over the dominator tree, with an explicit stack.
   const cur: number[] = Array.from({ length: nf }, () => -1);
+  if (s.fillBlock !== 0) {
+    // R30: zero from the entry on, so a path that doesn't pass the fill (and so reads nothing) still has a value to pass
+    const zeros = s.fields.map((x) => zeroOf(f, x.t));
+    zeros.forEach((z, fi) => (cur[fi] = z.res[0]!));
+    f.blocks[0]!.instrs.unshift(...zeros);
+  }
   type Frame = { b: number; saved: number[] | null; next: number };
   const stack: Frame[] = [{ b: cfg.rpo[0]!, saved: null, next: -1 }];
   while (stack.length > 0) {
@@ -248,6 +411,7 @@ function promote(f: Func, s: Slot, stats: SroaStats): void {
           continue;
         }
         drop.add(ins);
+        if (x.kind === "fillpart") continue;
         if (x.kind === "fill") {
           for (let fi = 0; fi < nf; fi++) {
             const z = zeroOf(f, s.fields[fi]!.t);
@@ -260,6 +424,9 @@ function promote(f: Func, s: Slot, stats: SroaStats): void {
         } else if (x.kind === "load") {
           subst.set(ins.res[0]!, cur[fieldAt.get(x.off)!]!);
           stats.loads++;
+        } else if (x.kind === "copy") {
+          out.push(...copyOut(f, s, valueOps(ins)[0]!, x.len!, cur, copyStale));
+          stats.copies++;
         }
       }
       blk.instrs = out;

@@ -36,6 +36,7 @@ import {
   r22Off,
   r24Off,
   r25Off,
+  r30Off,
   rcStrRuntime,
 } from "./emit-rcstr.ts";
 import {
@@ -1261,7 +1262,13 @@ class Emitter {
           te.k === "rtcall" &&
           (te.ty.k === "ref" || te.args.some((a) => a.ty.k === "ref")) &&
           this.vecRt(te) === null &&
-          !(this.strs && (te.name === "$concat" || te.name === "$indexFrom"))
+          !(
+            this.strs &&
+            (te.name === "$concat" ||
+              te.name === "$indexFrom" ||
+              te.name === "$copyFrom" ||
+              te.name === "$repeatFrom")
+          )
         )
           this.fail(`the runtime's ${te.name}, on references`);
       });
@@ -2203,6 +2210,63 @@ class Emitter {
   }
 
   /**
+   * R30: in `rc`, compiler/rt's `strCopy(r, at, s, n)` (n units of s from 0 into r from at, a unit at a time, each read and
+   * written checked) as `r.copyFrom(at, s, 0, n)`: the same units in the same places, one check of the run and one copy of it.
+   * Null where it isn't that shape, and it prints whole.
+   */
+  copyBody(f: FuncInst): Stmt[] | null {
+    const [r, at, s, n] = f.params;
+    if (
+      f.params.length !== 4 ||
+      r?.ty.k !== "ref" ||
+      s?.ty.k !== "ref" ||
+      at?.ty.k !== "int" ||
+      n?.ty.k !== "int" ||
+      f.body.length !== 1 ||
+      f.body[0]!.k !== "for"
+    )
+      return null;
+    let sh: unknown;
+    eachTE(f.body, (te) => {
+      if (sh === undefined && isStrSh(te.sh)) sh = te.sh;
+    });
+    if (sh === undefined) return null;
+    const v = (x: Var, str: boolean): TE =>
+      ({ k: "var", v: x, ty: x.ty, ...(str ? { sh } : {}) }) as TE;
+    const call = {
+      k: "rtcall",
+      name: "$copyFrom",
+      args: [v(r, true), v(at, false), v(s, true), v(n, false)],
+      ty: { k: "void" },
+    } as unknown as TE;
+    return [{ k: "expr", e: call }];
+  }
+
+  /**
+   * R30: in `rc`, compiler/rt's `strRepeat` up to its result made (`const r = newFlat(k * m)`), then, for its loop of
+   * `strCopy(r!, i * m, s, m)` over i below k, `r!.repeatFrom(s, k)`: the same units, s's m units k times over, written by
+   * copies that double (JsStr's own). Null where it isn't that shape, and it prints whole.
+   */
+  repeatBody(f: FuncInst): Stmt[] | null {
+    const at = f.body.findIndex((st) => st.k === "for");
+    const loop = f.body[at];
+    const kLet = f.body.find((st) => st.k === "let" && st.v.name === "k");
+    if (loop?.k !== "for" || kLet?.k !== "let" || loop.body.length !== 1) return null;
+    const st = loop.body[0]!;
+    if (st.k !== "expr" || st.e.k !== "call" || st.e.args.length !== 4) return null;
+    const [r, , s] = st.e.args;
+    const k = kLet.v;
+    if (k.ty.k !== "int" || r === undefined || s === undefined) return null;
+    const call = {
+      k: "rtcall",
+      name: "$repeatFrom",
+      args: [r, s, { k: "var", v: k, ty: k.ty } as TE],
+      ty: { k: "void" },
+    } as unknown as TE;
+    return [...f.body.slice(0, at), { k: "expr", e: call }, ...f.body.slice(at + 1)];
+  }
+
+  /**
    * `strConcat`'s body as far as JS's length check (which throws RangeError, as the lowering spells it), and then
    * `return a.concat(b)`: JsString's concatenation is the rest of it.
    */
@@ -3057,6 +3121,17 @@ class Emitter {
         for (const [g, n] of this.strRtNames()) {
           if (n !== "strIndexOf" || !this.funcs.includes(g)) continue;
           const body = this.indexOfBody(g);
+          if (body === null) continue;
+          indexOf.push({ f: g, body: g.body });
+          g.body = body;
+        }
+      // R30: in `rc`, strCopy a copy of the run of units JsStr's own copyFrom takes, where it was printed a checked unit at a
+      // time, and strRepeat's loop of strCopy calls JsStr's repeatFrom, which copies what it's written after itself
+      if (this.rc && !r30Off("copy"))
+        for (const [g, n] of this.strRtNames()) {
+          if (!this.funcs.includes(g)) continue;
+          const body =
+            n === "strCopy" ? this.copyBody(g) : n === "strRepeat" ? this.repeatBody(g) : null;
           if (body === null) continue;
           indexOf.push({ f: g, body: g.body });
           g.body = body;
@@ -5533,6 +5608,14 @@ class Emitter {
         if (this.strs && e.name === "$indexFrom") {
           const [a, b, c] = this.operands([e.args[0]!, e.args[1]!, e.args[2]!]);
           return `${paren(a!)}.indexFrom(${b}, ${c})`;
+        }
+        if (this.strs && e.name === "$copyFrom") {
+          const [r, at, s, n] = this.operands([e.args[0]!, e.args[1]!, e.args[2]!, e.args[3]!]);
+          return `${paren(r!)}.copyFrom(toUsize(${at}), ${s}, 0, toUsize(${n}))`;
+        }
+        if (this.strs && e.name === "$repeatFrom") {
+          const [r, s, k] = this.operands([e.args[0]!, e.args[1]!, e.args[2]!]);
+          return `${paren(r!)}.repeatFrom(${s}, toUsize(${k}))`;
         }
         if (this.classes && e.name === "$push") {
           const [v, x] = this.operands([e.args[0]!, e.args[1]!]);

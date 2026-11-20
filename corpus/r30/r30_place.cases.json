@@ -1,0 +1,10 @@
+[
+  { "fn": "chain", "args": [0] },
+  { "fn": "chain", "args": [1] },
+  { "fn": "chain", "args": [300] },
+  { "fn": "reuse", "args": [200] },
+  { "fn": "tails", "args": [400, 5] },
+  { "fn": "tails", "args": [300, 200] },
+  { "fn": "kept", "args": [2000] },
+  { "fn": "chain", "args": [50] }
+]

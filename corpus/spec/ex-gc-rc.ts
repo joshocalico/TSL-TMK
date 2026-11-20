@@ -331,8 +331,9 @@ function pageSlot(k: usize): u64 {
 /**
  * R28: pageSlot's common case alone, for `make`'s and `tailFast`'s fast paths in line: a slot of size class k cut from the
  * page its class is being cut from, where it's a small class and that page has room; 0 otherwise, and nothing changed, so
- * the caller goes on to `tryMakeAfter` or `tailMakeAfter`, whose pageSlot finds the same and takes a fresh page. A fresh
- * object was a call out of line (`tryMakeAfter`, 59 instructions to the direct route's `__rc_small` 34 at -O2, R26).
+ * the caller goes on to `slotAfter` or `tailSlotAfter` (R30; `tryMakeAfter` and `tailMakeAfter` before), whose pageSlot
+ * finds the same and takes a fresh page. A fresh object was a call out of line (`tryMakeAfter`, 59 instructions to the direct
+ * route's `__rc_small` 34 at -O2, R26).
  */
 /** @tsl.inline */
 // SAFETY: as pageSlot's: where cutting is only ever moves forward over slots handed out, within the page.
@@ -347,8 +348,29 @@ function pageCut(k: usize): u64 {
 }
 
 /**
+ * R30: with the collector, cutSlot's common case alone, for `make`'s and `tailFast`'s fast paths in line, as pageCut is
+ * without it: a slot of size class k cut from its class's newest chunk where that has room; 0 otherwise, and nothing
+ * changed, so the caller goes on to `slotAfter` or `tailSlotAfter`, whose cutSlot finds the same and takes a fresh chunk.
+ * Only where slotFor's dryStep would do nothing (nothing left of the budget, or nothing to free): the same slot, the same
+ * steps. A fresh slot was a call out of line (tailMakeAfter, 58 instructions to the direct route's `__rc_small` 30).
+ */
+/** @tsl.inline */
+// SAFETY: as cutSlot's: a chunk's end only ever moves forward over slots handed out, within the chunk, so an address plus a
+// slot's size, at most the chunk's end, can't wrap.
+function chunkCut(k: usize): u64 {
+  const rec = ptrAt(u64, ccChunks).add(k * 3);
+  const size = BigInt.asUintN(64, toU64(1) << toU64(k)); // k is a size class: below CLASSES, so nothing is lost
+  const slot = rec.add(1).read();
+  if (slot === 0n || BigInt.asUintN(64, slot + size) > rec.add(2).read()) return 0n;
+  const end = BigInt.asUintN(64, slot + size);
+  rec.add(1).write(end);
+  ptrAt(u64, rec.read()).add(1).write(end);
+  return slot;
+}
+
+/**
  * R19: slotFor where the caller has just found size class k's list empty after its freeing steps, with nothing run since
- * (`make`'s and `tailFast`'s fast paths, before `tryMakeAfter` and `tailMakeAfter`): without the collector that's what
+ * (`make`'s and `tailFast`'s fast paths, before `slotAfter` and `tailSlotAfter`): without the collector that's what
  * takeSlot would find too, so a fresh slot from its page straight away; and with no memory, slotDrained, as slotFor.
  */
 /** @tsl.inline */
@@ -1618,14 +1640,26 @@ export class Rc<T extends object> {
    */
   /** @tsl.moves item */
   /** @tsl.tailed item */
-  // SAFETY: the slot is a free one of class k, which holds the prefix and tailBytes(n), claimed before it's placed in;
-  // keep is the caller's promise, and more than n traps.
   private tailMake(n: usize, keep: usize, item: T): Counted<T> | null {
+    const slot = this.tailSlot(n);
+    if (slot === 0n) return null;
+    return this.tailPlace(slot, n, keep, item);
+  }
+
+  /**
+   * R30: tailMake's steps and its slot, without the object: freeing's steps, the store registered, the size class for a tail
+   * of n (kept as the last, with its owner word), and a free slot of it, off its list or slotFor's; 0 if there's none, or the
+   * store can't be registered. Out of line, and given no object, so a caller's new object is never in memory of its own: it's
+   * placed where it's made (tailPlace, inlined), its fields written straight into the slot.
+   */
+  /** @tsl.noinline */
+  // SAFETY: a slot on a list is free and 2^k bytes; slotFor's is too.
+  private tailSlot(n: usize): u64 {
     if (cyclesLinked()) {
       if (ccPhase !== 0 || (ccTop !== 0 && (ccGap === 0 || !pacing))) stepAll(budget);
       else idleStep();
     } else if (waiting !== 0n || cur !== 0n) freeAlloc(budget);
-    if (!this.register()) return null;
+    if (!this.register()) return 0n;
     // the size class as for the last object made, if its tail was as long: a lowered array's holders mostly are (R3)
     let k = this.tk;
     if (n !== this.tn || k === 0) {
@@ -1638,13 +1672,29 @@ export class Rc<T extends object> {
     }
     // a free slot of its size on its list first, as `tryMake` takes one (R3: a lowered `rc` array is made so)
     const head = ptrAt(u64, heads).add(k);
-    let slot = head.read();
-    if (slot !== 0n) head.write(countAt(slot).read());
-    else slot = slotFor(k);
-    if (slot === 0n) return null;
+    const slot = head.read();
+    if (slot !== 0n) {
+      head.write(countAt(slot).read());
+      return slot;
+    }
+    return slotFor(k);
+  }
+
+  /**
+   * R30: a slot of size class tk, free, for an object with a tail of n elements (tn is n): claimed, the object placed in it
+   * with its tail zeroed but for what's kept, as every make of a tailed object ends. Inlined, so the moved object is placed
+   * where it's made.
+   */
+  /** @tsl.moves item */
+  /** @tsl.tailed item */
+  /** @tsl.inline */
+  // SAFETY: the slot is a free one of size class tk, which holds the prefix and tailBytes(n) as tn is n, claimed before it's
+  // placed in; keep is the caller's promise, and more than n traps.
+  private tailPlace(slot: u64, n: usize, keep: usize, item: T): Counted<T> {
     const gen = this.claim(slot, this.tw);
     // a whole tail zeroed is one fill: only a room growth writes into (keep) takes the two around what it keeps
     const made = keep === 0 ? placeTail(slot, gen, n, item) : placeTail(slot, gen, n, item, keep);
+    // learn has nothing to do but on the host, for a store's first object
     if (cycleGroup<T>() === GROUP_UNKNOWN) this.learn(made);
     if (cyclesLinked() && rest !== 0) restIfWork();
     return made;
@@ -1667,19 +1717,20 @@ export class Rc<T extends object> {
 
   /**
    * R17: `makeTail` and `makeTailKeep`, inlined where the inliner inlines, as `make` is: for a tail as long as the last one
-   * made (its size class known, R3), freeing's steps as `tailMake` takes them, then a free slot of that size off its list,
-   * the object placed there in line, its tail zeroed but for what's kept. Anything else is `tailMake`'s, or with the steps
-   * taken, `tailMakeAfter`'s, out of line: the same steps and the same slot. R19: a tail of another length than the last
-   * is made in line too, its size class worked out here (sizeClass, inlined) and kept as the last, as `tailMake` keeps it:
-   * a lowered array's rooms are each a length of their own, and its holders' lengths alternate where two arrays of a class
-   * are made in turn, and each went out of line to `tailMake`.
+   * made (its size class known, R3), freeing's steps as `tailSlot` takes them, then a free slot of that size off its list.
+   * Anything else is `tailSlot`'s, or with the steps taken, `tailSlotAfter`'s, out of line: the same steps and the same
+   * slot. R19: a tail of another length than the last is made in line too, its size class worked out here (sizeClass,
+   * inlined) and kept as the last, as `tailSlot` keeps it: a lowered array's rooms are each a length of their own, and its
+   * holders' lengths alternate where two arrays of a class are made in turn. R30: whichever way the slot comes, the object
+   * is placed here (tailPlace): only the slot is found out of line, so the moved object is never given to a call, and the
+   * optimiser writes its fields straight into the slot, where it was built in a frame slot and copied.
    */
   /** @tsl.moves item */
   /** @tsl.tailed item */
   /** @tsl.inline */
-  // SAFETY: the slot is a free one of size class tk, which holds the prefix and tailBytes(n) as tn is n, claimed before
-  // it's placed in; keep is the caller's promise, as tailMake's.
+  // SAFETY: the slot is a free one of size class tk, as tailPlace needs.
   private tailFast(n: usize, keep: usize, item: T): Counted<T> {
+    let slot: u64 = 0n;
     if (
       this.id !== 0 &&
       !(cyclesLinked() && (ccPhase !== 0 || (ccTop !== 0 && (ccGap === 0 || !pacing))))
@@ -1698,51 +1749,49 @@ export class Rc<T extends object> {
       }
       const k = this.tk;
       const head = ptrAt(u64, heads).add(k);
-      let slot = head.read();
+      slot = head.read();
       if (slot !== 0n) head.write(countAt(slot).read());
-      else if (!cyclesLinked()) {
-        // R28: without the collector, a fresh slot cut in line where its page has room, as tailMakeAfter cuts it
-        slot = pageCut(k);
-        if (slot !== 0n) genAt(slot).write(0);
+      else {
+        // R28: without the collector, a fresh slot cut in line where its page has room, as tailSlotAfter cuts it
+        if (!cyclesLinked()) {
+          slot = pageCut(k);
+          if (slot !== 0n) genAt(slot).write(0);
+        } else if (rest === 0 || (waiting === 0n && cur === 0n)) {
+          // R30: with the collector, from its chunk in line, where slotFor's dryStep would do nothing
+          slot = chunkCut(k);
+          if (slot !== 0n) genAt(slot).write(0);
+        }
+        if (slot === 0n) slot = this.tailSlotAfter();
       }
-      if (slot !== 0n) {
-        const gen = this.claim(slot, this.tw);
-        const fast = keep === 0 ? placeTail(slot, gen, n, item) : placeTail(slot, gen, n, item, keep);
-        // as make's: learn has nothing to do but on the host for a fresh slot's
-        if (cycleGroup<T>() === GROUP_UNKNOWN) this.learn(fast);
-        if (cyclesLinked() && rest !== 0) restIfWork();
-        return fast;
-      }
-      const after = this.tailMakeAfter(n, keep, item);
-      if (after === null) trap(Trap.OutOfMemory);
-      return after;
-    }
-    const made = this.tailMake(n, keep, item);
-    if (made === null) trap(Trap.OutOfMemory);
-    return made;
+    } else slot = this.tailSlot(n);
+    if (slot === 0n) trap(Trap.OutOfMemory);
+    return this.tailPlace(slot, n, keep, item);
   }
 
   /**
-   * `tailFast`'s rest, its steps taken, its size class tk's list empty: slotFor's slot, as `tailMake` takes it (R19: by
-   * way of freshSlot, as the list was just found empty).
+   * `tailFast`'s rest, its steps taken, its size class tk's list empty: slotFor's slot, as `tailSlot` takes it (R19: by way
+   * of freshSlot, as the list was just found empty). R30: the slot alone; tailFast places the object.
    */
-  /** @tsl.moves item */
-  /** @tsl.tailed item */
   /** @tsl.noinline */
-  // SAFETY: as tailFast's.
-  private tailMakeAfter(n: usize, keep: usize, item: T): Counted<T> | null {
-    const slot = freshSlot(this.tk);
-    if (slot === 0n) return null;
-    const gen = this.claim(slot, this.tw);
-    const made = keep === 0 ? placeTail(slot, gen, n, item) : placeTail(slot, gen, n, item, keep);
-    if (cycleGroup<T>() === GROUP_UNKNOWN) this.learn(made);
-    if (cyclesLinked() && rest !== 0) restIfWork();
-    return made;
+  private tailSlotAfter(): u64 {
+    return freshSlot(this.tk);
   }
 
   /** @tsl.moves item */
-  // SAFETY: the slot is a free one of the class's size class, claimed before the object is placed in it.
   tryMake(item: T): Counted<T> | null {
+    const slot = this.slotSlow();
+    if (slot === 0n) return null;
+    return this.place(slot, item);
+  }
+
+  /**
+   * R30: tryMake's steps and its slot, without the object: freeing's steps, then, for a store that has made something before,
+   * a free slot of its size off its list, or else the store registered at its first make, and slotFor's; 0 if there's none.
+   * Out of line and given no object, as tailSlot is, so `make` places its object where it's made.
+   */
+  /** @tsl.noinline */
+  // SAFETY: a slot on a list is free and of the class's size class; slotFor's is too.
+  private slotSlow(): u64 {
     if (cyclesLinked()) {
       if (ccPhase !== 0 || (ccTop !== 0 && (ccGap === 0 || !pacing))) stepAll(budget);
       else idleStep();
@@ -1753,14 +1802,22 @@ export class Rc<T extends object> {
       const slot = head.read();
       if (slot !== 0n) {
         head.write(countAt(slot).read());
-        const fast = placeObject(slot, this.claim(slot, this.owner), item);
-        if (cyclesLinked() && rest !== 0) restIfWork();
-        return fast;
+        return slot;
       }
-    } else if (!this.register()) return null;
-    const slot = slotFor(this.k);
-    if (slot === 0n) return null;
+    } else if (!this.register()) return 0n;
+    return slotFor(this.k);
+  }
+
+  /**
+   * R30: a free slot of the class's size class: claimed, and the object placed in it, as every make ends. Inlined, so the
+   * moved object is placed where it's made.
+   */
+  /** @tsl.moves item */
+  /** @tsl.inline */
+  // SAFETY: the slot is a free one of the class's size class, claimed before the object is placed in it.
+  private place(slot: u64, item: T): Counted<T> {
     const made = placeObject(slot, this.claim(slot, this.owner), item);
+    // learn has nothing to do but on the host, for a store's first object
     if (cycleGroup<T>() === GROUP_UNKNOWN) this.learn(made);
     if (cyclesLinked() && rest !== 0) restIfWork();
     return made;
@@ -1768,58 +1825,46 @@ export class Rc<T extends object> {
 
   /**
    * R17: inlined where the inliner inlines, as the direct route's `__rc_new` is at -O2: freeing's steps first, as `tryMake`
-   * takes them (a call, only with something waiting; with the collector, only while it's idle or waits out its gap), then,
-   * with a free slot of its size on its list, the object placed there in line. Anything else is `tryMake`'s, or with the
-   * steps taken, `tryMakeAfter`'s, out of line: the same steps and the same slot as `tryMake` takes.
+   * takes them (a call, only with something waiting; with the collector, only while it's idle or waits out its gap), then
+   * a free slot of its size off its list. Anything else is `slotSlow`'s, or with the steps taken, `slotAfter`'s, out of
+   * line: the same steps and the same slot as `tryMake` takes. R30: whichever way the slot comes, the object is placed here
+   * (`place`), so the moved object is never given to a call, and its fields are written straight into the slot.
    */
   /** @tsl.moves item */
   /** @tsl.inline */
-  // SAFETY: the slot is a free one of the class's size class, off its list, claimed before the object is placed in it.
+  // SAFETY: the slot is a free one of the class's size class, as `place` needs.
   make(item: T): Counted<T> {
+    let slot: u64 = 0n;
     if (this.id !== 0 && !(cyclesLinked() && (ccPhase !== 0 || (ccTop !== 0 && (ccGap === 0 || !pacing))))) {
       if (cyclesLinked()) idleStep();
       else if (waiting !== 0n || cur !== 0n) freeAlloc(budget);
       const head = ptrAt(u64, heads).add(this.k);
-      const slot = head.read();
-      if (slot !== 0n) {
-        head.write(countAt(slot).read());
-        const fast = placeObject(slot, this.claim(slot, this.owner), item);
-        if (cyclesLinked() && rest !== 0) restIfWork();
-        return fast;
-      }
-      // R28: without the collector, a fresh slot cut in line where its page has room: tryMakeAfter's slot and steps
-      if (!cyclesLinked()) {
-        const cut = pageCut(this.k);
-        if (cut !== 0n) {
-          genAt(cut).write(0);
-          const fresh = placeObject(cut, this.claim(cut, this.owner), item);
-          if (cycleGroup<T>() === GROUP_UNKNOWN) this.learn(fresh);
-          return fresh;
+      slot = head.read();
+      if (slot !== 0n) head.write(countAt(slot).read());
+      else {
+        // R28: without the collector, a fresh slot cut in line where its page has room: slotAfter's slot and steps
+        if (!cyclesLinked()) {
+          slot = pageCut(this.k);
+          if (slot !== 0n) genAt(slot).write(0);
+        } else if (rest === 0 || (waiting === 0n && cur === 0n)) {
+          // R30: with the collector, from its chunk in line, where slotFor's dryStep would do nothing
+          slot = chunkCut(this.k);
+          if (slot !== 0n) genAt(slot).write(0);
         }
+        if (slot === 0n) slot = this.slotAfter();
       }
-      const after = this.tryMakeAfter(item);
-      if (after === null) trap(Trap.OutOfMemory);
-      return after;
-    }
-    const made = this.tryMake(item);
-    if (made === null) trap(Trap.OutOfMemory);
-    return made;
+    } else slot = this.slotSlow();
+    if (slot === 0n) trap(Trap.OutOfMemory);
+    return this.place(slot, item);
   }
 
   /**
-   * `tryMake`'s rest, for a registered store whose steps are taken and whose size's list is empty: slotFor's slot (R19: by
-   * way of freshSlot, as the list was just found empty).
+   * `make`'s rest, for a registered store whose steps are taken and whose size's list is empty: slotFor's slot (R19: by way
+   * of freshSlot, as the list was just found empty). R30: the slot alone; `make` places the object.
    */
-  /** @tsl.moves item */
   /** @tsl.noinline */
-  // SAFETY: the slot is a free one of the class's size class, claimed before the object is placed in it.
-  private tryMakeAfter(item: T): Counted<T> | null {
-    const slot = freshSlot(this.k);
-    if (slot === 0n) return null;
-    const made = placeObject(slot, this.claim(slot, this.owner), item);
-    if (cycleGroup<T>() === GROUP_UNKNOWN) this.learn(made);
-    if (cyclesLinked() && rest !== 0) restIfWork();
-    return made;
+  private slotAfter(): u64 {
+    return freshSlot(this.k);
   }
 
   /** One more count: the result is a second handle to the same object. */

@@ -114,3 +114,32 @@ export function slowPaths(n: number): number {
   for (let i = 0; i < n; i++) t = (t + sometimes(i)) | 0;
   return (t + made * 7 + (last !== null ? last.v : -1)) | 0;
 }
+
+// R30: @tsl/gc's make now finds only its slot out of line, so `sometimes` above is small enough to inline whole, and partial
+// inlining no longer takes it. The same shape with a rare path too big to inline whole: a count moved first, a return on the
+// common path, and on the rare one an object made and kept, then more in a loop (each built in a frame slot of the entry's).
+let madeHeavy = 0;
+let lastHeavy: Cell | null = null;
+
+function sometimesHeavy(x: number): number {
+  madeHeavy++;
+  if (x % 97 !== 5) return x * 2;
+  const first = new Cell(x);
+  lastHeavy = first;
+  let s = rare(first);
+  for (let i = 0; i < 4; i++) {
+    const c = new Cell(x + i);
+    lastHeavy = c;
+    s = (s + rare(c) + c.v * i) | 0;
+  }
+  const d = new Cell(s);
+  lastHeavy = d;
+  return (s + rare(d) + rare(d) * 3 + (x % 7) * 11 + (x % 13) * 5) | 0;
+}
+
+/** n calls, the rare path about one in 97: the sum and the count, so a path taken twice shows. */
+export function slowPathsHeavy(n: number): number {
+  let t = 0;
+  for (let i = 0; i < n; i++) t = (t + sometimesHeavy(i)) | 0;
+  return (t + madeHeavy * 7 + (lastHeavy !== null ? lastHeavy.v : -1)) | 0;
+}

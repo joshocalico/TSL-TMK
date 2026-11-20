@@ -486,6 +486,72 @@ bb2:
   assert.doesNotMatch(f, /alloca|load|store|mem\.fill/);
 });
 
+// R30: a new object built in a frame slot, cleared a word at a time after a test, and copied into its place (as `make`'s
+// placeObject and placeTail are): the slot goes, and the copy is stores of the fields' last values and zero between them.
+const PLACE = `func @f(%0: ptr, %1: i32, %2: i64) -> (i32) export {
+bb0:
+  %3 = alloca 24, 8, t3
+  %4 = iconst.i32 0
+  %5 = icmp.slt.i32 %1, %4
+  brif %5, bb3, bb1
+bb1:
+  %6 = iconst.i64 0
+  store.i64.na %3, %6
+  %7 = iconst.ix 0
+  %8 = gep %3, %7, 1, 8
+  store.i64.na %8, %6
+  %9 = gep %3, %7, 1, 16
+  store.i64.na %9, %6
+  store.i32.na %9, %1
+  store.i64.na %8, %2
+  %10 = iconst.ix 20
+  intrinsic mem.copy %0, %3, %10
+  %11 = load.i32.na %9
+  ret %11
+bb3:
+  trap t1
+}
+`;
+
+test("R30: a frame slot cleared a word at a time and copied out becomes stores into the copy's place", () => {
+  const f = fn(opt(PLACE).text, "f");
+  assert.doesNotMatch(f, /alloca|mem\.copy|load/);
+  // the zero word at 0, the i64 at 8 (%2) and the i32 at 16 (%1), each at its offset from %0
+  assert.match(f, /store\.i64\.na %0, %\d+\n/);
+  assert.match(f, /gep %0, %\d+, 1, 8\n\s+store\.i64\.na %\d+, %2\n/);
+  assert.match(f, /gep %0, %\d+, 1, 16\n\s+store\.i32\.na %\d+, %1\n/);
+  assert.match(f, /ret %1\n/);
+});
+
+test("R30: a copy out of a frame slot that would split a field, or a copy into it, keeps the slot", () => {
+  // 18 bytes splits the i32 at 16
+  const split = fn(opt(PLACE.replace("iconst.ix 20", "iconst.ix 18")).text, "f");
+  assert.match(split, /alloca 24/);
+  // a copy into it, not out of it
+  const into = fn(
+    opt(PLACE.replace("intrinsic mem.copy %0, %3, %10", "intrinsic mem.copy %3, %0, %10")).text,
+    "f",
+  );
+  assert.match(into, /alloca 24/);
+  // off (TMK_R30_OFF=sroa): as before R30, the fill isn't in the entry block, so the slot stays
+  const was = process.env.TMK_R30_OFF;
+  process.env.TMK_R30_OFF = "sroa";
+  try {
+    assert.match(fn(opt(PLACE).text, "f"), /alloca 24/);
+  } finally {
+    if (was === undefined) delete process.env.TMK_R30_OFF;
+    else process.env.TMK_R30_OFF = was;
+  }
+});
+
+test("R30: the injected bug r30-copy-stale stores the fill's zero, not the fields' last values", () => {
+  const lines = (PLACE + TRAPS).split("\n").filter((l) => l.trim() !== "");
+  const m = canonicalize(parseModule(lines.join("\n") + "\n"));
+  const r = optimizeModule(m, { level: 2, verifyEach: true, faults: ["r30-copy-stale"] });
+  const f = fn(printModule(r.module), "f");
+  assert.doesNotMatch(f, /store\.i64\.na %\d+, %2\n/);
+});
+
 test("the same input gives the same output", () => {
   const a = opt(CALLS).text;
   const b = opt(CALLS).text;

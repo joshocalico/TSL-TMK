@@ -108,6 +108,15 @@ export function r24Off(part: string): boolean {
 }
 
 /**
+ * R30's printing put back as it was, for tools/r30-pins.ts (`TMK_R30_OFF=zeroed`, or `copy`): jsStrZeroed's length tested
+ * as an i32 twice and checked again by toUsize, and compiler/rt's `strCopy` printed whole, a checked unit at a time. Never
+ * set otherwise.
+ */
+export function r30Off(part: string): boolean {
+  return (process.env.TMK_R30_OFF ?? "").split(",").includes(part);
+}
+
+/**
  * R25's printing put back as it was, for tools/r25-pins.ts (`TMK_R25_OFF=strings`): `cpLen` reading its units through
  * `all()`, `sub` and `copyFrom` out of line, and no `indexFrom` (compiler/rt's strIndexOf printed whole, emit-tsl.ts). Never
  * set otherwise.
@@ -281,6 +290,28 @@ function jsStrGrown(a: JsStr, b: JsStr, n: i32): JsStr {
     if (si + n > toUsize(s.n)) trap(Trap.Bounds);
     this.units.set(s.all().subarray(si, si + n), di);
   }`;
+  // R30: k copies of a string's units (compiler/rt's strRepeat, emit-tsl.ts's repeatBody): s's once, then what's written so
+  // far copied after itself, doubling, each copy one checked run of units
+  const repeatFromText = r30Off("copy")
+    ? ""
+    : `
+  /**
+   * k copies of s's units, from unit 0, into this string, made by jsStrZeroed and no one else's yet (R30): s's once, then
+   * what's written copied after itself, so a long repeat is a few copies of many units.
+   */
+  repeatFrom(s: JsStr, k: usize): void {
+    const m = toUsize(s.n);
+    const all = m * k;
+    if (all === 0) return;
+    this.units.set(s.all(), 0);
+    let done = m;
+    while (done < all) {
+      const n = done <= all - done ? done : all - done;
+      this.units.set(this.units.subarray(0, ${fault() === "r30-repeat-short" ? "n - 1" : "n"}), done);
+      done += n;
+    }
+  }
+`;
   // R25: equality's quick answers (the same string, one missing, the lengths differ) inlined where it's asked, the units
   // compared out of line
   const eqText = r25
@@ -341,6 +372,15 @@ function jsStrEq(a: JsStr | null, b: JsStr | null): bool {
 
 `
     : "";
+  // R30: one test of the length, as a u32, which a negative one fails as one too long does (the same trap), where the test
+  // of each and toUsize's own of the sign were three; and the length a u32 from there on, so the size class's arithmetic is
+  // known to stay small
+  const zeroedBody = r30Off("zeroed")
+    ? `if (n < 0 || n > 536870888) trap(Trap.OutOfMemory);
+  return withTail(toUsize(n), new JsStr(${r24Off("strings") ? "n" : "n, 0, null, 0"}));`
+    : `const u = wrapU32(n);
+  if (u > 536870888) trap(Trap.OutOfMemory);
+  return withTail(toUsize(u), new JsStr(${r24Off("strings") ? "n" : "n, 0, null, 0"}));`;
   const unitSlot = fault() === "rcstr-unit-low7" ? "u & 127" : "u";
   const unitLimit = fault() === "rcstr-unit-past" ? "<= 256" : "< 256";
   const unitLimitNot = fault() === "rcstr-unit-past" ? "> 256" : ">= 256";
@@ -393,7 +433,7 @@ ${jsStrCtor}  units = tail(u16);
 
   /** Copies n units of s from si into this string, made by jsStrZeroed and no one else's yet, from di. */
 ${copyFromText}
-
+${repeatFromText}
   /** Unit 0's address, where a native caller writes a string argument's units (4.5's ABI). */
   unitsAddr(): u64 {
     return toU64(cast<usize>(part<Ref>(this.all(), 0, 1)));
@@ -494,8 +534,7 @@ let jsStrNone: JsStr | null = null;
 
 /** \`n\` units, each zero, for a builder to \`put\` and \`copyFrom\` into before anyone else sees it. */
 function jsStrZeroed(n: i32): JsStr {
-  if (n < 0 || n > 536870888) trap(Trap.OutOfMemory);
-  return withTail(toUsize(n), new JsStr(${r24Off("strings") ? "n" : "n, 0, null, 0"}));
+  ${zeroedBody}
 }
 
 /** \`""\`. */

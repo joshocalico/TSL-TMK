@@ -2927,6 +2927,44 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     });
   });
 
+  // 79. R30: making placed where the object's made, rc strings' copies, and values split around cold calls.
+  M.unit("79", async () => {
+    const R30 = timedModule("r30", await import("../r30-tests.ts"));
+    const failures: string[] = [];
+    const sh = await R30.r30Shapes();
+    failures.push(...sh.failures);
+    const n = await R30.r30Native(accel, jobs);
+    failures.push(...n.failures);
+    if (n.cases === 0) failures.push("no case of corpus/r30 ran");
+    const d = await R30.r30Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of corpus/lower/r30 ran");
+    report({
+      box: "79. R30 (3.5, 4.3, 4.4, D44, D75): @tsl/gc's make and makeTail find only the slot out of line and place the object in line, and with the collector cut a fresh slot from its chunk in line, the same steps (D39); scalar replacement takes a copy out of a frame slot, a new object placed in its slot, as stores of its fields (at -O1 that alone, at -O2 with a fill a word at a time in any dominating block); `rc` class printing's jsStrZeroed tests its length once, strCopy is JsStr's copyFrom and strRepeat's loop its repeatFrom; and at -O1 and -O2 a value live across cold calls only (a call not on every turn of its loop, or outside loops not on every way out) is in a register a call clobbers, stored before each such call and loaded after: r30_strings.ts's jsStrZeroed with no frame slot or copy at -O2 and both with R30's scalar replacement off, @tsl/gc's freeAlloc saving fewer callee-saved registers split than not at -O1 and -O2, r30_split.ts's many with a cold call and outer none; corpus/r30 natively at -O0, -O1 and -O2 against V8 and JSC; corpus/lower/r30 through the dual route with class printing forced in rc and leak at -O0 and -O2 (tools/r30-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${sh.rows.join("; ")}; natively ${n.agreed}/${n.cases} (${n.rows.join(", ")}); dual ${d.agreed}/${d.cases}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 80. R30's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("80", async () => {
+    const R30 = timedModule("r30", await import("../r30-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R30.R30_FAULTS) {
+      const x = await R30.r30Fault(f, accel, jobs);
+      rows.push(`${f.name}: ${caughtText(x)}`);
+      if (x.caught === 0) failures.push(`${f.name} wasn't caught: ${x.first}`);
+    }
+    report({
+      box: `80. R30: each of ${R30.R30_FAULTS.length} bugs is caught by a wrong answer or a trap, with how many cases caught it: scalar replacement's copy storing the fill's zero for each field, a value split around a cold call never loaded back, stored after the call's arguments are moved, or given a callee-saved register the prologue doesn't save, JsStr's repeatFrom copying each doubling a unit short, and tailFast taking a free slot off its list without moving the list on, each over corpus/r30 natively (at -O1 and -O2 for the backend's) or corpus/lower/r30 through the dual route at -O2, against V8 (tools/r30-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
   M.vms(
     "8",
     "8. No QEMU process of this run is left, and the owner's UTM and QEMU processes were only observed",

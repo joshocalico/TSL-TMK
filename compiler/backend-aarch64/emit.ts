@@ -115,6 +115,7 @@ export const BACKEND_PARTS = [
   "layout",
   "nullchecks",
   "shrinkwrap",
+  "coldsplit",
 ] as const;
 export type BackendPart = (typeof BACKEND_PARTS)[number];
 
@@ -132,7 +133,8 @@ export function backendFaults(): Shape {
           x.startsWith("b3-") ||
           x.startsWith("r21-") ||
           x.startsWith("r23-") ||
-          x.startsWith("r25-"),
+          x.startsWith("r25-") ||
+          x.startsWith("r30-split-"),
       ),
     ),
     on: (part) => !off.has(part),
@@ -288,6 +290,9 @@ class FuncEmit {
   // R21: the entry's quick way out, taken before the prologue (shrinkWrap), and while its return is emitted, no epilogue
   wrap: { fast: number; slow: number; allocas: Set<Instr> } | null = null;
   bareRet = false;
+  saveBase = 0; // R30: where the slots for values split around cold calls start, from SP
+  low = false; // R30: the saved registers at the bottom of the frame, the slots above them (computeFrame)
+  lateSaves: { loc: number; slot: number }[] | null = null; // R30's injected bug: saves after the arguments' moves
 
   constructor(f0: Func, ctx: EmitContext) {
     this.sh = ctx.shape?.(f0) ?? null;
@@ -310,6 +315,9 @@ class FuncEmit {
         s,
         this.sh?.on("remat") === true ? this.sh.faults : null,
         ctx.hosted === true,
+        this.sh?.on("coldsplit") === true
+          ? { calleeFree: this.sh.faults.has("r30-split-callee-free") }
+          : null,
       );
       return [g, s, a, r.loads];
     };
@@ -367,33 +375,57 @@ class FuncEmit {
       }
     }
     const outBytes = outWords * 8;
-    this.spillBase = outBytes;
-    // Spill slots were numbered from 0: from here on a memory location is its offset from SP.
-    for (let v = 0; v < a.loc.length; v++) if (a.loc[v]! >= MEM_BASE) a.loc[v]! += outBytes;
-    let at = outBytes + a.spillSlots * 8;
-    for (const b of this.f.blocks) {
-      for (const ins of b.instrs) {
-        if (ins.op !== "alloca" || skipInstr(this.s, ins)) continue;
-        const nums = ins.ops.flatMap((o) => (o.t === "i" ? [Number(o.val)] : []));
-        const size = nums[0]!;
-        const align = Math.max(nums[1]!, 8);
-        if (align > 16) throw new Error(`@${this.f.name}: alloca aligned above 16`);
-        if (this.a.loopDepth[this.index.get(b.id)!]! > 0) {
-          throw new Error(`@${this.f.name}: alloca in a loop has no static slot`);
-        }
-        at = Math.ceil(at / align) * align;
-        this.allocaOff.set(ins, at);
-        at += size;
-      }
-    }
-    this.rest = Math.ceil(at / 16) * 16;
     const lr = a.hasCall;
     // Hosted (D57): a function that calls saves x29 with x30, as a frame record at the bottom of its saves.
     let n = a.usedGp.length + (lr ? (this.ctx.hosted === true ? 2 : 1) : 0);
     n = (n + 1) & ~1;
     const fpn = (a.usedFp.length + 1) & ~1;
     this.saved = { gp: a.usedGp, fp: a.usedFp, size: (n + fpn) * 8, lr };
-    this.frame = this.rest + this.saved.size;
+    // The slots below the saved registers, from `base`: outgoing arguments, spills, R30's saves around cold calls, allocas.
+    const layout = (base: number): { end: number; allocas: Map<Instr, number> } => {
+      const allocas = new Map<Instr, number>();
+      let at = base + (a.spillSlots + a.saveSlots) * 8;
+      for (const b of this.f.blocks) {
+        for (const ins of b.instrs) {
+          if (ins.op !== "alloca" || skipInstr(this.s, ins)) continue;
+          const nums = ins.ops.flatMap((o) => (o.t === "i" ? [Number(o.val)] : []));
+          const size = nums[0]!;
+          const align = Math.max(nums[1]!, 8);
+          if (align > 16) throw new Error(`@${this.f.name}: alloca aligned above 16`);
+          if (this.a.loopDepth[this.index.get(b.id)!]! > 0) {
+            throw new Error(`@${this.f.name}: alloca in a loop has no static slot`);
+          }
+          at = Math.ceil(at / align) * align;
+          allocas.set(ins, at);
+          at += size;
+        }
+      }
+      return { end: Math.ceil(at / 16) * 16, allocas };
+    };
+    let base = outBytes;
+    let l = layout(base);
+    // R30, -O1 and -O2 (`coldsplit`): with no outgoing arguments on the stack, the saved registers go at the bottom of the
+    // frame and the slots above them, so the first pair's store makes the whole frame and the last pair's load takes it
+    // away, where a frame with slots was a `sub` and an `add` of SP more (bare metal; hosted keeps its frame record on top).
+    this.low =
+      this.sh?.on("coldsplit") === true &&
+      this.ctx.hosted !== true &&
+      outBytes === 0 &&
+      this.saved.size > 0 &&
+      l.end > 0 &&
+      l.end + this.saved.size <= 504;
+    if (this.low) {
+      base = this.saved.size;
+      l = layout(base);
+    }
+    this.spillBase = base;
+    // Spill slots were numbered from 0: from here on a memory location is its offset from SP.
+    for (let v = 0; v < a.loc.length; v++) if (a.loc[v]! >= MEM_BASE) a.loc[v]! += base;
+    // R30: the slots values split around cold calls are kept in while one runs, after the spill slots
+    this.saveBase = base + a.spillSlots * 8;
+    this.allocaOff = l.allocas;
+    this.rest = this.low ? l.end - base : l.end;
+    this.frame = this.low ? l.end : this.rest + this.saved.size;
     if (this.frame >= 1 << 20) {
       // The guard below the stack is 2 MiB, and a frame this size could step over it (SPEC 3.10).
       throw new Error(`@${this.f.name}: a frame of ${this.frame} bytes is too large`);
@@ -412,7 +444,9 @@ class FuncEmit {
       let off = 0;
       for (let i = 0; i < regs.length; i += 2) {
         if (i === 0) {
-          c.emit(E.memPair("stpx", "pre", regs[0]!, regs[1]!, E.SP, -size));
+          c.emit(
+            E.memPair("stpx", "pre", regs[0]!, regs[1]!, E.SP, -(this.low ? this.frame : size)),
+          );
           // Hosted: that pair is x29 and x30, the frame record, and x29 points at it (mov x29, sp).
           if (this.ctx.hosted === true && lr) c.emit(E.arithImm("add", true, 29, E.SP, 0));
         } else c.emit(E.memPair("stpx", "offset", regs[i]!, regs[i + 1]!, E.SP, off));
@@ -420,12 +454,14 @@ class FuncEmit {
       }
       for (let i = 0; i < fregs.length; i += 2) {
         if (i === 0 && regs.length === 0) {
-          c.emit(E.memPair("stpd", "pre", fregs[0]!, fregs[1]!, E.SP, -size));
+          c.emit(
+            E.memPair("stpd", "pre", fregs[0]!, fregs[1]!, E.SP, -(this.low ? this.frame : size)),
+          );
         } else c.emit(E.memPair("stpd", "offset", fregs[i]!, fregs[i + 1]!, E.SP, off));
         off += 16;
       }
     }
-    this.adjustSp("sub", this.rest);
+    if (!this.low) this.adjustSp("sub", this.rest);
   }
 
   /** The integer registers the prologue saves, in order: hosted, a frame record (x29, x30) first. */
@@ -449,8 +485,9 @@ class FuncEmit {
       c.emit(E.RET);
       return;
     }
-    this.adjustSp("add", this.rest);
-    const { fp, size } = this.saved;
+    if (!this.low) this.adjustSp("add", this.rest);
+    const { fp } = this.saved;
+    const size = this.low ? this.frame : this.saved.size;
     if (size > 0) {
       const regs = this.savedRegs();
       if (regs.length % 2 === 1) regs.push(XZR);
@@ -1842,6 +1879,26 @@ class FuncEmit {
     this.parallel(moves);
   }
 
+  /**
+   * R30: values split around a cold call, stored to their slots before it (before its arguments are moved, which may write
+   * the registers they're in) or loaded back after it (after its results are moved, into registers none of them is in).
+   */
+  coldSave(saves: { loc: number; slot: number }[], dir: "store" | "load"): void {
+    for (const x of saves) {
+      const off = this.saveBase + x.slot * 8;
+      if (x.loc >= FP_BASE)
+        this.code.emit(E.memImm(dir === "store" ? "strd" : "ldrd", x.loc - FP_BASE, E.SP, off));
+      else this.code.emit(E.memImm(dir === "store" ? "strx" : "ldrx", x.loc, E.SP, off));
+    }
+  }
+
+  /** R30's injected bug (`r30-split-save-late`): a cold call's saves made after its arguments are moved. */
+  saveLate(): void {
+    if (this.lateSaves === null) return;
+    this.coldSave(this.lateSaves, "store");
+    this.lateSaves = null;
+  }
+
   callSymbol(sym: string, vals: number[], res: number[]): void {
     this.parallel(
       this.argMoves(
@@ -1849,6 +1906,7 @@ class FuncEmit {
         vals,
       ),
     );
+    this.saveLate();
     this.code.fix("bl26", sym);
     this.resultMoves(res);
   }
@@ -1862,6 +1920,7 @@ class FuncEmit {
     const target = this.moveValue(X8, vals[0]!);
     if (target !== null) moves.push(target);
     this.parallel(moves);
+    this.saveLate();
     this.code.emit(E.blr(X8));
     this.resultMoves(res);
   }
@@ -2135,7 +2194,19 @@ class FuncEmit {
       }
       for (const ins of b.instrs) {
         if (w !== null && at === 0 && w.allocas.has(ins)) continue;
-        if (!skipInstr(this.s, ins)) this.emitInstr(ins);
+        if (skipInstr(this.s, ins)) continue;
+        // R30: a cold call's values in registers it clobbers, kept in their slots while it runs
+        const saves = this.a.coldSaves.get(ins);
+        if (saves === undefined) {
+          this.emitInstr(ins);
+          continue;
+        }
+        const faults = this.sh!.faults;
+        if (faults.has("r30-split-save-late")) this.lateSaves = saves;
+        else this.coldSave(saves, "store");
+        this.emitInstr(ins);
+        this.lateSaves = null;
+        if (!faults.has("r30-split-norestore")) this.coldSave(saves, "load");
       }
       this.bareRet = w !== null && at === w.fast;
       this.emitTerm(at);

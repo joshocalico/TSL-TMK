@@ -1,0 +1,17 @@
+[
+  { "fn": "many", "args": [0, 3] },
+  { "fn": "many", "args": [50, 1] },
+  { "fn": "many", "args": [200, 7] },
+  { "fn": "many", "args": [300, 0] },
+  { "fn": "floats", "args": [40, 3] },
+  { "fn": "floats", "args": [100, 9] },
+  { "fn": "floats", "args": [10, 0] },
+  { "fn": "args", "args": [11, 22, 33, 44, 0] },
+  { "fn": "args", "args": [11, 22, 33, 44, 1] },
+  { "fn": "args", "args": [-5, 7, -9, 13, 2] },
+  { "fn": "mixed", "args": [5, 1] },
+  { "fn": "mixed", "args": [9, 3] },
+  { "fn": "outer", "args": [20, 2] },
+  { "fn": "outer", "args": [60, 5] },
+  { "fn": "outer", "args": [3, 0] }
+]

@@ -947,6 +947,23 @@ line where the page has room (`pageCut`: pageSlot's common case, the same slot),
 `placeTail` zeroes up to 128 bytes of a tail a word at a time in line, the fields before the length copied over the length's
 word after (the item is the caller's, never the slot); longer, the fill routine, as before.
 
+*Making placed where the object's made (R30).* `make` and `makeTail` find only the slot out of line: `slotSlow` and `tailSlot`
+(freeing's steps, the store registered at its first make, the size class, a slot off its list or slotFor's) where the fast path
+doesn't apply, `slotAfter` and `tailSlotAfter` (freshSlot's) where its list is empty and the page or chunk has no room; and every
+way ends in the same object placed in line (`place`, `tailPlace`: claimed, placed, learned on the host, the collector's rest).
+So the moved object is never given to a call, and the optimiser writes its fields straight into the slot (4.3's R30 bullet),
+where it was built in a frame slot and copied, its address held in a callee-saved register across freeing's call. The steps
+are the same, in the same order, with the same effects (D39, D41): the slot functions are the old out-of-line makes with the
+placing moved after them. With the collector, a fresh slot is cut from its size class's chunk in line too (`chunkCut`, cutSlot's
+common case, the same slot), where slotFor's `dryStep` would do nothing: nothing left of the budget, or nothing waiting.
+
+*`rc` strings' copies (R30).* Class printing prints compiler/rt's `strCopy` as JsStr's `copyFrom` (one check of the run and one
+copy, where it was a checked read and a checked write a unit), and `strRepeat`'s loop of `strCopy` calls as JsStr's
+`repeatFrom`, which copies s's units once and then what it's written after itself, doubling: the same units, a few copies of
+many units. jsStrZeroed tests its length once, as a u32 (a negative one is too long, the same trap), where it was tested as an
+i32 twice and checked again by `toUsize`; the length is then known small, so the size class's arithmetic needs no checks.
+`TMK_R30_OFF=zeroed,copy` puts the printing back as it was.
+
 Closure calls (R3's kind switch): in `rc`, an environment class's `call` with several kinds prints `@tsl.inline`, and so does
 each kind's method of at most six lines with no loop, so a closure called in a loop is its compare chain and its kind's code
 there; tslc notes the kind and the captures, which only the environment's constructor stores, invariant (3.4's R19 rule), so
@@ -1487,8 +1504,9 @@ function pageSlot(k: usize): u64 {
 /**
  * R28: pageSlot's common case alone, for `make`'s and `tailFast`'s fast paths in line: a slot of size class k cut from the
  * page its class is being cut from, where it's a small class and that page has room; 0 otherwise, and nothing changed, so
- * the caller goes on to `tryMakeAfter` or `tailMakeAfter`, whose pageSlot finds the same and takes a fresh page. A fresh
- * object was a call out of line (`tryMakeAfter`, 59 instructions to the direct route's `__rc_small` 34 at -O2, R26).
+ * the caller goes on to `slotAfter` or `tailSlotAfter` (R30; `tryMakeAfter` and `tailMakeAfter` before), whose pageSlot
+ * finds the same and takes a fresh page. A fresh object was a call out of line (`tryMakeAfter`, 59 instructions to the direct
+ * route's `__rc_small` 34 at -O2, R26).
  */
 /** @tsl.inline */
 // SAFETY: as pageSlot's: where cutting is only ever moves forward over slots handed out, within the page.
@@ -1503,8 +1521,29 @@ function pageCut(k: usize): u64 {
 }
 
 /**
+ * R30: with the collector, cutSlot's common case alone, for `make`'s and `tailFast`'s fast paths in line, as pageCut is
+ * without it: a slot of size class k cut from its class's newest chunk where that has room; 0 otherwise, and nothing
+ * changed, so the caller goes on to `slotAfter` or `tailSlotAfter`, whose cutSlot finds the same and takes a fresh chunk.
+ * Only where slotFor's dryStep would do nothing (nothing left of the budget, or nothing to free): the same slot, the same
+ * steps. A fresh slot was a call out of line (tailMakeAfter, 58 instructions to the direct route's `__rc_small` 30).
+ */
+/** @tsl.inline */
+// SAFETY: as cutSlot's: a chunk's end only ever moves forward over slots handed out, within the chunk, so an address plus a
+// slot's size, at most the chunk's end, can't wrap.
+function chunkCut(k: usize): u64 {
+  const rec = ptrAt(u64, ccChunks).add(k * 3);
+  const size = BigInt.asUintN(64, toU64(1) << toU64(k)); // k is a size class: below CLASSES, so nothing is lost
+  const slot = rec.add(1).read();
+  if (slot === 0n || BigInt.asUintN(64, slot + size) > rec.add(2).read()) return 0n;
+  const end = BigInt.asUintN(64, slot + size);
+  rec.add(1).write(end);
+  ptrAt(u64, rec.read()).add(1).write(end);
+  return slot;
+}
+
+/**
  * R19: slotFor where the caller has just found size class k's list empty after its freeing steps, with nothing run since
- * (`make`'s and `tailFast`'s fast paths, before `tryMakeAfter` and `tailMakeAfter`): without the collector that's what
+ * (`make`'s and `tailFast`'s fast paths, before `slotAfter` and `tailSlotAfter`): without the collector that's what
  * takeSlot would find too, so a fresh slot from its page straight away; and with no memory, slotDrained, as slotFor.
  */
 /** @tsl.inline */
@@ -2774,14 +2813,26 @@ export class Rc<T extends object> {
    */
   /** @tsl.moves item */
   /** @tsl.tailed item */
-  // SAFETY: the slot is a free one of class k, which holds the prefix and tailBytes(n), claimed before it's placed in;
-  // keep is the caller's promise, and more than n traps.
   private tailMake(n: usize, keep: usize, item: T): Counted<T> | null {
+    const slot = this.tailSlot(n);
+    if (slot === 0n) return null;
+    return this.tailPlace(slot, n, keep, item);
+  }
+
+  /**
+   * R30: tailMake's steps and its slot, without the object: freeing's steps, the store registered, the size class for a tail
+   * of n (kept as the last, with its owner word), and a free slot of it, off its list or slotFor's; 0 if there's none, or the
+   * store can't be registered. Out of line, and given no object, so a caller's new object is never in memory of its own: it's
+   * placed where it's made (tailPlace, inlined), its fields written straight into the slot.
+   */
+  /** @tsl.noinline */
+  // SAFETY: a slot on a list is free and 2^k bytes; slotFor's is too.
+  private tailSlot(n: usize): u64 {
     if (cyclesLinked()) {
       if (ccPhase !== 0 || (ccTop !== 0 && (ccGap === 0 || !pacing))) stepAll(budget);
       else idleStep();
     } else if (waiting !== 0n || cur !== 0n) freeAlloc(budget);
-    if (!this.register()) return null;
+    if (!this.register()) return 0n;
     // the size class as for the last object made, if its tail was as long: a lowered array's holders mostly are (R3)
     let k = this.tk;
     if (n !== this.tn || k === 0) {
@@ -2794,13 +2845,29 @@ export class Rc<T extends object> {
     }
     // a free slot of its size on its list first, as `tryMake` takes one (R3: a lowered `rc` array is made so)
     const head = ptrAt(u64, heads).add(k);
-    let slot = head.read();
-    if (slot !== 0n) head.write(countAt(slot).read());
-    else slot = slotFor(k);
-    if (slot === 0n) return null;
+    const slot = head.read();
+    if (slot !== 0n) {
+      head.write(countAt(slot).read());
+      return slot;
+    }
+    return slotFor(k);
+  }
+
+  /**
+   * R30: a slot of size class tk, free, for an object with a tail of n elements (tn is n): claimed, the object placed in it
+   * with its tail zeroed but for what's kept, as every make of a tailed object ends. Inlined, so the moved object is placed
+   * where it's made.
+   */
+  /** @tsl.moves item */
+  /** @tsl.tailed item */
+  /** @tsl.inline */
+  // SAFETY: the slot is a free one of size class tk, which holds the prefix and tailBytes(n) as tn is n, claimed before it's
+  // placed in; keep is the caller's promise, and more than n traps.
+  private tailPlace(slot: u64, n: usize, keep: usize, item: T): Counted<T> {
     const gen = this.claim(slot, this.tw);
     // a whole tail zeroed is one fill: only a room growth writes into (keep) takes the two around what it keeps
     const made = keep === 0 ? placeTail(slot, gen, n, item) : placeTail(slot, gen, n, item, keep);
+    // learn has nothing to do but on the host, for a store's first object
     if (cycleGroup<T>() === GROUP_UNKNOWN) this.learn(made);
     if (cyclesLinked() && rest !== 0) restIfWork();
     return made;
@@ -2823,19 +2890,20 @@ export class Rc<T extends object> {
 
   /**
    * R17: `makeTail` and `makeTailKeep`, inlined where the inliner inlines, as `make` is: for a tail as long as the last one
-   * made (its size class known, R3), freeing's steps as `tailMake` takes them, then a free slot of that size off its list,
-   * the object placed there in line, its tail zeroed but for what's kept. Anything else is `tailMake`'s, or with the steps
-   * taken, `tailMakeAfter`'s, out of line: the same steps and the same slot. R19: a tail of another length than the last
-   * is made in line too, its size class worked out here (sizeClass, inlined) and kept as the last, as `tailMake` keeps it:
-   * a lowered array's rooms are each a length of their own, and its holders' lengths alternate where two arrays of a class
-   * are made in turn, and each went out of line to `tailMake`.
+   * made (its size class known, R3), freeing's steps as `tailSlot` takes them, then a free slot of that size off its list.
+   * Anything else is `tailSlot`'s, or with the steps taken, `tailSlotAfter`'s, out of line: the same steps and the same
+   * slot. R19: a tail of another length than the last is made in line too, its size class worked out here (sizeClass,
+   * inlined) and kept as the last, as `tailSlot` keeps it: a lowered array's rooms are each a length of their own, and its
+   * holders' lengths alternate where two arrays of a class are made in turn. R30: whichever way the slot comes, the object
+   * is placed here (tailPlace): only the slot is found out of line, so the moved object is never given to a call, and the
+   * optimiser writes its fields straight into the slot, where it was built in a frame slot and copied.
    */
   /** @tsl.moves item */
   /** @tsl.tailed item */
   /** @tsl.inline */
-  // SAFETY: the slot is a free one of size class tk, which holds the prefix and tailBytes(n) as tn is n, claimed before
-  // it's placed in; keep is the caller's promise, as tailMake's.
+  // SAFETY: the slot is a free one of size class tk, as tailPlace needs.
   private tailFast(n: usize, keep: usize, item: T): Counted<T> {
+    let slot: u64 = 0n;
     if (
       this.id !== 0 &&
       !(cyclesLinked() && (ccPhase !== 0 || (ccTop !== 0 && (ccGap === 0 || !pacing))))
@@ -2854,51 +2922,49 @@ export class Rc<T extends object> {
       }
       const k = this.tk;
       const head = ptrAt(u64, heads).add(k);
-      let slot = head.read();
+      slot = head.read();
       if (slot !== 0n) head.write(countAt(slot).read());
-      else if (!cyclesLinked()) {
-        // R28: without the collector, a fresh slot cut in line where its page has room, as tailMakeAfter cuts it
-        slot = pageCut(k);
-        if (slot !== 0n) genAt(slot).write(0);
+      else {
+        // R28: without the collector, a fresh slot cut in line where its page has room, as tailSlotAfter cuts it
+        if (!cyclesLinked()) {
+          slot = pageCut(k);
+          if (slot !== 0n) genAt(slot).write(0);
+        } else if (rest === 0 || (waiting === 0n && cur === 0n)) {
+          // R30: with the collector, from its chunk in line, where slotFor's dryStep would do nothing
+          slot = chunkCut(k);
+          if (slot !== 0n) genAt(slot).write(0);
+        }
+        if (slot === 0n) slot = this.tailSlotAfter();
       }
-      if (slot !== 0n) {
-        const gen = this.claim(slot, this.tw);
-        const fast = keep === 0 ? placeTail(slot, gen, n, item) : placeTail(slot, gen, n, item, keep);
-        // as make's: learn has nothing to do but on the host for a fresh slot's
-        if (cycleGroup<T>() === GROUP_UNKNOWN) this.learn(fast);
-        if (cyclesLinked() && rest !== 0) restIfWork();
-        return fast;
-      }
-      const after = this.tailMakeAfter(n, keep, item);
-      if (after === null) trap(Trap.OutOfMemory);
-      return after;
-    }
-    const made = this.tailMake(n, keep, item);
-    if (made === null) trap(Trap.OutOfMemory);
-    return made;
+    } else slot = this.tailSlot(n);
+    if (slot === 0n) trap(Trap.OutOfMemory);
+    return this.tailPlace(slot, n, keep, item);
   }
 
   /**
-   * `tailFast`'s rest, its steps taken, its size class tk's list empty: slotFor's slot, as `tailMake` takes it (R19: by
-   * way of freshSlot, as the list was just found empty).
+   * `tailFast`'s rest, its steps taken, its size class tk's list empty: slotFor's slot, as `tailSlot` takes it (R19: by way
+   * of freshSlot, as the list was just found empty). R30: the slot alone; tailFast places the object.
    */
-  /** @tsl.moves item */
-  /** @tsl.tailed item */
   /** @tsl.noinline */
-  // SAFETY: as tailFast's.
-  private tailMakeAfter(n: usize, keep: usize, item: T): Counted<T> | null {
-    const slot = freshSlot(this.tk);
-    if (slot === 0n) return null;
-    const gen = this.claim(slot, this.tw);
-    const made = keep === 0 ? placeTail(slot, gen, n, item) : placeTail(slot, gen, n, item, keep);
-    if (cycleGroup<T>() === GROUP_UNKNOWN) this.learn(made);
-    if (cyclesLinked() && rest !== 0) restIfWork();
-    return made;
+  private tailSlotAfter(): u64 {
+    return freshSlot(this.tk);
   }
 
   /** @tsl.moves item */
-  // SAFETY: the slot is a free one of the class's size class, claimed before the object is placed in it.
   tryMake(item: T): Counted<T> | null {
+    const slot = this.slotSlow();
+    if (slot === 0n) return null;
+    return this.place(slot, item);
+  }
+
+  /**
+   * R30: tryMake's steps and its slot, without the object: freeing's steps, then, for a store that has made something before,
+   * a free slot of its size off its list, or else the store registered at its first make, and slotFor's; 0 if there's none.
+   * Out of line and given no object, as tailSlot is, so `make` places its object where it's made.
+   */
+  /** @tsl.noinline */
+  // SAFETY: a slot on a list is free and of the class's size class; slotFor's is too.
+  private slotSlow(): u64 {
     if (cyclesLinked()) {
       if (ccPhase !== 0 || (ccTop !== 0 && (ccGap === 0 || !pacing))) stepAll(budget);
       else idleStep();
@@ -2909,14 +2975,22 @@ export class Rc<T extends object> {
       const slot = head.read();
       if (slot !== 0n) {
         head.write(countAt(slot).read());
-        const fast = placeObject(slot, this.claim(slot, this.owner), item);
-        if (cyclesLinked() && rest !== 0) restIfWork();
-        return fast;
+        return slot;
       }
-    } else if (!this.register()) return null;
-    const slot = slotFor(this.k);
-    if (slot === 0n) return null;
+    } else if (!this.register()) return 0n;
+    return slotFor(this.k);
+  }
+
+  /**
+   * R30: a free slot of the class's size class: claimed, and the object placed in it, as every make ends. Inlined, so the
+   * moved object is placed where it's made.
+   */
+  /** @tsl.moves item */
+  /** @tsl.inline */
+  // SAFETY: the slot is a free one of the class's size class, claimed before the object is placed in it.
+  private place(slot: u64, item: T): Counted<T> {
     const made = placeObject(slot, this.claim(slot, this.owner), item);
+    // learn has nothing to do but on the host, for a store's first object
     if (cycleGroup<T>() === GROUP_UNKNOWN) this.learn(made);
     if (cyclesLinked() && rest !== 0) restIfWork();
     return made;
@@ -2924,58 +2998,46 @@ export class Rc<T extends object> {
 
   /**
    * R17: inlined where the inliner inlines, as the direct route's `__rc_new` is at -O2: freeing's steps first, as `tryMake`
-   * takes them (a call, only with something waiting; with the collector, only while it's idle or waits out its gap), then,
-   * with a free slot of its size on its list, the object placed there in line. Anything else is `tryMake`'s, or with the
-   * steps taken, `tryMakeAfter`'s, out of line: the same steps and the same slot as `tryMake` takes.
+   * takes them (a call, only with something waiting; with the collector, only while it's idle or waits out its gap), then
+   * a free slot of its size off its list. Anything else is `slotSlow`'s, or with the steps taken, `slotAfter`'s, out of
+   * line: the same steps and the same slot as `tryMake` takes. R30: whichever way the slot comes, the object is placed here
+   * (`place`), so the moved object is never given to a call, and its fields are written straight into the slot.
    */
   /** @tsl.moves item */
   /** @tsl.inline */
-  // SAFETY: the slot is a free one of the class's size class, off its list, claimed before the object is placed in it.
+  // SAFETY: the slot is a free one of the class's size class, as `place` needs.
   make(item: T): Counted<T> {
+    let slot: u64 = 0n;
     if (this.id !== 0 && !(cyclesLinked() && (ccPhase !== 0 || (ccTop !== 0 && (ccGap === 0 || !pacing))))) {
       if (cyclesLinked()) idleStep();
       else if (waiting !== 0n || cur !== 0n) freeAlloc(budget);
       const head = ptrAt(u64, heads).add(this.k);
-      const slot = head.read();
-      if (slot !== 0n) {
-        head.write(countAt(slot).read());
-        const fast = placeObject(slot, this.claim(slot, this.owner), item);
-        if (cyclesLinked() && rest !== 0) restIfWork();
-        return fast;
-      }
-      // R28: without the collector, a fresh slot cut in line where its page has room: tryMakeAfter's slot and steps
-      if (!cyclesLinked()) {
-        const cut = pageCut(this.k);
-        if (cut !== 0n) {
-          genAt(cut).write(0);
-          const fresh = placeObject(cut, this.claim(cut, this.owner), item);
-          if (cycleGroup<T>() === GROUP_UNKNOWN) this.learn(fresh);
-          return fresh;
+      slot = head.read();
+      if (slot !== 0n) head.write(countAt(slot).read());
+      else {
+        // R28: without the collector, a fresh slot cut in line where its page has room: slotAfter's slot and steps
+        if (!cyclesLinked()) {
+          slot = pageCut(this.k);
+          if (slot !== 0n) genAt(slot).write(0);
+        } else if (rest === 0 || (waiting === 0n && cur === 0n)) {
+          // R30: with the collector, from its chunk in line, where slotFor's dryStep would do nothing
+          slot = chunkCut(this.k);
+          if (slot !== 0n) genAt(slot).write(0);
         }
+        if (slot === 0n) slot = this.slotAfter();
       }
-      const after = this.tryMakeAfter(item);
-      if (after === null) trap(Trap.OutOfMemory);
-      return after;
-    }
-    const made = this.tryMake(item);
-    if (made === null) trap(Trap.OutOfMemory);
-    return made;
+    } else slot = this.slotSlow();
+    if (slot === 0n) trap(Trap.OutOfMemory);
+    return this.place(slot, item);
   }
 
   /**
-   * `tryMake`'s rest, for a registered store whose steps are taken and whose size's list is empty: slotFor's slot (R19: by
-   * way of freshSlot, as the list was just found empty).
+   * `make`'s rest, for a registered store whose steps are taken and whose size's list is empty: slotFor's slot (R19: by way
+   * of freshSlot, as the list was just found empty). R30: the slot alone; `make` places the object.
    */
-  /** @tsl.moves item */
   /** @tsl.noinline */
-  // SAFETY: the slot is a free one of the class's size class, claimed before the object is placed in it.
-  private tryMakeAfter(item: T): Counted<T> | null {
-    const slot = freshSlot(this.k);
-    if (slot === 0n) return null;
-    const made = placeObject(slot, this.claim(slot, this.owner), item);
-    if (cycleGroup<T>() === GROUP_UNKNOWN) this.learn(made);
-    if (cyclesLinked() && rest !== 0) restIfWork();
-    return made;
+  private slotAfter(): u64 {
+    return freshSlot(this.k);
   }
 
   /** One more count: the result is a second handle to the same object. */
@@ -8198,6 +8260,14 @@ the module untouched, the same object, so no `-O0` output can move. The passes:
   object's arrays held in place, so the load can't fault, and with the check gone nothing needs it. Both notes are outside the
   canonical text, so -O0 is untouched; a call not inlined keeps its check. `TMK_R29_OFF=links` turns the proof off; its injected
   bug is `r29-inb-any` (every call's copy loses the check), in `OPT_FAULTS`.
+- R30 (`sroa`; `-O2`, and its first part at `-O1`): a copy out of a frame slot (`mem.copy` from it, of a constant length
+  within it, to anywhere else), which is how `make` places a new object in its counted slot, is written as a store of each
+  field's value at that point at its offset from the copy's destination, and a store of zero over each run of bytes no field
+  covers, which only the fill wrote; a copy that would split a field keeps the slot. The fill may be the first accesses of a
+  block that dominates every access, stores of zero that cover the slot exactly a word at a time, as a new object's fields
+  are cleared after its constructor's tests (the entry block's `mem.fill` or one store, before). At `-O1`, only a slot copied
+  out is replaced, nothing else of `-O2`'s; -O0 is untouched. `TMK_R30_OFF=sroa` puts it back; its injected bug is
+  `r30-copy-stale` (each field stored as the fill left it), in `OPT_FAULTS`.
 - `licm` (D73, `-O1` and `-O2`): loop-invariant code motion into the loop's preheader, made where there isn't one. A
   load with an invariant address that nothing in the loop may write moves from anywhere if it's from a global or a frame
   slot, which can't fault; any other only from the path every first turn takes from the header, with only pure operations
@@ -8356,6 +8426,20 @@ name with the optimiser's passes (`TMK_OPT_DISABLE`), each with an injected bug 
 - *`layout`:* blocks that only trap go last, and a branch to one goes straight to its trap stub; a loop whose header ends in
   a test with one way out, whose other blocks are together with the latch last, has its header placed after the latch, so an
   iteration takes one branch, the test's, back to the body.
+
+*R30, values split around cold calls* (`coldsplit`, at -O1 and -O2): a call is cold where its block isn't on every turn of its
+innermost loop (it doesn't dominate each source of the loop's back edges), or, outside every loop, isn't on every way out of the
+function (it doesn't dominate each block that returns, but a quick way out, a block that only returns reached by a conditional
+branch); `native.try` is never cold, and nothing is kept across `trap.code`, which never comes back. A value live across cold
+calls only may take a register a call clobbers: it's stored to a slot of its own just before each such call (before its
+arguments are moved) and loaded back just after (after its results are moved), so the way through that calls nothing needs no
+callee-saved register for it, and the prologue saves fewer. A value live across any other call still takes a callee-saved
+register. Which calls are cold decides only what's saved where, never what's computed. And a frame with no outgoing arguments
+on the stack has its saved registers at the bottom and its slots above them, so the first pair's store makes the whole frame
+and the last pair's load takes it away, where a frame with slots was a `sub` and an `add` of SP more (bare metal only; hosted
+keeps its frame record on top). Machine code only: TIR and tirhashes are untouched. @tsl/gc's `freeAlloc` saved 9 to 11
+registers and now saves only the link register. Its injected bugs, in `OPT_FAULTS` (`r30-split-`): a split value never loaded
+back, one stored after the call's arguments are moved, and a callee-saved register taken for a split value but not saved.
 
 *R23, range checks' bounds a value can't pass* (always at -O1 and -O2, not a part of its own): a 32-bit `range.chk` leaves out
 the compare for a bound the operand can't pass whichever way it's read: a signed check's upper bound at 2^31 - 1 or lower at
@@ -9830,6 +9914,25 @@ every call's leading check out (`r29-inb-any`, in `OPT_FAULTS` too, so opt-a box
 -O1 and -O2). R3's `ranks-left-live`, R4's `map-grow-moves-first` and R19's `map-grow-lose` patch JsMap as R29 has it
 (`oldGone`'s first test, growth's reservations, `link`'s call).
 
+**Making placed, rc strings' copies and values split around cold calls (R30).** `tmk milestone pipe-d` box 79
+(tools/r30-tests.ts) checks where R30's changes apply: corpus/lower/r30/r30_strings.ts's `rc` build has jsStrZeroed with no
+frame slot or copy at -O2, and both with R30's scalar replacement off (`TMK_R30_OFF=sroa`); @tsl/gc's `freeAlloc` in that build
+saves fewer callee-saved registers with values split around cold calls than with the split off (`TMK_OPT_DISABLE=coldsplit`) at
+-O1 and -O2; and corpus/r30/r30_split.ts's `many` has a cold call and `outer` none. corpus/r30 (many integers and floats across a
+call taken one turn in k, a function's own arguments across a cold call given others, a caller whose values sit in
+callee-saved registers across calls to all of these; objects made on every way a slot comes, with tails of changing lengths,
+read back) runs natively at -O0, -O1 and -O2 against V8 and JSC, and corpus/lower/r30 (repeats and pads read back unit by unit,
+records, a call taken sometimes) through the dual route with class printing forced in `rc` and `leak` at -O0 and -O2. Box 80
+puts in R30's six bugs and requires each caught by a wrong answer or a trap: `r30-copy-stale`, `r30-split-norestore`,
+`r30-split-save-late` and `r30-split-callee-free` (in `OPT_FAULTS` too, so opt-a box 12 runs them, its first step corpus/r30
+natively at -O1 and -O2), `r30-repeat-short` (repeatFrom's doubling a unit short) and `r30-slot-twice` (tailFast taking a slot
+off its list without moving the list on, a patch). R20's `inline-alloca-pure-block` lost its catch with R30's @tsl/gc (its
+program's `sometimes` became small enough to inline whole, so partial inlining no longer took it): corpus/lower/r20 gained
+`slowPathsHeavy`, the same shape with a rare path too big to inline whole, and catches it again (2 cases). And R19's box 57 checks
+tslc's invariant mark on corpus/lowered-rc/r19_fields.ts's `fixed` in the build with R30's scalar replacement off: with it on,
+`fixed` reads the kind as the value its new object was made with, and has no load of it left to mark (a field `retarget` stores
+is still checked never marked, in both builds).
+
 **Fresh-allocation separation (R27, D77).** `tmk milestone pipe-d` box 73 (tools/r27-tests.ts) checks, compiling only, what
 tslc separates and refuses: corpus/r27/r27_sep.ts's `Buf` and r27_sep_neg.ts's `Arr` separated; `Escapes` (its block's address
 given to code outside, before it's filled), `Kept` (stored in another object's field, read back from there and viewed) and `Ref`
@@ -10367,6 +10470,20 @@ bare-metal test runtime, the native corpus on HVF and TCG, and the decoder. It d
 - *Why, as far as shown:* the object-keyed build's machine code at -O2 in `leak`. `seek`, the chain walk every lookup makes, is 46 instructions to the direct route's 27, and a step along a chain is 13 to 9: `JsArray.get`'s bounds check on the key and on the chain link, each a load of its array's length, which nothing in the loop changes, a compare and a branch. Before the loop, `heads.length - 1` is a checked subtract (an underflow branch and a 53-bit test) and `heads.get` a bounds check that `& (b - 1)` already ensures; `getOr` checks the value's index again. With `get`'s check taken out of `JsArray` (a measurement only, `TSL_TEST_PATCH`), number keys are 1.04× at -O2 and 1.06× at -O1, object keys 1.14× and 1.16×: the checks are most of -O1's gap and little of -O2's. **What's left of the object-keyed gap at -O2 isn't diagnosed.** The checks are what optimiser phase B targets: the length loads are loop-invariant (LICM), the `& (b - 1)` bound and the subtract are check elimination's.
 - *Class printing:* with classes forced at -O2 in `leak` and `manual`, over the pipe corpora and `bench/` (316 builds), 140 class-print where 128 did with string keys refused (`TMK_EMIT_STRKEYS=0`), and 30 print a `JsMap` or `JsSet` where 10 did: `strkeys.ts`, `drop_bound.ts`, `gaps_context.ts`, `rc_churn.ts` and both string-keyed benchmarks newly print, and the four that printed the runtime's map print `JsMap`. `auto` is unchanged.
 - *Pins:* none moved. `auto` prints no maps or strings, so no `auto` build's TIR changed, and every pinned tirhash check passed in `tmk test --changed` and the gate. New: `keyDispatch`, `JsString`'s three methods and `jsUnitsHash`, `corpus/lower/pipe/strkeys.ts`, `maps.ts`'s `objectMisses`, the hand-written cases, the two benchmarks, `tmk bench memory --maps`, box 19, and `TMK_EMIT_STRKEYS`.
+
+**Pipeline, phase 2: @tsl/gc's making placed where the object's made, rc strings' copies, and values split around cold calls (R30, 3.5, 4.3, 4.4, 8.3, D44, D80), `tmk milestone pipe-d` boxes 79 and 80, MEASURED 2026-11-20** (same host; builder's record, for the coordinator to verify; instruction counts, TCG with `TMK_ICOUNT=1`: tools/r14-time.ts under `TMK_TRUST_IN=rc:classes`, `tmk bench memory --classes --rc` and with `--strings` and `--exceptions`, `tmk profile --instructions`, and a measurement script profiling a program's own cases image; the JPEG decoder and S4 by `tmk bench native --quick` under HVF. "Before" is the tree at commit 0af3812, R29's verified state, measured from a worktree of it with its own `@tsl` package links).
+
+- **Measured first:** R29's figures for strkeys (1.174 / 1.151), case_all (1.041 / 1.065), strings.ts (1.009 / 1.011), drop_bound (0.943 at -O1) and cyc_exhaust (1.425 at -O1), and every benchmark; rc_strings measured 1.092 / 1.124 against R29's 1.056 / 1.076. Making and freeing a flat string (strkeys' `views` at -O2, a program's own cases image, per object): `jsStrZeroed` 138.5 instructions against `__rc_new` 98.9, `freeAlloc` 113.7 a call against `__rc_work` 64.8 and `__rc_block_free` 13. Making's extra, against the direct route: its frame (eight registers saved and a frame slot, 12 instructions against 7), the new string built in a frame slot and copied into its slot (11, against the direct route's three stores), the length tested three times (8 against 3), the size class with a checked add, a test against 2^31 and a loop beside it (30 against 14, a length new each make, its class kept), the claim (a generation read and written, the store's count of objects made through the table of stores: 15 against 6), the store's reference tagged and untagged (5) and its first-make test (2). Freeing's: per call its frame (3 to 6 pairs of registers saved, by program; 9 to 11 registers in most); per object the freeing step's mechanics (D39's `stepping` and `spare` set and cleared around the release call, 12; the release function found by a chain of compares, 2 an arm before the class's; the generation, the store's freed count and the reuse limit in giveBack, 9).
+- **Built:** (1) @tsl/gc: making finds only the slot out of line and places the object in line; with the collector, chunkCut (3.5); (2) scalar replacement of a copy out of a frame slot, -O2 and at -O1 for copies alone (4.3, D44); (3) `rc` class printing: jsStrZeroed's one length test, strCopy as copyFrom, strRepeat's loop as repeatFrom (3.5); (4) values split around cold calls, and a frame's saved registers at its bottom (4.4, D80). *Tests:* corpus/r30 (r30_split.ts, r30_place.ts), corpus/lower/r30 (r30_strings.ts), tools/r30-tests.ts, pipe-d boxes 79 and 80, opt-a box 12's first step, compiler/tir/passes/passes.test.ts's three R30 tests; tools/r30-pins.ts and r30-moved.ts. `TMK_R30_OFF=sroa,zeroed,copy` turns the optimiser's and the printer's parts off, `TMK_OPT_DISABLE=coldsplit` the backend's.
+- **After, making and freeing** (the same image): `jsStrZeroed` 116.7 (its frame the link register and the slots, 3 instructions; the new string's fields stored in its slot, 5; one length test; the size class 13 with no checks), `freeAlloc` 111.8 (its frame the link register; strkeys' saved only six registers before). The direct route's own freeing is faster too, by the same split (`__rc_work` 64.8 → 59.1). Left against the direct route: the claim's generation and counts (9), the store's tagged reference and first-make test (7), the size class remembered (4), saves around the freeing call it makes three times in four (4.5 on average); and in freeing, D39's step mechanics, the release compare chain and giveBack's counts and limit, which are what the bound, stale references and `Rc.size` rest on.
+- **After, tools/r14-time.ts** (`TMK_TRUST_IN=rc:classes`, before → after, -O1 / -O2): strkeys 1.174 / 1.151 → 1.146 / 1.126, rc_strings 1.092 / 1.124 → 1.032 / 1.074 (R29 measured 1.056 / 1.076), case_all 1.041 / 1.065 → 1.007 / 0.998, strings.ts 1.009 / 1.011 → 0.978 / 0.991, drop_bound 0.943 / 1.006 → 0.940 / 1.000 (at -O2 1,770,406 against 1,770,165, so a hair over), frag 1.525 / 1.429 → 0.185 / 0.182 (its repeats copies that double, where the direct route copies a unit at a time), cyc_exhaust 1.425 / – → 1.430 / 1.325 (judged to the trap, R31's), map_grow_oom at equal work 0.804 / 0.806 → 0.796 / 0.796. Over 1.00 after: strkeys, rc_strings, case_all at -O1, drop_bound at -O2 by 0.01%, cyc_exhaust. frag, drop_bound and rc_churn (0.858 / 0.825 → 0.862 / 0.835) were timed with `--passes 8` in both trees, as 40 passes went past r14-time's 120-second limit a run on this loaded host (cyc_churn and cyc_large weren't timed after); risen by more than 0.005: grow_reuse 0.692 / 0.618 → 0.704 / 0.626, adv_forof_mutation 0.804 → 0.819 (-O1), read_checks 0.915 → 0.926 (-O1), closure_selected 0.951 → 0.961 (-O1), gaps_context 0.733 → 0.756 (-O2), all under 1.00 (the direct route got faster by the split too).
+- **Benchmarks** (before → after, -O1 / -O2): `AUTO_RC`'s list 0.488 / 0.535 → 0.477 / 0.523, churn 0.814 / 0.813 → 0.797 / 0.798, cycles 1.004 / 0.861 → 1.012 / 0.885 (over 1.00 at -O1 by instructions since R19; box 26 decides on time), arrays 0.710 / 0.698 → 0.662 / 0.710, acyclic 0.721 / 0.777 → 0.711 / 0.784, number-keyed maps 0.913 / 0.904 → 0.928 / 0.914, object-keyed 0.845 / 0.815 → 0.865 / 0.821: each under 1.00 but cycles at -O1, and the direct route faster too by the split. Strings: appends 0.892 / 0.882 → 0.838 / 0.858, short joins 0.706 / 0.702 → 0.686 / 0.746, substrings 0.949 / 0.932 → 0.911 / 0.915, scans 0.984 / 0.997 → 0.928 / 0.956, split and join 0.954 / 0.931 → 0.915 / 0.919. Exceptions in `rc`, all ≤ 1.00: calls that can throw, `try`, `try`/`finally` 1.000; throws 0.876 / 0.899 → 0.762 / 0.844 (1 up), 0.902 / 0.921 → 0.808 / 0.878 (10 up), 0.968 / 0.975 → 0.934 / 0.961 (100 up).
+- **JPEG and S4** (HVF, interleaved with the before tree, three runs each): the JPEG decoder natively 2.6% faster at -O2 (tower-portrait 7.19 → 7.00 ms; native / V8 geomean 1.066 → 1.035) and 0.4% slower at -O1 (7.02 → 7.05 ms, the same way each run; geomean 1.059 both); S4's median native / clang the same at -O2 (1.040) and at -O1 (1.17; sort_i32 and sha256_u32 the same at both). So -O1's JPEG is within half a percent, not strictly no slower: flagged.
+- **`TRUSTED_IN` rc, plainly:** not every program it would newly take is at or under 1.00 at -O1 and -O2: strkeys (1.146 / 1.126), rc_strings (1.032 / 1.074), case_all at -O1 (1.007), drop_bound at -O2 (1.000, 0.01% over) and cyc_exhaust (R31's). It stays off; no carve-out; `auto` takes nothing new.
+- **Coverage** (route-blockers, -O2): the same before and after, line for line: `strict` 30 + 18, `leak` and `manual` 63 + 43, `rc` 19 + 0.
+- **Injected bugs** (box 80): `r30-copy-stale` 10 (10), `r30-split-norestore` 43 (13), `r30-split-save-late` 30 (16), `r30-split-callee-free` 14 (14), `r30-repeat-short` 4 (4), `r30-slot-twice` 37 (21) (cases caught, wrong answers among them); the first four in `OPT_FAULTS` too.
+- **Pins:** 45 of 3,864 moved, none unexplained (tools/r30-pins.ts, r30-moved.ts): `gc` 10 (-O0 pins of five lowered `rc` programs that make counted objects, in pre-std and pre-strings, five set aside by key in the read-only pre-strings file), `gc` and `sroa` 10 (the same five at -O1 and -O2), `sroa` 25; `zeroed` and `copy` none. -O0 10, -O1 6, -O2 29. TSL proper's moved: 16, all `sroa` (corpus/mem's alloc_heap at -O1 and -O2, alloc_vec, gen_adversarial, lang_misc, layout and plain_class, corpus/spec/run_memory.ts, corpus/memory's leak_list, manual_list and manual_slab, corpus/std's job_queue, stack_holders, std_gen_adversarial, std_vec_safety and word_count at -O2): an optimiser change, which D44 allows; listed for the coordinator. The backend's split moves no pin (machine code only).
+- *Rejected:* a pragma marking cold calls (a language extension); a general splitting allocator; splitting only where it saves a callee-saved register (lost -O2's JPEG gain); leaving strings the runtime fills unzeroed (`makeTailKeep` from lowered code would trust lowered code); dropping the claim's generation or counts.
 
 **Pipeline, phase 2: programs that run until memory is out judged at equal work, and the table-links proof (R29, 3.5, 3.7, 4.3, 8.3, D44, D62, D79), `tmk milestone pipe-d` boxes 77 and 78, MEASURED 2026-11-20** (same host; builder's record, for the coordinator to verify; instruction counts, TCG with `TMK_ICOUNT=1`: tools/r14-time.ts under `TMK_TRUST_IN=rc:classes`, `tmk bench memory --classes --rc`, `--strings --rc` and `--exceptions --rc`, `tmk profile --instructions`, and a measurement script profiling a program's own cases image. "Before" is the tree at commit 88d42d3, R28's verified state, measured from a worktree of it with its own `@tsl` package links).
 
@@ -12424,7 +12541,7 @@ Each row has a default. Work proceeds on the default without waiting. **Confirm 
 | D42 | `Map`, `Set` and run-time strings lower in `leak`, `manual` and `rc`, and stay fallbacks in `strict`. They're ordinary TS in `compiler/rt`, lowered by the compiler into what reaches them, over a few intrinsics, so `rc`'s counts, descriptors, elision, cycles, freeing bound and poisoning apply with no new code in `rc`, and a module that doesn't use them doesn't change by a byte. A string is one pointer to immutable UTF-16, flat or a view, with a tail-sharing buffer for concatenation and no ropes. Literals are static with a count that can't reach zero. A substring shares only within 4 times its length. A map is parallel vectors in insertion order with a chained table of positions and tombstones, and a chain of generations for cursors, with nothing registered. Strings hash with keyed HalfSipHash-1-3, and numbers and addresses with a keyed finaliser. Number to text is Burger and Dybvig's free-format printing by exact integers, and text to number Clinger's AlgorithmR. Copy-on-write is for strings only. **D72:** the map, as `@tsl/jsrt`'s `JsMap` and `JsSet`, written in TSL, which class printing prints a lowered program's maps as, with classes forced; `compiler/rt/map.ts` stays the direct route's. **R10 (M5's R10 record):** through the TSL route in `rc`, strings are two classes the printing puts in the program, `JsStr` and `JsStrBuf` (3.5's "Strings counted by the expansion"), counted by tslc's `rc` expansion: D42's representation kept in substance (flat strings and views into a concatenation's buffer, appends and prepends in place, the sharing bound), a substring of a flat string copying, and a one-unit string made each time. Forced only: 1.54x to 2.34x the direct route at -O1 and -O2 (`AUTO_RC_STRINGS` off). | Over `@tsl/alloc`, as first planned: `Vec` holds no counted reference, has generation checks on what it stores, takes a heap, and the collector can't see through it, so a map over it would be a second memory system beside `rc`'s (4.5). A runtime in TIR beside the counted heap: Ryu and a hash table by hand in TIR, with its own descriptors and barriers, each a chance to be wrong in `rc`, when lowering gets them right by construction. Ropes: a test on every read, a flatten that's linear at a read nobody expects, a mutable node, and they don't help reading between appends, which a shared tail does. One-byte strings alongside two-byte, as V8 has: half the memory on ASCII for a branch on every read, and two paths everywhere. Ryu: tables of 10 KiB or more, and 128-bit arithmetic TS has no words for; exact integers are slower on a random double, MEASURED in M5, but have no tables, no fallback and no proof to trust beyond a page of arithmetic. Registering live iterators on the map: an iterator dropped without finishing has to be removed, which `leak` and a trap can't do. A sequence number per entry: 8 bytes an entry for what generations do for nothing unless a table compacts under an iterator. Copy-on-write for `.slice()` and spread: the write test costs almost nothing, MEASURED in M5, but every slice in the corpus is 16 elements or fewer, where a shared header saves about nothing, and a buffer with its own count changes what the freeing walk, the collector's edge counts and a native caller's view of a vector can assume. Not built, only measured. Price: UTF-16 doubles ASCII, 32 bytes of headers a string, growth is a linear operation in one call, and no entropy means no defence against flooding until a caller provides a key. | Owner's requirements 2026-11-05: no tracing GC, no pause, COW only for strings and visible copies, no third-party runtime dependencies. The design: delegated. Not over `@tsl/alloc`, which the owner asked for: says why here, for the owner to rule on. Owner's ruling 2026-11-06: accepted, the runtime stays in `compiler/rt`. Its core is also written as a TSL class, `@tsl/jsrt`'s `JsString` (D67), with these same rules, which class printing prints strings as; not yet `auto`'s choice. Since D69 (pipe-tails) that class keeps a flat string's units, and a concatenation buffer's room, in its tail, so a flat string is one allocation in both routes; views and buffers are as above, a view being an object with a tail of none. Since pipe-split that class is three behind dispatch interfaces (D70): a flat string (`JsFlat`, a 12-byte header and its units), a view (`JsView`, 32 bytes) and a buffer (`JsBuf`, a 16-byte header and its room), which only a view reaches; every rule above holds as written (UTF-16 units with lone surrogates kept, an append in place only at a buffer's end and a prepend only at its head, the second append making a buffer that doubles, sharing from 32 units and within 4× of what the owner keeps alive, a view of a view judged against the first owner). **strkeys (D72):** a `JsString` is a `JsMap` key by its own `hashKey` and `sameKey`, which `keyHash` and `keySame` reach through its class id (D70): `hashKey` is this hash, HalfSipHash-1-3 under the hash key over the units two to a word, in 30 bits, the same number `strHash` gives, kept in the same hash word (bit 0 known, the hash from bit 2, GROWN kept the class's own), and `JsMap` puts it through its keyed finaliser as it does every key's; `sameKey` is `===` on units, two known hash words that differ saying no first, as `strEq`. The hash key is `JsMap`'s (`jsMapKey`), which a native caller's `__hash_key_use` sets with the program's, and both start at the same default, so a hash word either route's code kept is right for the other. |
 
 | D43 | `@tsl/std` is the third layer: `Vec`, `Map`, `Set`, `Slab`, `Str` and `StrBuilder` over one global allocator, for programs that aren't the kernel or a driver, and TSL1018 keeps it out of a `noStd` package at any depth. Each is `@tsl/alloc`'s `Vec` or `Slab` in a field. An allocator is named by `@tsl.global-allocator` on a top-level `const h = globalAllocator(pageSource)`, read at compile time natively and run as the module loads on V8 and JSC, at most one in a program. With none, it's a `Heap` over the page source `setPageSource` registers. Out of memory is trap 14, with `try` forms. A `Map` and a `forEach` take a loan, so changing a collection in one is trap 13, and a stored reference is checked before it reaches a closure. `Heap` tells std about whole-page runs it's given back, and that's no code at all without std. A stack object can hold a stack object of its own frame. `Shared<T>` is written down, and not built. | A `Vec` of `@tsl/std`'s own over raw `Ptr`: one call less per operation, and a second copy of the safety code in `ex-vec.ts`. Over `compiler/rt`: not possible, as its vectors are lowered arrays, and 3.5 has what was looked for and why. A pluggable allocator algorithm, two function values or a trait: D38 rejected those, and `@tsl/alloc`'s `Vec` takes a `Heap`. A global allocator registered only at run time: a top-level `new Vec` would have to allocate or check at every call. A tag alone: V8 and JSC don't read comments, so they'd use a different allocator from native. `get` giving `V \| null`: null is only for references (TSL1008), so `getOr`, and `get` traps 2. JS's behaviour for changing a `Map` during `forEach`: cursors and generations, for what's almost always a bug. Returning `false` from `push`: a result nobody reads loses data silently. A `Heap` rewrite to reuse runs: it would have moved every `@tsl/alloc` user's bytes. Price: with no inliner, a `Vec.get` is one more call than `@tsl/alloc`'s, and the `Vec` row is 2.03×, MEASURED in M5. A `Str` is 16 bytes of slot, a `Vec` and its hash, about 72 bytes before its text, worked out from its fields and not measured. A `Vec` made in a function in `strict` can't be returned. | Owner's decisions 2026-11-05: three layers, a global allocator, per thread in concept, `noStd` kernel and drivers, runs on V8 and JSC and matches native, no GC pause. Exhaustion as expected by the owner. The design: delegated. D42's evidence is in 3.5 and M5's Phase G, for the owner to rule on. Owner's ruling 2026-11-06: two maps, see D47. |
-| D44 | Optimiser levels: `-O0` is direct translation and the comparison baseline; `-O1` is fast passes only, and what S5 measures; `-O2` is everything that needs more time or the whole program, and is the default for `tmk lower` and the kernel. No level changes results or trap codes: only timing, memory and stack use differ (3.10). A check goes only if proved unable to fire. The same source, level and profile give byte-identical output, and the level is part of the boot cache key. A profile is an input to `-O2`, not a level. The full suite runs at `-O0` and `-O2`, and a smaller set at `-O1`. A program that differs between `-O0` and `-O2` has a compiler bug, which works where V8 can't run the code. Built in phase A (4.3, D46, M5's Optimiser phase A): the three levels through `tmk lower`, `tslc` and every harness, `-O2` the default for `tmk lower`, and the full suite at `-O0` and `-O2` with the quick tier at `-O1`. There's no boot cache yet, and 6.3 says where the level goes when there is. **Owner's ruling, 2026-11-15:** -O0 means no optimisation, and is exempt from the pipeline's speed rule (D62): a feature switches to the TSL route when it's no slower than the direct route at -O1 and -O2. **Phase B (D73), 2026-11:** the rules hold as written: a check goes only where `range.ts` proves it can't fire, a load or check moves or is shared only where `-O0`'s trap order and `keep` are unchanged, and `-O0` is untouched. `-O1` gains value numbering and loop-invariant code motion, once each; `-O2` also check elimination, unswitching and peeling, and LICM's proofs of a loop's first turn. Check elimination is `-O2`'s because `-O1`'s compile time is gated at 1.25 times `-O0`'s (opt-a box 6), MEASURED 1.18× with it left out and 1.21× to 1.27× with it in. **R7:** `-O1` also removes a bounds check its loop's own test proves (`loopbounds`, D73), with no intervals and no fixpoint: -O1's compile time is 1.12× -O0's with it (1.11× without), MEASURED by opt-a box 6's corpus. And at `-O1` and `-O2` the AArch64 backend leaves an explicit null check to the load right after it (D75), where the runtime makes that load's fault through null trap 6 everywhere, as the check was: a check goes only where what replaces it gives the same code, inside a driver's case and outside one; on Wasm, where a load near 0 reads memory, the TIR keeps it. **R15:** `-O1` and `-O2` also remove a test a test above them answered (`conds`, D73: one walk of the dominator tree, so within -O1's limit), and `-O2` versions loops (`version`, D73): a fast copy without the checks a guard before the loop proves, the loop as it was the fallback, so a check goes only where proved, as this decision says, and -O0 is untouched (no -O0 pin moved; M5's R15 record). **R26:** `range.ts` reads a signed test whose smaller side isn't negative as the unsigned one, decides a float compare of converted `i32`s from the integers as known where it is, and reaches a target through its own `zext`; `-O1`'s `loopbounds` takes `k < 0` as false for a signed test's index that's never negative; `-O2` copies loops in up to three rounds with value numbering between, under the same limits; and the inliner keeps a loop's split block in the loop. Each is `-O1`'s or `-O2`'s alone, a check still goes only where proved, and `-O0` is untouched; the TSL proper pins they move at `-O1` and `-O2` are listed in M5's R26 record. **R27 (D77):** a field's read is kept across a store into a block tslc proved no object is in, and across a call that writes only such blocks, at `-O1` and `-O2`; a check goes only where the existing proofs then prove it, `-O0` is untouched, and lowering's notes are outside the canonical text, so no `-O0` pin moves. **R28:** `simplify` takes a tag off before `ref.addr`, `conds` takes equal constants as one operand, the inliner lets a callee no bigger than its call past the growth limit, and `-O2` versions the loops its copying rounds left; each `-O1`'s or `-O2`'s alone (versioning `-O2`'s), a check goes only where proved, and `-O0` is untouched; the TSL proper pins they move at `-O1` and `-O2` are listed in M5's R28 record. **R29 (D79):** the inliner takes a JsArray read's leading bounds check out of a call tslc's table-links proof marked in bounds, at `-O1` and `-O2`; the check goes only where that proof shows it can't fire, lowering's notes are outside the canonical text, and no `-O0` pin moves by it (the `-O0` pins that move are JsMap's own source, a library change; M5's R29 record lists them). | `-Ofast`, or any level that drops checks: `manual` is the declared, audited way to opt out, and a flag would undo that. `-O3`: a profile does that job. `-Os` and per-package levels: nothing has shown a need, and whole-program compilation favours one level a build. | Owner's decision in principle, 2026-11-06. |
+| D44 | Optimiser levels: `-O0` is direct translation and the comparison baseline; `-O1` is fast passes only, and what S5 measures; `-O2` is everything that needs more time or the whole program, and is the default for `tmk lower` and the kernel. No level changes results or trap codes: only timing, memory and stack use differ (3.10). A check goes only if proved unable to fire. The same source, level and profile give byte-identical output, and the level is part of the boot cache key. A profile is an input to `-O2`, not a level. The full suite runs at `-O0` and `-O2`, and a smaller set at `-O1`. A program that differs between `-O0` and `-O2` has a compiler bug, which works where V8 can't run the code. Built in phase A (4.3, D46, M5's Optimiser phase A): the three levels through `tmk lower`, `tslc` and every harness, `-O2` the default for `tmk lower`, and the full suite at `-O0` and `-O2` with the quick tier at `-O1`. There's no boot cache yet, and 6.3 says where the level goes when there is. **Owner's ruling, 2026-11-15:** -O0 means no optimisation, and is exempt from the pipeline's speed rule (D62): a feature switches to the TSL route when it's no slower than the direct route at -O1 and -O2. **Phase B (D73), 2026-11:** the rules hold as written: a check goes only where `range.ts` proves it can't fire, a load or check moves or is shared only where `-O0`'s trap order and `keep` are unchanged, and `-O0` is untouched. `-O1` gains value numbering and loop-invariant code motion, once each; `-O2` also check elimination, unswitching and peeling, and LICM's proofs of a loop's first turn. Check elimination is `-O2`'s because `-O1`'s compile time is gated at 1.25 times `-O0`'s (opt-a box 6), MEASURED 1.18× with it left out and 1.21× to 1.27× with it in. **R7:** `-O1` also removes a bounds check its loop's own test proves (`loopbounds`, D73), with no intervals and no fixpoint: -O1's compile time is 1.12× -O0's with it (1.11× without), MEASURED by opt-a box 6's corpus. And at `-O1` and `-O2` the AArch64 backend leaves an explicit null check to the load right after it (D75), where the runtime makes that load's fault through null trap 6 everywhere, as the check was: a check goes only where what replaces it gives the same code, inside a driver's case and outside one; on Wasm, where a load near 0 reads memory, the TIR keeps it. **R15:** `-O1` and `-O2` also remove a test a test above them answered (`conds`, D73: one walk of the dominator tree, so within -O1's limit), and `-O2` versions loops (`version`, D73): a fast copy without the checks a guard before the loop proves, the loop as it was the fallback, so a check goes only where proved, as this decision says, and -O0 is untouched (no -O0 pin moved; M5's R15 record). **R26:** `range.ts` reads a signed test whose smaller side isn't negative as the unsigned one, decides a float compare of converted `i32`s from the integers as known where it is, and reaches a target through its own `zext`; `-O1`'s `loopbounds` takes `k < 0` as false for a signed test's index that's never negative; `-O2` copies loops in up to three rounds with value numbering between, under the same limits; and the inliner keeps a loop's split block in the loop. Each is `-O1`'s or `-O2`'s alone, a check still goes only where proved, and `-O0` is untouched; the TSL proper pins they move at `-O1` and `-O2` are listed in M5's R26 record. **R27 (D77):** a field's read is kept across a store into a block tslc proved no object is in, and across a call that writes only such blocks, at `-O1` and `-O2`; a check goes only where the existing proofs then prove it, `-O0` is untouched, and lowering's notes are outside the canonical text, so no `-O0` pin moves. **R28:** `simplify` takes a tag off before `ref.addr`, `conds` takes equal constants as one operand, the inliner lets a callee no bigger than its call past the growth limit, and `-O2` versions the loops its copying rounds left; each `-O1`'s or `-O2`'s alone (versioning `-O2`'s), a check goes only where proved, and `-O0` is untouched; the TSL proper pins they move at `-O1` and `-O2` are listed in M5's R28 record. **R29 (D79):** the inliner takes a JsArray read's leading bounds check out of a call tslc's table-links proof marked in bounds, at `-O1` and `-O2`; the check goes only where that proof shows it can't fire, lowering's notes are outside the canonical text, and no `-O0` pin moves by it (the `-O0` pins that move are JsMap's own source, a library change; M5's R29 record lists them). **R30:** scalar replacement writes a copy out of a frame slot (a new object placed in its counted slot) as stores of its fields, at `-O2`, and at `-O1` that alone, nothing else of `-O2`'s scalar replacement (compile time within opt-a box 6's limit); and at `-O1` and `-O2` the AArch64 backend splits values live across cold calls only around them (D80), machine code only. A check goes nowhere by either, and `-O0` is untouched (the `-O0` pins that move are @tsl/gc's own source, a library change); the TSL proper pins they move at `-O1` and `-O2` are listed in M5's R30 record. | `-Ofast`, or any level that drops checks: `manual` is the declared, audited way to opt out, and a flag would undo that. `-O3`: a profile does that job. `-Os` and per-package levels: nothing has shown a need, and whole-program compilation favours one level a build. | Owner's decision in principle, 2026-11-06. |
 | D45 | Tests are made fast without testing less (owner, 2026-11-06): every milestone records seconds per box and suite (8.3); a test image's per-case output goes through RAM, with serial keeping the sentinels and a byte count and checksum of what's in RAM (8.2); the test process lowers and links on worker threads; `tmk test` is a quick tier that verifies nothing; and there's no cache of results. Only a milestone run in full from `tmk clean` verifies. | Results over serial: 1.6 µs a byte under HVF, MEASURED. virtio-console: a driver in the runtime for the same effect. Reading RAM through the monitor's `pmemsave`: needs QEMU alive, so it loses what a killed run did. A results cache: saves nothing on a change to the compiler or tools, and nothing from clean (M5). Raising `--jobs`: the host carries the owner's VMs. | Owner agreed the plan, 2026-11-06; channel, workers, tier and no cache MEASURED, M5. |
 | D46 | The optimiser's phase A and what each level holds (4.3). **-O1**: folding, copy propagation, dead code, branch folding and block merging, two rounds, and inlining only where the callee costs no more than its call (4 plus its parameters and results), or since B3 where it calls nothing, costs up to 16 and the call is in a loop (a block between a backward edge's target and its source, in block order: no dominators at -O1), one function at a time, bottom-up, so nothing grows by more than a few instructions a hot site; a load `-O0` ran is kept. **-O2**: all of that, three rounds, plus the whole call graph: inlining by cost, partial inlining, calls through a known function's address made direct, scalar replacement of frame slots, and a round of cleanup after. **Cost** is about the instructions the backend emits: nothing for a constant, an address, a rename or a frame slot; 4 plus its arguments for a call; 4 for a `Math` function, `mem.fill` or `mem.copy`; 3 for a division; 2 for a check; 1 for the rest; and 1 for a two-way branch or a return. **-O2's threshold** for a callee is 16, plus 8 for a leaf, 4 for each constant argument up to 3, times 3 at a call in a loop, and at least 200 for the one call site of a function nothing else can reach (not exported, no address taken). A caller may grow to twice its size or by 150, whichever is more, and never past 30,000 or 64 KiB of frame slots more. **Never inlined**: a call into the caller's own cycle of the call graph, or into a function whose copy the call is already inside, so recursion and mutual recursion unroll at most once into a caller outside the cycle; `@tsl.noinline`; `export_c` and `section`, which stay as written; a callee without the caller's `noalloc` or `nosleep`, so those facts keep holding; and a callee with frame slots into a caller that recurses. **Always**, short of those and a hard limit of 2,000: `@tsl.inline`. **Partial inlining**: a callee too big to inline has its side-effect-free entry (arithmetic, loads and checks, with no loop) inlined, with every path from there that makes no call, and every other edge out of it calls the whole function from the start. That's sound because nothing before the call changed any state, and a check or a load that traps in the copy traps the same at `-O0`. It's how an allocator's or a counter's fast path is inlined and its slow path isn't. An exported function is inlined as a copy and keeps its body and symbol. Removing a function is the image linker's, by what's reachable. Phase B's passes, and what each adds to `-O1` and `-O2`, are D73's; phase A's cost model and rules are unchanged by it. **R20 (M5's R20 record):** a callee whose entry gives a frame slot (`alloca`, which is no effect when it runs) is taken partially where nothing the copy holds uses the slot, which is left out of the copy; before, any slot in the entry refused it, so an `rc` class printing's function that builds an object in a slot on a rare path (a throw's `Dyn`) was never inlined where the direct route's is. -O2 only; 76 pins moved, all at -O2 (tools/r20-pins.ts). | Inlining everything up to 40, with a caller growing to 4 times: tried, MEASURED 27% more code in `rc`'s corpus for 5% fewer calls in the module, and the runtime's functions each grew to the limit. Unrolling a cycle through inlining's own copies (only the call graph's cycles refused): tried, the runtime's mutually recursive `__rc_zero` and `__rc_dec` unrolled to the growth limit at every site. Outlining a slow path into a new function: more for the same effect, since calling the whole function again needs nothing new. A profile: D44's input to `-O2`, and there's none yet. Heuristics from LLVM's or GCC's inliners: their licences (D35); this is the author's design from published descriptions of bottom-up inlining and partial inlining. Inlining at `-O0`: `-O0` is the comparison baseline. | Owner's levels (D44), 2026-11-06. The cost model and the rules are the author's, delegated |
 | D47 | Two maps, by the owner, 2026-11-06. One is JS's: `get` on a missing key gives `undefined`, and changing it during iteration does what JS does. The other, `ExactMap`, traps on a missing key (2) and on a change during iteration (13), for code that wants a missing key to be a bug. `Set` stays JS's only: with no `get` to miss, a trapping set would differ only on iteration. `Map` keeps JS's meaning everywhere, and the trapping one gets its own name, so the same name never means two things. `Map` growth becomes incremental, so no `set` does work proportional to the table, which owner confirmed with "no pause". **Built** (M5's Maps phase, `tmk milestone maps`). In `@tsl/std`, `Map` and `Set` are JS's, and `ExactMap` is the trapping map as it was; `get` of a scalar is `V \| undefined`, a flag and a value in two registers, the one place TSL proper lets you write a nullable scalar (3.3, rule 12). In lowered code, a full table is replaced by one made at its final size, and the old one moved into it in order, 4 positions an insert or delete, with lookups in both meanwhile and each old position recording where it went for the cursors (3.5). `Map` and `Set` are opaque to a native caller, read through `size`, `has` and a cursor (4.5). Not met in full: the new table's vectors are one allocation, and zeroing it is proportional to the table, which the page source or `rc`'s reuse of a run does inside that one `set`: 11.0 ms at 2^20 entries, against 19.2 ms before, and 23.5 µs with the zeroing taken out (MEASURED, M5). Not built: `ExactMap` in lowered code, and incremental growth in `@tsl/std`, whose vectors grow by copying in `@tsl/alloc`. **D72:** `@tsl/jsrt`'s `JsMap` grows as lowered code does, incrementally, 4 positions an insert or delete, and its cursors have JS's rules under change, as map.ts's. | One map that traps: the same name as JS's with a different meaning, which is what the owner rejected. One JS-style map only: a missing key would then be a value to check everywhere it's a bug. A boxed `V \| undefined` for `get`: an allocation for every lookup, in a layer with no collector. Rebuilding the table a slice at a time in place, as linear hashing does: insertion order is positions, so a cursor would have to follow entries as they move, where moving them in order to a new table lets each old position say where it went. Chunked tables, so no one allocation grows with the table: what the zeroing above needs, a load on every access, not built until the owner says it's worth it. | Owner's decision, 2026-11-06, including the name `ExactMap`. |
@@ -12461,6 +12578,7 @@ Each row has a default. Work proceeds on the default without waiting. **Confirm 
 | D77 | Fresh-allocation separation (R27; the owner's option 1, 2027-01-01, taken up 2027-01-17). A block from the allocator that only one class's fields hold, and only that class's code reaches, holds no object, so a store into it changes no object's field and an object's field's store doesn't change it. The optimiser keeps a field's read (an array's length, a map's state) across such stores, and across a call that writes only such blocks, and a check the kept value proves goes by the proofs already there (D44, D73): nothing unchecked is added, and a check goes only where proved. **tslc's rule** (compiler/host/separate.ts, whole-program, after `markInvariantFields`): a field F of a class C is separated where (1) F is a `u64` held by value, and C isn't a layout class and has no tail; (2) only C's own methods read or write F; (3) everything they store in F is 0, a fresh block (@tsl/alloc's `Heap.allocBytes`, the per-call region's `callRegionBytes`) or a value read from a separated field of C (a block moved between C's objects, as `adopt` and `swap` move one), and every value worked out from one (a block value) is used only as the address of C's own reads and writes of elements that are numbers or references (never an object in place, `inlineOf`), as a copy's or a fill's address, as `addrInCallRegion`'s or `Heap.freeBytes`' argument, in a compare, stored into a separated field of C or a local, passed between C's own methods, or as a method's result only C's methods take: never stored anywhere else, given to any other code, or used to make, place or view an object; (4) C's methods use no other @tsl/unsafe operation that names memory (`addrOf`, `slotOf`, `viewAt`, `objectAt`, ...) and make no closure, and nothing takes one of them as a value; (5) no object of C, or holding one in place, is an element in place or viewed at an address. So a block a separated field holds can be reached only through C's methods, and no object is ever in one. **The optimiser** (compiler/tir/passes/memory.ts): lowering notes a separated field's read and every object field's read and write, outside the canonical text, as it notes a class id's (D73), so -O0's TIR and every tirhash at -O0 are as they were. An address worked out from a separated field's read (an offset, a cast, an add of one and something that isn't one, a block parameter every edge gives one) is in a separated block, and an access there and an object's field's, a global's or a frame slot's never alias; a call writes only separated blocks where the callee and everything it calls store nowhere but their own frame slots and such blocks (a write summary, settled over the call graph), and such a call, or a fill or copy into a block, changes no object's field. Value numbering, LICM and peeling read writes this way at -O1 and -O2. **What it rests on:** the allocators give a block that no live object or other live block shares until it's given back (@tsl/alloc's `Heap`, the per-call region; their SAFETY comments); C's own unsafe code keeps its SAFETY comments: an address it works out from a block stays inside that block, and a block goes back only once no separated field holds it and isn't used after; @tsl/unsafe's object operations move and name whole objects (`placeObject`'s copy of a moved object into a slot, `objectAt` of a placed one), the copy a move leaves behind never read again (tslc's moves rule); and in `manual`, nothing uses an object after `unsafeFree` (that mode's own contract). Lowered code can't import @tsl/unsafe (TSL1023), so in a lowered package only the libraries' classes can have such a field: @tsl/jsrt's `JsArray.data`, a JsMap's tables among them. **Where it doesn't apply** (r27_sep_neg.ts): a block whose address leaves its class, before or after it's filled, or that's stored in another object's field and read back from there, isn't separated; a call that writes a field keeps every read of one after it. Injected bugs, each caught by wrong answers: a summary missing a write, an alias the separation misses, an escape let through (`tmk milestone pipe-d` boxes 73 and 74, opt-a box 12; M5's R27 record). | A lowered-only unchecked `get` (the owner, 2027-01-01: never). Type-based alias analysis over TIR: TIR has no types on memory; this notes the one fact it needs where tslc proved it. Taking every block from `allocBytes` as separated: a block whose address escapes may hold a viewed or placed object, and a store through it would then change a field the optimiser kept. Proving a map lookup's chain positions in range: that's a fact about a table's contents, which no separation gives (R27's measurement, M5's record). | The owner's ruling, 2027-01-01 (option 1: the optimiser rule, fresh-allocation separation with per-call write summaries), and go-ahead, 2027-01-17; the rule's design delegated |
 | D78 | References with no tag, and module state written once (R28, 3.5; M5's R28 record). A lowered `rc` package's heap class (expand-rc.ts's `loweredRcHeapClass`: counted exactly, never `@tsl.stack`, every object in a slot a store's `make` placed) whose references are untagged (R8's `untaggedCounted`) has every reference to it be its object's address, by construction: `placeObject`, `placeTail` and `objectAt` of it give the address, and callRelease's arm for it hands its release function the object as an address (from the slot where the call is given `objectAt` itself, else masked). So its fields are read and written, and its slot found, with no mask. A lowered package can't import @tsl/unsafe (TSL1023), so it can't make one otherwise, and the libraries holding them store and load them whole. A module variable that only its module's top-level `__init` writes, and that nothing calls, is given to a call borrowed, with no count around the call, as no code that runs after `__init` can overwrite it. No check is removed: the mask was never one. No freeing step moves (D39, D41): a count not taken isn't given back, and such a variable's object never reaches zero. | Keeping the mask (R19): relative_import's one instruction a read, and one in every count change, for a tag nothing reads. A release function given a tagged object, its class's reads masked only there: a second form of every field access. Taking every module variable as stable: a call can overwrite one (corpus/lower/r28's `overwriteWhileBorrowed`), and its old value would be freed under the call (the injected bug `r28-init-any`, caught). Literals as static objects, as the direct route has them: a second kind of reference to a lowered class, which would bring the tag back. | The owner's rule (2026-11-17): a check or mask goes only by a proof that it can't matter; this is that proof, delegated |
 | D79 | The table-links proof (R29, 3.5, 4.3; the owner's ruling of 2027-01-21 asked for it; M5's R29 record). A class's `@tsl.links l... < b...` claim, that every link its link fields' arrays hold (a `u32` from 2 to 2^31 - 1, naming position link - 2) is below every bound field's array's length, is proved by tslc over every write to them, and a JsArray read it then shows in bounds loses its leading check where the inliner copies it, at -O1 and -O2. **tslc's rule** (compiler/host/links.ts, whole-program, after D77's): (1) each claimed field is @tsl/jsrt's `JsArray` held in place, a link field's of `u32`; (2) the fields are named only in the class's methods (every instance of its declaration) and its group functions (module functions every call of which, all in the class's methods, passes one group's fields in the same places; never exported or a value), and only as a JsArray method's receiver, a local const naming one, an argument of one of the class's methods (followed into at each call) or of a group function, or what another array's `adopt` takes from; no object of the class, or holding one in place, is an element in place or viewed; (3) following each method statement by statement from the claim holding (a constructor's arrays all new), each link field is empty, valid or broken, and: a value stored into one (`set`, `push`) is 0, 1, at least 2^31 (`(c \| x) >>> 0` with c's top bit set), a value read from the group's link fields since its bounds last got shorter, or `(p + 2) >>> 0` with p known below every bound's length; a bound that may get shorter (`setLength`, `trim`, `adopt` from it, a new array) breaks every link field of its group that isn't empty; a link field `trim`med, adopted from, newly made or given length 0 is empty; a run of swaps keeps a group only where it swaps every field of one group with the same place in another; (4) no link field is broken at a return, at a call of the class's own method (unless it only reads) or a group function, or at a call of code that may reach the class's methods (whole-program; a function value reaches only the functions of its type taken as values, a down-lowered closure call anything), and after such a call nothing is known but that the claim holds; (5) a position is known below a length after a bounds-checked access there (`get`, `set`, `zero`), a test against the length, as the length read before a `push` onto that array, or as `(s - 2) >>> 0` for an s read from a link field under a test below 2^31 - 2, while the claim holds. **What's marked:** a JsArray `get`, `set` or `zero` on a claimed field whose index (3, 5) shows below that field's length in every way it's reached (`call.inb`), and JsArray's leading checks (`cmp.chk`); lowering notes both outside the canonical text, and the inliner (4.3) copies such a call with the check's test false. **What it rests on:** JsArray's methods do what D66 and their SAFETY comments say (a bounds check traps past the length, `push` adds one, `setLength` keeps what's below and adds zeros, `trim` and `adopt` empty the array, `swap` exchanges two whole arrays, `reserve` changes no element); its buffer is reached only by its own methods (D77's `JsArray.data`); objects are moved whole (D77's rule 5); in `manual`, nothing uses an object after `unsafeFree`; and the class's own code is what it's proved to be. Lowered code can't name a JsMap's fields (they're private, and tslc's rule refuses one named outside), so it can't break the claim. **Where it doesn't apply** (corpus/r29/r29_links_neg.ts): a link stored past its key, the keys cut with links left, half a table swapped, the keys cut from outside, a read after a call that may empty the table; each keeps its checks. Injected bugs, each caught by wrong answers or traps: the rule letting any stored value through, missing a bound getting shorter or half a swap, missing a field named outside, and the inliner taking every call's check out (`tmk milestone pipe-d` boxes 77 and 78, opt-a box 12). | A lowered-only unchecked `get` (the owner, 2027-01-01: never). Proving the claim in the optimiser, over TIR: the fact is about a class's private fields, which only tslc sees whole. Taking `vals` as a bound: a Set's table has none, so the claim would be false. | The owner's ruling, 2027-01-21 ("Then build the table-links proof"); the rule's design delegated |
+| D80 | Values split around cold calls (R30, 4.4; M5's R30 record). At -O1 and -O2 the AArch64 backend's allocator takes a call to be cold where its block isn't on every turn of its innermost loop, or, outside loops, isn't on every way out of the function but a quick way out (a block that only returns, reached by a conditional branch); `native.try` is never cold, and `trap.code` keeps nothing. A value live across cold calls only may then take a register a call clobbers, stored to a slot of its own before each such call (before its arguments are moved) and loaded back after it (after its results are moved); a value live across any other call takes a callee-saved register as before. And a bare-metal frame with no outgoing stack arguments puts its saved registers at its bottom, so its first pair's store makes the whole frame. Coldness is a static guess: it decides only what's saved where, never what's computed, so a wrong guess costs time and never a result. MEASURED (HVF, interleaved with the tree before): the JPEG decoder natively 2.4% faster at -O2 and 0.2% slower at -O1 (6.81 → 6.83 ms on tower-portrait, under the timers' noise but the same way each run), S4's median the same at both. | Intervals with holes and a general splitting allocator: a rewrite of the allocator for what saves around a few calls give. Branch weights from a profile: there's no profile at -O1. Splitting only where it saves a callee-saved register: it lost -O2's 2.4% on the JPEG decoder, where every register is taken either way and the split values were spilled before. | Delegated (the coordinator's 2027-01-25 brief: "split such values around cold calls") |
 ### Open questions, with defaults
 
 | Question | Default if unanswered |

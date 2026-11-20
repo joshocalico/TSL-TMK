@@ -6,7 +6,13 @@
 // used only by a branch or select in its block folds into it. Allocation then works on what is left:
 // one interval per value from its definition to its last use, in reverse postorder, with no holes and
 // no splitting. A value gets one register or one stack slot for its whole life.
-import { edgesOf, type Func, type Instr, type TirType } from "../tir/ir.ts";
+//
+// R30, at -O1 and -O2 (`coldsplit`): a call that runs only on some of its loop's turns, or outside a loop on only some of
+// the ways through the function, is cold. A value live across cold calls only may take a register the caller doesn't need
+// kept, which is stored to a slot of its own just before each such call and loaded back just after; so the way through
+// that calls nothing needs no callee-saved register for it, and the prologue saves fewer. A value live across any other
+// call still takes a callee-saved register, as before.
+import { buildCfg, edgesOf, type Func, type Instr, type TirType } from "../tir/ir.ts";
 import { type MemOp, memImmOk } from "./encode.ts";
 
 const LOAD_OP: Record<string, MemOp> = {
@@ -379,6 +385,18 @@ export interface Allocation {
   hasCall: boolean;
   outArea: number; // filled in by the emitter's scan of calls
   loopDepth: Int32Array; // by block position
+  /**
+   * R30: at each cold call, the registers the caller doesn't need kept that hold a value live across it, each stored to
+   * its slot (counted from 0 after the spill slots) just before the call and loaded back just after.
+   */
+  coldSaves: Map<Instr, { loc: number; slot: number }[]>;
+  saveSlots: number; // R30: 8-byte slots after the spill slots, one a value saved around a cold call
+}
+
+/** R30: how the allocator splits values around cold calls (-O1 and -O2), with its injected bugs (`OPT_FAULTS`). */
+export interface ColdSplit {
+  /** `r30-split-callee-free`: a callee-saved register taken for a value across cold calls only, and not saved */
+  calleeFree: boolean;
 }
 
 interface Interval {
@@ -387,6 +405,7 @@ interface Interval {
   end: number;
   weight: number;
   crosses: boolean;
+  coldCross?: boolean; // R30: across a cold call (and, unless `crosses`, no other)
   fp: boolean;
   hint: number; // a location it would like, or NONE
   hintValue: number; // a value whose location it would like, or NONE
@@ -449,7 +468,11 @@ export function allocate(
   s: Selection,
   faults: ReadonlySet<string> | null = null,
   frameRecords = false, // hosted targets (macos-arm64, D57): x29 is the frame pointer, never allocated
+  split: ColdSplit | null = null, // R30: -O1 and -O2, values split around cold calls
 ): Allocation {
+  const cold = split !== null ? coldCalls(s.f) : null;
+  const allocateOnce = (sel: Selection, fr: boolean): Allocation =>
+    allocateOnce0(sel, fr, cold, split);
   let a = allocateOnce(s, frameRecords);
   if (faults === null || a.spillSlots === 0) return a;
   const cand = rematCandidates(s);
@@ -602,7 +625,91 @@ function effectful(ins: Instr): boolean {
   return !PURE.has(base) && base !== "bounds" && base !== "range" && !ins.op.includes(".chk");
 }
 
-function allocateOnce(s: Selection, frameRecords = false): Allocation {
+/**
+ * R30: the function's cold calls. A call (anything that clobbers the registers a caller doesn't need kept, `isCallOp`) is cold
+ * where its block isn't on every turn of its innermost loop (it doesn't dominate each of the loop's back edges' sources), or,
+ * outside every loop, isn't on every way out of the function (it doesn't dominate each block that returns, but a quick way
+ * out: one that only returns, reached by a conditional branch): a call made only on some paths, such as a slow path's or a
+ * rare case's. `native.try` is never cold, and `trap.code`, which never comes back,
+ * has nothing live across it to keep. Which calls are cold decides only what's saved where, never what's computed.
+ */
+export function coldCalls(f: Func): Set<Instr> {
+  const out = new Set<Instr>();
+  const nb = f.blocks.length;
+  if (nb === 0) return out;
+  const index = new Map<number, number>();
+  f.blocks.forEach((b, i) => index.set(b.id, i));
+  const cfg = buildCfg(f);
+  const dominates = (x: number, y0: number): boolean => {
+    let y = y0;
+    for (let guard = 0; guard <= nb; guard++) {
+      if (y === x) return true;
+      const up = cfg.idom.get(y);
+      if (up === undefined || up === y) return false;
+      y = up;
+    }
+    return false;
+  };
+  // natural loops by header: their blocks and the sources of their back edges
+  const loops = new Map<number, { body: Set<number>; latches: number[] }>();
+  f.blocks.forEach((b, i) => {
+    if (!cfg.idom.has(i)) return;
+    for (const e of edgesOf(b.term)) {
+      const h = index.get(e.block)!;
+      if (!dominates(h, i)) continue;
+      const l = loops.get(h) ?? { body: new Set<number>([h]), latches: [] };
+      loops.set(h, l);
+      l.latches.push(i);
+      const stack = [i];
+      while (stack.length > 0) {
+        const x = stack.pop()!;
+        if (l.body.has(x)) continue;
+        l.body.add(x);
+        for (const p of cfg.preds[x]!) stack.push(p);
+      }
+    }
+  });
+  // The ways out: blocks that return, but a quick way out (a block that only returns, reached by a conditional branch, as
+  // `if (lo >= hi) return;` is), which is taken rarely: a call past a guard like that is on every way through that does
+  // the function's work (sort_i32's recursive calls were split around, 5% slower, before this).
+  const all: number[] = [];
+  f.blocks.forEach((b, i) => {
+    if (b.term.k === "ret" && cfg.idom.has(i)) all.push(i);
+  });
+  const quick = (i: number): boolean =>
+    f.blocks[i]!.instrs.length === 0 &&
+    cfg.preds[i]!.length > 0 &&
+    cfg.preds[i]!.every((p) => f.blocks[p]!.term.k === "brif");
+  const rets = all.some((i) => !quick(i)) ? all.filter((i) => !quick(i)) : all;
+  f.blocks.forEach((b, i) => {
+    if (!cfg.idom.has(i)) return;
+    let inner: { body: Set<number>; latches: number[] } | null = null;
+    for (const l of loops.values())
+      if (l.body.has(i) && (inner === null || l.body.size < inner.body.size)) inner = l;
+    const every = inner !== null ? inner.latches : rets;
+    const onEvery = every.every((x) => dominates(i, x));
+    for (const ins of b.instrs) {
+      if (!isCallOp(ins)) continue;
+      const n = ins.ops[0];
+      if (ins.op === "intrinsic" && n?.t === "name" && n.name === "native.try") continue;
+      if (!onEvery) out.add(ins);
+    }
+  });
+  return out;
+}
+
+/** `trap.code`: a call as far as registers go, but it never comes back, so nothing needs to be kept across it. */
+function neverReturns(ins: Instr): boolean {
+  const n = ins.ops[0];
+  return ins.op === "intrinsic" && n?.t === "name" && n.name === "trap.code";
+}
+
+function allocateOnce0(
+  s: Selection,
+  frameRecords: boolean,
+  cold: Set<Instr> | null,
+  split: ColdSplit | null,
+): Allocation {
   const GP_CALLEE = frameRecords ? GP_CALLEE_ALL.filter((r) => r !== 29) : GP_CALLEE_ALL;
   const f = s.f;
   const n = f.types.length;
@@ -620,6 +727,7 @@ function allocateOnce(s: Selection, frameRecords = false): Allocation {
   const end = new Int32Array(n).fill(-1);
   const uses = new Float64Array(n);
   const callPos: number[] = [];
+  const coldAt: { pos: number; ins: Instr }[] = []; // R30: cold calls, in order
   const depth = loopDepths(f);
   const hint = new Int32Array(n).fill(NONE);
   const hintValue = new Int32Array(n).fill(NONE);
@@ -665,9 +773,12 @@ function allocateOnce(s: Selection, frameRecords = false): Allocation {
       for (const v of tmp) noteUse(bi, v, pos);
       for (const r of ins.res) noteDef(bi, r, pos + 1);
       if (isCallOp(ins)) {
-        // trap.code never returns, so nothing needs to survive it, but treating it as a call is safe.
+        // trap.code never returns, so nothing needs to survive it, but treating it as a call is safe. R30: with values split
+        // around cold calls, a cold call's place is noted apart, and trap.code's not at all.
         hasCall = true;
-        callPos.push(pos);
+        if (cold !== null && cold.has(ins)) {
+          if (!neverReturns(ins)) coldAt.push({ pos, ins });
+        } else if (cold === null || !neverReturns(ins)) callPos.push(pos);
         const argVals: number[] = [];
         for (const o of ins.ops) if (o.t === "v") argVals.push(s.alias[o.id]!);
         const skip = ins.op === "call.indirect" ? 1 : 0;
@@ -781,6 +892,7 @@ function allocateOnce(s: Selection, frameRecords = false): Allocation {
       end: end[v]!,
       weight: uses[v]! / (end[v]! - start[v]! + 2),
       crosses: crossesCall(start[v]!, end[v]!),
+      coldCross: coldAt.some((c) => c.pos > start[v]! && c.pos < end[v]!),
       fp: isFloat(f.types[v]!),
       hint: hint[v]!,
       hintValue: hintValue[v]!,
@@ -816,6 +928,16 @@ function allocateOnce(s: Selection, frameRecords = false): Allocation {
     const order = it.fp ? [...FP_CALLER, ...FP_CALLEE] : [...GP_CALLER, ...GP_CALLEE];
     let pick = NONE;
     const usable = (r: number): boolean => free.has(r) && (!it.crosses || callee.has(r));
+    // the injected bug (`r30-split-callee-free`): a value across cold calls only takes a callee-saved register first, and
+    // it's not recorded as used, so the prologue doesn't save it
+    const calleeFree = split?.calleeFree === true && it.coldCross === true && !it.crosses;
+    if (calleeFree) {
+      for (const r of it.fp ? FP_CALLEE : GP_CALLEE)
+        if (free.has(r)) {
+          pick = r;
+          break;
+        }
+    }
     // First a register already holding the other end of a block argument, then the call hint.
     if (it.hintValue !== NONE) {
       const l = loc[it.hintValue]!;
@@ -856,8 +978,22 @@ function allocateOnce(s: Selection, frameRecords = false): Allocation {
     free.delete(pick);
     it.reg = pick;
     loc[it.v] = it.fp ? FP_BASE + pick : pick;
-    if (callee.has(pick)) (it.fp ? usedFp : usedGp).add(pick);
+    if (callee.has(pick) && !calleeFree) (it.fp ? usedFp : usedGp).add(pick);
     active.push(it);
+  }
+  // R30: at each cold call, what's in a register the caller doesn't need kept and live across it, a slot each value
+  const coldSaves = new Map<Instr, { loc: number; slot: number }[]>();
+  const slotOf = new Map<number, number>();
+  for (const c of coldAt) {
+    const list: { loc: number; slot: number }[] = [];
+    for (const it of intervals) {
+      if (it.reg === NONE || !(it.start < c.pos && c.pos < it.end)) continue;
+      if ((it.fp ? calleeFp : calleeGp).has(it.reg)) continue;
+      let k = slotOf.get(it.v);
+      if (k === undefined) slotOf.set(it.v, (k = slotOf.size));
+      list.push({ loc: it.fp ? FP_BASE + it.reg : it.reg, slot: k });
+    }
+    if (list.length > 0) coldSaves.set(c.ins, list);
   }
   return {
     loc,
@@ -867,5 +1003,7 @@ function allocateOnce(s: Selection, frameRecords = false): Allocation {
     hasCall,
     outArea: 0,
     loopDepth: depth,
+    coldSaves,
+    saveSlots: slotOf.size,
   };
 }
