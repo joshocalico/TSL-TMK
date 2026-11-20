@@ -125,6 +125,16 @@ export function r25Off(part: string): boolean {
   return (process.env.TMK_R25_OFF ?? "").split(",").includes(part);
 }
 
+/**
+ * R32: the one-unit string's table read with its three tests one inside the other, where they were joined by `&&`, so the
+ * block past the null test is reached by its edge alone and the table's global is read once (R31 read it into a local,
+ * which in `rc` is a counted reference, a share and a drop: slower). `TMK_R32_OFF=units` puts it back, for
+ * tools/r32-pins.ts. Never set otherwise.
+ */
+export function r32UnitsOff(): boolean {
+  return (process.env.TMK_R32_OFF ?? "").split(",").includes("units");
+}
+
 /** The string runtime's text: the two classes and the functions the printing calls in place of JsString's statics. */
 export function rcStrRuntime(key: [string, string] | null, join3 = false): string[] {
   const off = r21UnitsOff();
@@ -649,10 +659,21 @@ let jsStrUnits: JsStrUnits | null = null;
  */
 /** @tsl.inline */
 function jsStrOfUnit(u: i32): JsStr {
-  if (u >= 0 && u ${unitLimit} && jsStrUnits !== null) {
+${
+  r32UnitsOff()
+    ? `  if (u >= 0 && u ${unitLimit} && jsStrUnits !== null) {
     const s = jsStrUnits.v.get(toUsize(${unitSlot}));
     if (s !== null) return s;
-  }
+  }`
+    : `  if (u >= 0) {
+    if (u ${unitLimit}) {
+      if (jsStrUnits !== null) {
+        const s = jsStrUnits.v.get(toUsize(${unitSlot}));
+        if (s !== null) return s;
+      }
+    }
+  }`
+}
   return jsStrUnitMade(u);
 }
 

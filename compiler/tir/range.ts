@@ -17,7 +17,7 @@
 // 2^53 - 1 (D23), which is the 64-bit target's limit for checked `ix` arithmetic, and wasm32's `ix` can't pass its own.
 // So `i + k` checked, where `i + k <= n` for an `ix` value `n` read unsigned, can't fire on either.
 import { buildCfg, edgesOf, type Cfg, type Func, type Instr, type TirType } from "./ir.ts";
-import { intImm, opParts, r26Off, valueOps } from "./passes/util.ts";
+import { intImm, opParts, r26Off, r32Off, valueOps } from "./passes/util.ts";
 
 export interface Iv {
   lo: bigint;
@@ -37,9 +37,20 @@ export const IX_PORTABLE = P32 - 1n;
 /** And no `ix` result of one that passed is above this on either (SPEC 4.3). */
 const IX_CHECKED = (1n << 53n) - 1n;
 
-/** R26's injected bugs (D73's fault rule), set by the pass manager for its run: tools/r26-tests.ts. */
-let rangeFaults: { relAny?: boolean; fcmpSwap?: boolean } = {};
-export function setRangeFaults(f: { relAny?: boolean; fcmpSwap?: boolean }): void {
+/**
+ * R26's injected bugs (D73's fault rule), set by the pass manager for its run: tools/r26-tests.ts. R32's: a float's
+ * `<=` taken as `<` (`floatLe`), any float taken as an integer (`floatInt`), and a false ordered compare taken as its
+ * opposite even where the float may be NaN (`floatNaN`): tools/r32-tests.ts.
+ */
+export interface RangeFaults {
+  relAny?: boolean;
+  fcmpSwap?: boolean;
+  floatLe?: boolean;
+  floatInt?: boolean;
+  floatNaN?: boolean;
+}
+let rangeFaults: RangeFaults = {};
+export function setRangeFaults(f: RangeFaults): void {
   rangeFaults = f;
 }
 
@@ -532,9 +543,18 @@ export class Ranges {
         if (c !== null) return c !== 0n ? x : y;
         return { u: join(x.u, y.u), s: join(x.s, y.s) };
       }
+      case "fptosi": {
+        // R32: check elimination's ToInt32 of a float floatRange bounds, which saturating gives exactly there
+        if (ins.op !== "fptosi.sat.i32") return T;
+        const fr = this.floatRange(ops[0]!, at);
+        return fr !== null ? { u: iv(fr.lo, fr.hi), s: iv(fr.lo, fr.hi) } : T;
+      }
       case "js": {
         const x = this.fint.get(ops[0]!);
         if (x !== undefined && x.lo >= smin("i32") && x.hi <= smax("i32")) return { u: T.u, s: x };
+        // R32: a float the compares above this block put in a range of integers it truncates into (floatRange)
+        const fr = this.floatRange(ops[0]!, at);
+        if (fr !== null) return { u: iv(fr.lo, fr.hi), s: iv(fr.lo, fr.hi) };
         return T;
       }
       case "intrinsic": {
@@ -551,6 +571,136 @@ export class Ranges {
     const d = this.defs.get(v);
     if (d === undefined || !d.op.startsWith("iconst.")) return null;
     return intImm(d, 0);
+  }
+
+  /**
+   * R32 (SPEC 4.3): the integers `js.toint32` of the float `x` can give in block `at`, from the float compares on the edges
+   * above it: each block from `at` up the dominator tree that's reached by one edge alone, from a two-way branch whose
+   * ways differ, knows which way the branch's test went, as edgeFacts reads an integer test (a test of `c == 0` or `c != 0`
+   * read as `c`'s, the other way or the same). A compare of `x` with a float constant or with an `i32` converted
+   * (`sitofp`, exact) bounds it; `Math.trunc(x) === x` says it's an integer. NaN answers every ordered compare false and
+   * `!==` true, so a compare that held says x isn't NaN, and one that failed says its opposite only where x isn't NaN: it
+   * counts only once some compare here says so. Where x isn't NaN, is at least `lo` and at most `hi` (or below), with the
+   * integers its bounds allow from 0 to below 2^31, `js.toint32` is `Math.trunc(x)`, which for x at least 0 is its floor:
+   * from `x >= c` at least `ceil(c)` for an integer and `floor(c)` for any float, from `x > c` `floor(c) + 1` and
+   * `floor(c)`; from `x < c` at most `ceil(c) - 1`, from `x <= c` `floor(c)`. Below a converted `n`, it's at most `n - 1`,
+   * which `below` gives as a fact (`toint32(x) <= n - 1`). Null where nothing's known, or the range is empty.
+   */
+  floatRange(
+    x: number,
+    at: number,
+  ): { lo: bigint; hi: bigint; below: { n: number; c: bigint } | null } | null {
+    if (r32Off("range") || this.type(x) !== "f64") return null;
+    type Bound = { c: number | null; n: number | null; strict: boolean; nan: boolean };
+    const los: Bound[] = [];
+    const his: Bound[] = [];
+    let notNaN = false;
+    let integral = false;
+    const fconst = (v: number): number | null => {
+      const d = this.defs.get(v);
+      return d !== undefined && d.op === "fconst.f64" ? f64(intImm(d, 0)) : null;
+    };
+    const converted = (v: number): number | null => {
+      const d = this.defs.get(v);
+      if (d === undefined || d.op !== "sitofp.f64") return null;
+      const src = valueOps(d)[0]!;
+      return this.type(src) === "i32" ? src : null;
+    };
+    const truncOf = (v: number): boolean => {
+      const d = this.defs.get(v);
+      return d !== undefined && d.op === "ftrunc.f64" && valueOps(d)[0] === x;
+    };
+    for (let b: number | undefined = at, depth = 0; b !== undefined && depth < 64; depth++) {
+      const preds = this.cfg.preds[b]!;
+      const term = preds.length === 1 ? this.f.blocks[preds[0]!]!.term : null;
+      if (term !== null && term.k === "brif" && term.t.block !== term.f.block) {
+        let truth = term.t.block === this.f.blocks[b]!.id;
+        let c = term.cond;
+        for (let k = 0; k < 4; k++) {
+          const d = this.defs.get(c);
+          if (d === undefined || (d.op !== "icmp.eq.i32" && d.op !== "icmp.ne.i32")) break;
+          const [a0, b0] = valueOps(d) as [number, number];
+          if (this.constOf(b0) !== 0n) break;
+          if (d.op === "icmp.eq.i32") truth = !truth;
+          c = a0;
+        }
+        const d = this.defs.get(c);
+        const p = d !== undefined ? opParts(d.op) : [];
+        if (d !== undefined && p[0] === "fcmp" && p[2] === "f64") {
+          const [a0, b0] = valueOps(d) as [number, number];
+          let pred = p[1]!;
+          if (
+            (pred === "eq" || pred === "ne") &&
+            ((truncOf(a0) && b0 === x) || (a0 === x && truncOf(b0)))
+          ) {
+            // `Math.trunc(x) === x` held, or `!==` failed: x is an integer (or infinite), and not NaN
+            if ((pred === "eq") === truth) {
+              integral = true;
+              notNaN = true;
+            }
+          } else if (a0 === x || b0 === x) {
+            const other = a0 === x ? b0 : a0;
+            if (a0 !== x) pred = FSWAP[pred]!;
+            // what holds of x against `other`: the compare where it held, its opposite where it failed (unless NaN)
+            let rel: string | null = null;
+            let nan = false;
+            if (truth) {
+              rel = pred === "ne" ? null : pred;
+              if (pred !== "ne") notNaN = true;
+            } else if (pred === "ne") {
+              rel = "eq";
+              notNaN = true;
+            } else if (pred !== "eq") {
+              rel = FNOT[pred]!;
+              nan = true;
+            }
+            const k = fconst(other);
+            const n = k === null ? converted(other) : null;
+            if (rel !== null && (k !== null ? Number.isFinite(k) : n !== null)) {
+              const strict = rel === "lt" || rel === "gt";
+              const bd: Bound = { c: k, n, strict, nan };
+              if (rel === "lt" || rel === "le" || rel === "eq") {
+                // the injected `r32-float-le` bug: `x <= n` taken as `x < n`
+                his.push(rangeFaults.floatLe === true && n !== null ? { ...bd, strict: true } : bd);
+              }
+              if (rel === "gt" || rel === "ge" || rel === "eq")
+                los.push({ ...bd, strict: rel !== "eq" && strict });
+            }
+          }
+        }
+      }
+      const up = this.cfg.idom.get(b);
+      if (up === undefined || up === b) break;
+      b = up;
+    }
+    // the injected `r32-float-nan` bug: a failed compare's opposite taken whether or not x may be NaN
+    const holds = (bd: Bound): boolean => !bd.nan || notNaN || rangeFaults.floatNaN === true;
+    // the injected `r32-float-int` bug: every float taken as an integer
+    const isInt = integral || rangeFaults.floatInt === true;
+    let lo: bigint | null = null;
+    for (const bd of los) {
+      if (!holds(bd)) continue;
+      const c = bd.c ?? Number(this.at(bd.n!, at)!.s.lo);
+      const v = bd.strict
+        ? BigInt(Math.floor(c)) + (isInt ? 1n : 0n)
+        : BigInt(isInt ? Math.ceil(c) : Math.floor(c));
+      if (lo === null || v > lo) lo = v;
+    }
+    let hi: bigint | null = null;
+    let below: { n: number; c: bigint } | null = null;
+    for (const bd of his) {
+      if (!holds(bd)) continue;
+      let v: bigint;
+      if (bd.c !== null) v = bd.strict ? BigInt(Math.ceil(bd.c)) - 1n : BigInt(Math.floor(bd.c));
+      else {
+        v = this.at(bd.n!, at)!.s.hi - (bd.strict ? 1n : 0n);
+        if (below === null || (bd.strict && below.c === 0n))
+          below = { n: bd.n!, c: bd.strict ? -1n : 0n };
+      }
+      if (hi === null || v < hi) hi = v;
+    }
+    if (lo === null || hi === null || lo < 0n || hi > smax("i32") || lo > hi) return null;
+    return { lo, hi, below };
   }
 
   /** A compare's result where the intervals and facts decide it: 1n, 0n, or null. */
@@ -682,6 +832,7 @@ export class Ranges {
     if (term.k === "brif" && term.t.block !== term.f.block) {
       const truth = term.t.block === id;
       const own = this.refineBy(term.cond, truth, pr);
+      this.floatEdge(term.cond, at, own);
       return { own, rels: this.relsOf(term.cond, truth, pr) };
     }
     if (term.k === "switch") {
@@ -700,6 +851,40 @@ export class Ranges {
       }
     }
     return null;
+  }
+
+  /**
+   * R32: a block a float compare's edge reaches, where floatRange puts a float x at `lo` or more and below a converted i32 n
+   * (or at most it), knows n too: n is above x (or at least it), and x is at least `lo` (an integer at least `lo`, or a float
+   * at least its truncation), so n is at least `lo + 1` (or `lo`). So a signed test of ToInt32 of x against n, which reads
+   * the integers alike signed and unsigned only where neither is negative, can use the fact `toint32(x) <= n - 1`.
+   */
+  private floatEdge(cond: number, at: number, own: Map<number, Rng>): void {
+    if (r32Off("range")) return;
+    let c = cond;
+    for (let k = 0; k < 4; k++) {
+      const d = this.defs.get(c);
+      if (d === undefined || (d.op !== "icmp.eq.i32" && d.op !== "icmp.ne.i32")) break;
+      const [a0, b0] = valueOps(d) as [number, number];
+      if (this.constOf(b0) !== 0n) break;
+      c = a0;
+    }
+    const d = this.defs.get(c);
+    if (d === undefined || !d.op.startsWith("fcmp.") || !d.op.endsWith(".f64")) return;
+    for (const v of valueOps(d)) {
+      const fr = this.floatRange(v, at);
+      if (fr === null || fr.below === null) continue;
+      const n = fr.below.n;
+      const lb = fr.lo + (fr.below.c < 0n ? 1n : 0n);
+      const was = own.get(n) ?? this.at(n, at)!;
+      own.set(
+        n,
+        norm("i32", {
+          u: meet(was.u, { lo: lb, hi: smax("i32") }),
+          s: meet(was.s, { lo: lb, hi: smax("i32") }),
+        }),
+      );
+    }
   }
 
   /** A branch's test as facts `a <= b + c`. */
@@ -770,14 +955,21 @@ export class Ranges {
         fw(ops[0]!, 0n);
         bw(ops[0]!, 0n);
         break;
+      case "fptosi":
       case "js": {
+        if (b === "fptosi" && ins.op !== "fptosi.sat.i32") break;
         // js.toint32 of a converted i32 is that i32, where it's not negative (the facts read unsigned).
-        const src = this.fsrc.get(ops[0]!);
+        const src = b === "js" ? this.fsrc.get(ops[0]!) : undefined;
         const x = src !== undefined ? this.val.get(src) : undefined;
         if (src !== undefined && x !== undefined && x.s.lo >= 0n) {
           fw(src, 0n);
           bw(src, 0n);
         }
+        // R32: of a float below a converted i32 `n` (or at most it) by the compares above where it's made, and not below 0,
+        // it's at most n - 1 (or n): a fact wherever the result is, as it's only where its definition is
+        const db = this.defBlock.get(v);
+        const fr = db !== undefined ? this.floatRange(ops[0]!, db) : null;
+        if (fr !== null && fr.below !== null) fw(fr.below.n, fr.below.c);
         break;
       }
       case "trunc":
@@ -996,6 +1188,18 @@ const NEGATE: Record<string, string> = {
   sgt: "sle",
   sge: "slt",
 };
+
+/** A float compare with its operands the other way round (R32). */
+const FSWAP: Record<string, string> = {
+  lt: "gt",
+  le: "ge",
+  gt: "lt",
+  ge: "le",
+  eq: "eq",
+  ne: "ne",
+};
+/** What an ordered float compare's failing says where neither operand is NaN (R32). */
+const FNOT: Record<string, string> = { lt: "ge", le: "gt", gt: "le", ge: "lt" };
 
 function notPoint(x: Iv, k: bigint): Iv {
   if (x.lo === k && x.hi > k) return { lo: k + 1n, hi: x.hi };

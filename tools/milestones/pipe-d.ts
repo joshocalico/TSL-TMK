@@ -3003,6 +3003,45 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     });
   });
 
+  // 83. R32: range.ts's facts from a float compare's edge, `s[x]` and the one-unit table read printed nested in `rc`, and
+  // freeAlloc's tests in a new order.
+  M.unit("83", async () => {
+    const R32 = timedModule("r32", await import("../r32-tests.ts"));
+    const failures: string[] = [];
+    const sh = await R32.r32Shapes();
+    failures.push(...sh.failures);
+    const d = await R32.r32Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of corpus/lower/r32 ran");
+    const st = await R32.r32Steps(accel, jobs);
+    failures.push(...st.failures);
+    if (st.cases === 0) failures.push("no case of corpus/rc's rc_steps programs ran");
+    report({
+      box: "83. R32 (3.5, 4.3, 4.5, D39, D44, D73): range.ts's facts from a float compare's edge (a float not NaN, at least 0 and below a converted i32 n or a constant makes its ToInt32 that range, below n a fact `toint32(x) <= n - 1`), so check elimination takes a unit read's test of its index against the length by proof and makes the ToInt32 the saturating conversion; class printing's `s[x]` in `rc` as three tests one inside the other, and the one-unit string's table read the same, and a string literal read where it's used rather than held in a counted temporary; @tsl/gc's freeAlloc testing a one-slot object's ways in two tests: r32_index.ts's scan through the TSL route in rc at -O2 with a saturating ToInt32 and fewer index tests, and with R32 off (TMK_R32_OFF=range,index,units,stable) none and more; corpus/lower/r32 through the dual route with class printing forced in rc and leak at -O0, -O1 and -O2; corpus/rc's rc_steps programs natively in rc (tools/r32-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${sh.rows.join("; ")}; dual ${d.agreed}/${d.cases}; rc_steps ${st.agreed}/${st.cases}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 84. R32's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("84", async () => {
+    const R32 = timedModule("r32", await import("../r32-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R32.R32_FAULTS) {
+      const x = await R32.r32Fault(f, accel, jobs);
+      rows.push(`${f.name}: ${caughtText(x)}`);
+      if (x.caught === 0) failures.push(`${f.name} wasn't caught: ${x.first}`);
+    }
+    report({
+      box: `84. R32: each of ${R32.R32_FAULTS.length} bugs is caught by a wrong answer or a trap, with how many cases caught it: range.ts taking a float's \`x <= n\` as \`x < n\`, every float as an integer, or a failed compare's opposite where the float may be NaN, and check elimination making every ToInt32 the saturating conversion, each over corpus/lower/r32 and corpus/lower/r26 through the dual route at -O2 in rc and leak; \`s[x]\` printed with the length taken as in range, and any module state's read taken as a literal's (read after a later operand that assigns it), each over corpus/lower/r32 in rc at -O1 and -O2; freeAlloc taking an object of two slots as one of one, so its second slot is never visited, over corpus/rc's rc_steps programs natively and corpus/lower/r32, r25 and r24 through the dual route at -O2; against V8 (tools/r32-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
   M.vms(
     "8",
     "8. No QEMU process of this run is left, and the owner's UTM and QEMU processes were only observed",

@@ -298,6 +298,12 @@ export async function registeredFaults(): Promise<RegisteredFault[]> {
   for (const f of R31.R31_FAULTS) {
     if (f.patch !== undefined) patchOf("r31-tests R31_FAULTS", f, f.patch);
   }
+  const R32 = await import("./r32-tests.ts");
+  for (const f of R32.R32_FAULTS) {
+    if (f.patch !== undefined) patchOf("r32-tests R32_FAULTS", f, f.patch);
+    if (f.emit !== undefined) hookOf("r32-tests R32_FAULTS", f, "TMK_TEST_EMIT", f.emit);
+    if (f.optFault !== undefined) hookOf("r32-tests R32_FAULTS", f, "TMK_OPT_FAULT", f.optFault);
+  }
   const R28 = await import("./r28-tests.ts");
   for (const f of R28.R28_FAULTS) {
     if (f.patch !== undefined) patchOf("r28-tests R28_FAULTS", f, f.patch);

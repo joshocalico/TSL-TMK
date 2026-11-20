@@ -382,6 +382,17 @@ async function faultSteps(
   const engines = defaultEngines();
   return [
     {
+      // R32: range.ts's facts from a float compare's edge and check elimination's saturating ToInt32 (checks.ts), on R32's
+      // program through both routes in rc and leak at -O1 and -O2, against V8 (seconds, so first: R32's bugs are caught
+      // here, and so may an earlier bug be, which changes only which step names it).
+      name: "R32's program through both routes at -O1 and -O2 (corpus/lower/r32, tools/r32-tests.ts)",
+      run: async () => {
+        const R32 = await import("./r32-tests.ts");
+        const d = await R32.r32Dual([accel], jobs, [1, 2], false, undefined, ["rc", "leak"]);
+        return d.failures.length === 0 && d.cases > 0;
+      },
+    },
+    {
       // R30: scalar replacement's copy out of a frame slot (sroa.ts) and values split around cold calls (regalloc.ts), on
       // R30's TSL programs natively at -O1 and -O2, against V8 (seconds, so first: R30's bugs are caught here, and so may an
       // earlier bug be, which changes only which step names it).

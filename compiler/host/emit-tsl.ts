@@ -7,7 +7,7 @@
 // What isn't printable yet throws EmitUnsupported with what it was, and that program stays on the direct route.
 import { dirname, relative } from "node:path";
 import type { Global } from "../tir/ir.ts";
-import { r26Off } from "../tir/passes/util.ts";
+import { r26Off, r32Off } from "../tir/passes/util.ts";
 import type { Desc, DownMeta, DownResult } from "./down.ts";
 import ts from "typescript";
 import {
@@ -3999,7 +3999,7 @@ class Emitter {
     const tail = this.classes ? this.deadTail(f) : null;
     // the injected `dead-tail-live` bug: the live return before the dead one left out with it
     const cut = tail === null ? 0 : this.fault === "dead-tail-live" ? 2 : 1;
-    const codeAt = this.intCodeAt(f);
+    const codeAt = this.intCodeAt(f) ?? this.nestedIndex(f);
     if (codeAt !== null) this.body.push(...codeAt);
     else this.stmts(cut > 0 ? f.body.slice(0, -cut) : f.body);
     // The string literals (D67), made first thing, before anything can read one.
@@ -4064,6 +4064,39 @@ class Emitter {
       `    return cast<f64>(NaN);`,
       `  }`,
       `  return toF64(${sn}.unit(cast<usize>(${xn}, "usize")));`,
+    ];
+  }
+
+  /**
+   * R32: in `rc`, compiler/rt's `strIndex` (`s[x]`) where the lowering gave it a float index, printed as three tests one
+   * inside the other where compiler/rt joins their opposites by `||`: `x >= 0`, then `x < length`, then `Math.trunc(x) ===
+   * x`, the unit's string where all three hold and null otherwise. The same answers: `!(x >= 0) || x >= n || t !== x` is
+   * false exactly where `x >= 0 && !(x >= n) && t === x`, and past `x >= 0` x isn't NaN, so `!(x >= n)` is `x < n`. Each
+   * block past a test is then reached by that test's edge alone, so range.ts's facts from a float compare's edge reach the
+   * unit read (its own test of the index against the length goes, by proof), and the length's two loads are one. Null
+   * where the index isn't a float, and it prints as compiler/rt has it. `TMK_R32_OFF=index` puts it back, for
+   * tools/r32-pins.ts.
+   */
+  nestedIndex(f: FuncInst): string[] | null {
+    if (!this.rc || !this.strs || r32Off("index")) return null;
+    if (!f.key.includes("/compiler/rt/str.ts") || !/^strIndex(\$\d+)?$/.test(f.tirName))
+      return null;
+    const [s, x] = f.params;
+    if (s === undefined || x === undefined || f.params.length !== 2) return null;
+    if (this.varTy(x) !== "f64") return null;
+    const sn = this.varName(s);
+    const xn = this.varName(x);
+    // the injected `r32-index-le` bug: the length itself taken as in range
+    const below = this.fault === "r32-index-le" ? "<=" : "<";
+    return [
+      `  if ((${xn} >= 0)) {`,
+      `    if ((${xn} ${below} toF64(${sn}.len()))) {`,
+      `      if ((Math.trunc(${xn}) === ${xn})) {`,
+      `        return jsStrOfUnit(${sn}.unit(cast<usize>((${xn} | 0), "usize")));`,
+      `      }`,
+      `    }`,
+      `  }`,
+      `  return null;`,
     ];
   }
 
@@ -4845,7 +4878,22 @@ class Emitter {
    * expansion has no copy to count.
    */
   rcStable(te: TE, later: TE[]): boolean {
-    if (!this.rc || te.k !== "var") return false;
+    if (!this.rc) return false;
+    // R32: a string literal, module state `__init` sets first thing and nothing assigns again, is the same reference after
+    // anything a later operand does, so it's read where it's used, with no temporary for the expansion to count
+    // (`TMK_R32_OFF=stable` puts the temporary back, for tools/r32-pins.ts)
+    if (
+      this.strs &&
+      !r32Off("stable") &&
+      te.k === "gaddr" &&
+      /^__strlit_\d+$/.test(te.name) &&
+      te.off === 16
+    )
+      return true;
+    // the injected `r32-stable-global` bug: any module state's read taken as stable, though a later operand may assign it
+    if (this.fault === "r32-stable-global" && te.k === "fload" && te.glob !== undefined)
+      return true;
+    if (te.k !== "var") return false;
     let assigned = false;
     eachTE(later, (x) => {
       if (x.k === "setvar" && x.v === te.v) assigned = true;

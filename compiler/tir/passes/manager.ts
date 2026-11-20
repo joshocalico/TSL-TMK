@@ -118,6 +118,10 @@ export const OPT_FAULTS = [
   "r30-split-norestore", // a value split around a cold call is stored before it but never loaded back after (R30)
   "r30-split-save-late", // a value split around a cold call is stored after the call's arguments are moved, not before (R30)
   "r30-split-callee-free", // a value across cold calls only takes a callee-saved register the prologue doesn't save (R30)
+  "r32-float-le", // range.ts takes a float's `x <= n` (n a converted i32) as `x < n`, so ToInt32 of it as below n (R32)
+  "r32-float-int", // range.ts takes every float as an integer, so `x > 0` puts its ToInt32 at 1 or more (R32)
+  "r32-float-nan", // range.ts takes a failed ordered float compare's opposite whether or not x may be NaN (R32)
+  "r32-sat-any", // check elimination makes every js.toint32 the saturating conversion, proved in range or not (R32)
 ] as const;
 
 export interface OptOptions {
@@ -272,6 +276,9 @@ export function optimizeModule(
   setRangeFaults({
     relAny: faults.has("r26-rel-any"),
     fcmpSwap: faults.has("r26-fcmp-swap"),
+    floatLe: faults.has("r32-float-le"),
+    floatInt: faults.has("r32-float-int"),
+    floatNaN: faults.has("r32-float-nan"),
   });
   // R27: memory.ts's injected bugs, read by every pass this run asks what a write may change
   setSepFaults({
@@ -418,6 +425,7 @@ export function optimizeModule(
     const checkFaults = {
       dropBounds: faults.has("checks-drop-bounds"),
       offByOne: faults.has("checks-off-by-one"),
+      satAny: faults.has("r32-sat-any"),
     };
     // Check elimination is -O2's: its range analysis goes round loops to a fixpoint, which -O1, the fast level, doesn't
     // spend (D44; -O1's compile time is gated at 1.25 times -O0's, opt-a box 6).

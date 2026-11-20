@@ -717,16 +717,18 @@ function freeAlloc(n: usize): u64 {
       spare = 0n;
       stepping = false;
       if (s !== 0) {
-        if (s > 1 && left !== 0n) {
-          // the rest of its slots (freeRest), out of line, so the common one-slot object keeps a small frame
-          left = freeRest(head, entry, s, left);
-          if (cur !== 0n) break;
-        } else if (s > 1 || left === 0n) {
-          // the cursor left where freeFlat leaves it, at slot 1, for the next freeing to take on
+        // R32: no step left, whatever its slots: the cursor left where freeFlat leaves it, at slot 1, for the next freeing
+        // to take on; then the rest of its slots if it has more (freeRest), out of line, so the common one-slot object
+        // keeps a small frame (R24's three ways, tested in the order that takes a one-slot object through in two tests)
+        if (left === 0n) {
           cur = head;
           at = 1;
           slots = s;
           break;
+        }
+        if (s > 1) {
+          left = freeRest(head, entry, s, left);
+          if (cur !== 0n) break;
         }
         left = BigInt.asUintN(64, left - 1n); // every slot visited: giving its block back, a step of its own
       }

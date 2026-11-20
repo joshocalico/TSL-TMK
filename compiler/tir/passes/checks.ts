@@ -13,7 +13,7 @@
 // Divisions keep their checks: TIR has no division without one.
 import type { Func, Instr, TirType } from "../ir.ts";
 import { IX_PORTABLE, isTracked, Ranges } from "../range.ts";
-import { opParts, substitute, valueOps } from "./util.ts";
+import { opParts, r32Off, substitute, valueOps } from "./util.ts";
 
 export interface ChecksStats {
   overflow: number; // checked arithmetic made plain
@@ -27,6 +27,8 @@ export interface ChecksFaults {
   dropBounds?: boolean;
   /** Injected (D73): a result proved at most one past the type's limit is taken for in range. */
   offByOne?: boolean;
+  /** Injected (R32): every `js.toint32` made the saturating conversion, whether its float is proved in range or not. */
+  satAny?: boolean;
 }
 
 const W: Record<string, number> = { i8: 8, i16: 16, i32: 32, i64: 64 };
@@ -97,7 +99,18 @@ export function checksFunc(f: Func, stats: ChecksStats, faults: ChecksFaults = {
       } else if (ins.op === "js.toint32") {
         // An i32 converted to a float and back, through roundings that change nothing, is that i32.
         const src = R.intSource(ops[0]!);
-        if (src === null) continue;
+        if (src === null) {
+          // R32: a float the compares above put in [0, 2^31) (range.ts's floatRange: not NaN, at least 0, below a
+          // converted i32 or a constant): its ToInt32 is its truncation, which the saturating conversion gives exactly, as
+          // it never saturates there; so the slow way for a float out of range is never taken, and goes
+          // the injected `r32-sat-any` bug: every one made the saturating conversion, proved or not
+          if (faults.satAny !== true && (r32Off("range") || R.floatRange(ops[0]!, pos) === null))
+            continue;
+          ins.op = "fptosi.sat.i32";
+          stats.compares++;
+          changed = true;
+          continue;
+        }
         subst.set(ins.res[0]!, src);
         removed.add(ins);
         stats.compares++;

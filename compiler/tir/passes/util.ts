@@ -355,6 +355,16 @@ export function r26Off(part: string): boolean {
   return (process.env.TMK_R26_OFF ?? "").split(",").includes(part);
 }
 
+/**
+ * R32's parts put back as they were, for tools/r32-pins.ts (`TMK_R32_OFF`, a comma-separated list): `range` (range.ts's
+ * facts from a float compare's edge, so `js.toint32` of a float known in `[0, n)` is too), `index` (class printing's
+ * `s[x]` in `rc` as compiler/rt has it, one test joined by `||`), `stable` (a string literal ahead of a later operand's
+ * statements held in a temporary, as before); `units` is emit-rcstr.ts's (r32UnitsOff). Never set otherwise.
+ */
+export function r32Off(part: string): boolean {
+  return (process.env.TMK_R32_OFF ?? "").split(",").includes(part);
+}
+
 /** R28's parts turned off, a measurement only (`TMK_R28_OFF=grow`, say). */
 export function r28Off(part: string): boolean {
   return (process.env.TMK_R28_OFF ?? "").split(",").includes(part);

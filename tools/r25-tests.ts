@@ -59,10 +59,12 @@ export const R25_FAULTS: {
   {
     name: "r25-last-step",
     what: "freeAlloc, with one step left, going on to an object's block after slot 0 where the budget ran out, so the budget wraps and an allocation frees everything",
+    // R32: freeAlloc tests its ways in a new order (no step left first), so the bug is that test taking only an object of
+    // more slots: the same bug, at the line that now decides it
     patch: {
       file: RC,
-      from: "        } else if (s > 1 || left === 0n) {",
-      to: "        } else if (s > 1) {",
+      from: "        if (left === 0n) {\n          cur = head;\n          at = 1;\n          slots = s;\n          break;\n        }\n        if (s > 1) {",
+      to: "        if (left === 0n && s > 1) {\n          cur = head;\n          at = 1;\n          slots = s;\n          break;\n        }\n        if (s > 1) {",
     },
   },
   {
