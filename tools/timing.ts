@@ -127,6 +127,12 @@ function describeArg(a: unknown): string | null {
         .map(([k, v]) => `${k}:${describeArg(v) ?? "?"}`)
         .join(",")}}`;
     }
+    // A compiler's module that says which program it is (TypedModule's repo-relative `file`): named by that, so a suite
+    // per compile is one per program. Without it every compile of a level shared one name, and since a fast one isn't
+    // kept (run, below), which programs' counts a run kept depended on time: two runs of the same tree kept different
+    // programs under the same name and `tmk gate --sample` couldn't compare them (opt-a box 4's compileTyped at -O0).
+    const file = (a as { file?: unknown }).file;
+    if (typeof file === "string" && file !== "") return file;
   }
   return null;
 }

@@ -137,3 +137,38 @@ test("a speed box is compared by the decisions it asserts, not by its measuremen
   // And a box with no decisions listed is compared as before.
   assert.equal(decisionsByKey("pipe-d/3@unset"), null);
 });
+
+// opt-a box 4 in R34's sample (2026-11-21): every -O0 compileTyped was one suite name, and a compile under 50 ms isn't kept
+// (timing.ts), so the gate kept js_map.ts's string table and the sample ergo_alloc.ts's under that one name: neither list a
+// part of the other. A compile is named by its program, so what two runs both kept is the same program's.
+test("a compile's suite is named by its program, so runs that kept different programs compare those both kept", async () => {
+  const { startMilestone, timedFn } = await import("./timing.ts");
+  const rec = startMilestone("t", [0], 1);
+  const compile = timedFn(
+    "tslc.compileTyped",
+    (m: { file: string; strings: Map<string, number> }, _o: { opt: number }) => {
+      const t = performance.now();
+      while (performance.now() - t < 60); // over the 50 ms a synchronous suite needs to be kept
+      return { meta: { exports: {}, strings: Object.fromEntries(m.strings) } };
+    },
+  );
+  compile({ file: "corpus/std/leak/js_map.ts", strings: new Map([["héllo", 1]]) }, { opt: 0 });
+  rec.closeBox("4");
+  const kept = rec.finish().boxes[0]!.suites;
+  assert.deepEqual(
+    kept.map((s) => s.name),
+    ['tslc.compileTyped(corpus/std/leak/js_map.ts, {"opt":0})'],
+  );
+  assert.deepEqual(kept[0]!.counts, { "meta.strings.héllo": 1 });
+  const s = (file: string, counts: Record<string, number>) => ({
+    name: `tslc.compileTyped(${file}, {"opt":0})`,
+    counts,
+  });
+  const shared = s("corpus/std/std_new_safety.ts", { "meta.strings.abc": 4 });
+  const gate = [s("corpus/std/leak/js_map.ts", { "meta.strings.héllo": 3 }), shared];
+  const sample = [s("corpus/std/ergo_alloc.ts", { "meta.strings.the quick brown fox": 1 }), shared];
+  assert.deepEqual(suiteCountDiffs(gate, sample), []);
+  // the same program's table changed still differs
+  const changed = [s("corpus/std/std_new_safety.ts", { "meta.strings.abd": 4 })];
+  assert.equal(suiteCountDiffs(gate, changed).length, 1);
+});
