@@ -37,6 +37,7 @@ export const RC_STR_NAMES = [
   "jsStrOfUnits",
   "jsStrOfUnit",
   "jsStrUnitMade",
+  "jsStrUnitNew",
   "JsStrUnits",
   "jsStrUnits",
   "jsStrJoined",
@@ -133,6 +134,23 @@ export function r25Off(part: string): boolean {
  */
 export function r32UnitsOff(): boolean {
   return (process.env.TMK_R32_OFF ?? "").split(",").includes("units");
+}
+
+/**
+ * R35: a one-unit string past the table (a unit of 256 or more, or below 0) made in line where it's asked for, as the
+ * direct route's strChar makes it, where it was `jsStrUnitMade`'s call; only a unit below 256 the table hasn't got yet goes
+ * out of line. `TMK_R35_OFF=units` puts it back, for tools/r35-pins.ts. Never set otherwise.
+ */
+export function r35UnitsOff(): boolean {
+  return (process.env.TMK_R35_OFF ?? "").split(",").includes("units");
+}
+
+/**
+ * R35: jsStrJoined puts b's units after a's run at that run's length, where it converted a's length (checked) for it.
+ * `TMK_R35_OFF=joined` puts it back, for tools/r35-pins.ts. Never set otherwise.
+ */
+function r35Off(part: string): boolean {
+  return (process.env.TMK_R35_OFF ?? "").split(",").includes(part);
 }
 
 /** The string runtime's text: the two classes and the functions the printing calls in place of JsString's statics. */
@@ -564,8 +582,15 @@ function jsStrView(b: JsStrBuf, start: i32, n: i32, hw: i32): JsStr {
 /** a's units then b's, n in all, copied into a flat string made by concatenation. */
 function jsStrJoined(a: JsStr, b: JsStr, n: i32): JsStr {
   const r = jsStrZeroed(n);
-  r.units.set(a.all(), 0);
-  r.units.set(b.all(), toUsize(a.n));
+${
+  r35Off("joined")
+    ? `  r.units.set(a.all(), 0);
+  r.units.set(b.all(), toUsize(a.n));`
+    : `  // R35: b's units go after a's run, whose length is a's own: no conversion of a's length to check
+  const ua = a.all();
+  r.units.set(ua, 0);
+  r.units.set(b.all(), ua.length);`
+}
   r.hw = 2;
   return r;
 }
@@ -578,10 +603,19 @@ ${
  */
 function jsStrJoined3(a: JsStr, b: JsStr, c: JsStr, n: i32): JsStr {
   const r = jsStrZeroed(n);
-  const la = toUsize(a.n);
+${
+  r35Off("joined")
+    ? `  const la = toUsize(a.n);
   r.units.set(a.all(), 0);
   r.units.set(b.all(), la);
-  r.units.set(c.all(), la + toUsize(b.n));
+  r.units.set(c.all(), la + toUsize(b.n));`
+    : `  // R35: each part's units go after the runs before them, at their lengths: no conversion of a length to check
+  const ua = a.all();
+  const ub = b.all();
+  r.units.set(ua, 0);
+  r.units.set(ub, ua.length);
+  r.units.set(c.all(), ua.length + ${fault() === "r35-joined3-offset" ? "ua" : "ub"}.length);`
+}
   r.hw = 2;
   return r;
 }
@@ -655,29 +689,59 @@ let jsStrUnits: JsStrUnits | null = null;
 
 /**
  * The string of one unit: below 256 the table's, else a new one. Inlined: the table's hit is a checked read and the
- * string's count; anything else is \`jsStrUnitMade\`'s, out of line.
+ * string's count; anything else is \`jsStrUnitMade\`'s, out of line.${
+   r35UnitsOff()
+     ? ""
+     : "\n * R35: a unit past the table is a string made here, as the direct route's strChar makes it."
+ }
  */
 /** @tsl.inline */
 function jsStrOfUnit(u: i32): JsStr {
 ${
-  r32UnitsOff()
-    ? `  if (u >= 0 && u ${unitLimit} && jsStrUnits !== null) {
+  !r35UnitsOff() && !r32UnitsOff()
+    ? `  if (u >= 0) {
+    if (u ${unitLimit}) {
+      if (jsStrUnits !== null) {
+        const s = jsStrUnits.v.get(toUsize(${unitSlot}));
+        if (s !== null) return s;
+      }
+      return jsStrUnitMade(u);
+    }
+  }
+  // R35: past the table, a new one, as the direct route's strChar makes it
+  return jsStrUnitNew(u);`
+    : r32UnitsOff()
+      ? `  if (u >= 0 && u ${unitLimit} && jsStrUnits !== null) {
     const s = jsStrUnits.v.get(toUsize(${unitSlot}));
     if (s !== null) return s;
-  }`
-    : `  if (u >= 0) {
+  }
+  return jsStrUnitMade(u);`
+      : `  if (u >= 0) {
     if (u ${unitLimit}) {
       if (jsStrUnits !== null) {
         const s = jsStrUnits.v.get(toUsize(${unitSlot}));
         if (s !== null) return s;
       }
     }
-  }`
+  }
+  return jsStrUnitMade(u);`
 }
-  return jsStrUnitMade(u);
 }
 
-/**
+${
+  r35UnitsOff()
+    ? ""
+    : `/**
+ * R35: a new string of the one unit u, for a unit past the table: made with its length known, so its size class is worked
+ * out when it's compiled and its one unit's write needs no test of the length it was just made with.
+ */
+function jsStrUnitNew(u: i32): JsStr {
+  const s = withTail(1, new JsStr(${r24Off("strings") ? "1" : "1, 0, null, 0"}));
+${fault() === "r35-unit-unwritten" ? "" : "  s.put(0, u);\n"}  return s;
+}
+
+`
+}/**
  * The string of unit u that the table hasn't got: below 256 made and kept by the table (and the table made, the first
  * time), else made. Out of line.
  */

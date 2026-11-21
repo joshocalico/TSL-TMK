@@ -30,7 +30,7 @@ import { versionFunc, type VersionStats } from "./version.ts";
 import { simplifyFunc, type FoldFaults, type SimplifyStats } from "./simplify.ts";
 import { r30Off, sroaFunc, type SroaStats } from "./sroa.ts";
 import { removeUnreached, type UnreachedStats } from "./unreached.ts";
-import { cloneModule, r26Off, r28Off } from "./util.ts";
+import { cloneModule, r26Off, r28Off, r35Off } from "./util.ts";
 
 export type { OptLevel, Remark } from "./inline.ts";
 
@@ -122,6 +122,8 @@ export const OPT_FAULTS = [
   "r32-float-int", // range.ts takes every float as an integer, so `x > 0` puts its ToInt32 at 1 or more (R32)
   "r32-float-nan", // range.ts takes a failed ordered float compare's opposite whether or not x may be NaN (R32)
   "r32-sat-any", // check elimination makes every js.toint32 the saturating conversion, proved in range or not (R32)
+  "r35-round-header", // -O1's one round takes a loop header's parameter from its edges before the loop alone (R35)
+  "r35-save-block-only", // a value split around a cold call is saved only where its block reads it after the call (R35)
 ] as const;
 
 export interface OptOptions {
@@ -279,6 +281,7 @@ export function optimizeModule(
     floatLe: faults.has("r32-float-le"),
     floatInt: faults.has("r32-float-int"),
     floatNaN: faults.has("r32-float-nan"),
+    roundHeader: faults.has("r35-round-header"),
   });
   // R27: memory.ts's injected bugs, read by every pass this run asks what a write may change
   setSepFaults({
@@ -427,11 +430,12 @@ export function optimizeModule(
       offByOne: faults.has("checks-off-by-one"),
       satAny: faults.has("r32-sat-any"),
     };
-    // Check elimination is -O2's: its range analysis goes round loops to a fixpoint, which -O1, the fast level, doesn't
-    // spend (D44; -O1's compile time is gated at 1.25 times -O0's, opt-a box 6).
+    // Check elimination's range analysis goes round loops to a fixpoint at -O2. R35: -O1, the fast level, takes it in one
+    // round, a loop header's parameters taken as anything (range.ts's oneRound), so no going round and no widening (D44;
+    // -O1's compile time is gated at 1.25 times -O0's, opt-a box 6). `TMK_R35_OFF=checks` leaves -O1 without it, as before.
     const checks = (f: Func): boolean => {
-      if (off.has("checks") || o.level < 2) return false;
-      const c = checksFunc(f, report.checks, checkFaults);
+      if (off.has("checks") || o.level < 1 || (o.level === 1 && r35Off("checks"))) return false;
+      const c = checksFunc(f, report.checks, checkFaults, o.level === 1);
       if (c) verify("checks", f);
       return c;
     };
@@ -493,14 +497,19 @@ export function optimizeModule(
         // -O1: value numbering and LICM once each, then one cleanup. -O2: check elimination too, what moved out is shared
         // again, and loops are copied (below).
         let c = gvn(f);
-        if (checks(f)) c = true;
+        // R35: at -O1 a compare check elimination decided is a constant a branch tests, which branch folding takes away
+        // with the trap behind it, as after loopbounds and conds below
+        let folded = false;
+        if (checks(f)) {
+          c = true;
+          if (o.level === 1) folded = true;
+        }
         if (licm(f)) {
           c = true;
           if (o.level >= 2) gvn(f);
         }
         // -O1: after LICM has moved a loop's length load out, a check its test proves goes, and the trap it branched to
         // is unreached (branch folding removes it).
-        let folded = false;
         if (loopBounds(f)) {
           c = true;
           folded = true;

@@ -3126,6 +3126,45 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     });
   });
 
+  // 89. R35: -O1's check elimination in one round, the backend's saves around cold calls by what's live after them, and
+  // strings' one-unit makes and short joins in rc.
+  M.unit("89", async () => {
+    const R35 = timedModule("r35", await import("../r35-tests.ts"));
+    const failures: string[] = [];
+    const sh = await R35.r35Shapes();
+    failures.push(...sh.failures);
+    const n = await R35.r35Native(accel, jobs);
+    failures.push(...n.failures);
+    if (n.cases === 0) failures.push("no case of corpus/r35 ran");
+    const d = await R35.r35Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of corpus/lower/r35 ran");
+    report({
+      box: "89. R35 (4.3, 4.4, 3.5, D44, D80): -O1 eliminates checks by range.ts in one round, a loop header's parameters taken as anything their type allows, so no going round and no widening; the backend stores a value around a cold call and loads it back only where it's live after the call (read later in its block, or live out of it); class printing in rc makes a one-unit string past the table in line, its length known (`jsStrUnitNew`), and copies a short join's parts at the runs' lengths: r35_round.ts's `bounded` at -O1 has no checked operation, and with R35 off (TMK_R35_OFF=checks) has; r35_units.ts through the TSL route in rc at -O1 reads `scan`'s units with a saturating ToInt32 and fewer index tests, and its jsStrZeroed has fewer checked operations, than with R35 off; it has a `jsStrUnitNew`, and with TMK_R35_OFF=units none; its `JsStr.concat` at -O2 stores and loads fewer values around calls than with TMK_R35_OFF=saves; corpus/r35 natively at -O0, -O1 and -O2 against V8 and JSC; corpus/lower/r35 through the dual route with class printing forced in rc and leak at -O0, -O1 and -O2 (tools/r35-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${sh.rows.join("; ")}; native ${n.agreed}/${n.cases}; dual ${d.agreed}/${d.cases}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 90. R35's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("90", async () => {
+    const R35 = timedModule("r35", await import("../r35-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R35.R35_FAULTS) {
+      const x = await R35.r35Fault(f, accel, jobs);
+      rows.push(`${f.name}: ${caughtText(x)}`);
+      if (x.caught === 0) failures.push(`${f.name} wasn't caught: ${x.first}`);
+    }
+    report({
+      box: `90. R35: each of ${R35.R35_FAULTS.length} bugs is caught by a wrong answer or a trap, with how many cases caught it: -O1's one round taking a loop header's parameter from the edges before the loop alone; the backend taking a value as live after a cold call only where the call's block reads it; \`jsStrUnitNew\` leaving its unit unwritten; \`jsStrJoined3\` copying the third part after twice the first's run; the optimiser's and backend's over corpus/r35 natively and corpus/lower/r35 through the dual route in rc at their levels, the printing's over corpus/lower/r35 in rc at -O1 and -O2; against V8 (tools/r35-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
   M.vms(
     "8",
     "8. No QEMU process of this run is left, and the owner's UTM and QEMU processes were only observed",

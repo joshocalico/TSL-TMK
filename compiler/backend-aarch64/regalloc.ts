@@ -12,6 +12,10 @@
 // kept, which is stored to a slot of its own just before each such call and loaded back just after; so the way through
 // that calls nothing needs no callee-saved register for it, and the prologue saves fewer. A value live across any other
 // call still takes a callee-saved register, as before.
+//
+// R35: a value is stored before a cold call and loaded back after it only where it's live after it: read later in the
+// call's block or live out of it. An interval has no holes, so it can span a cold call on a way through the function that
+// never reads it again (`concat`'s short way, whose call is its last word, spanned the long ways' values).
 import { buildCfg, edgesOf, type Func, type Instr, type TirType } from "../tir/ir.ts";
 import { type MemOp, memImmOk } from "./encode.ts";
 
@@ -397,6 +401,8 @@ export interface Allocation {
 export interface ColdSplit {
   /** `r30-split-callee-free`: a callee-saved register taken for a value across cold calls only, and not saved */
   calleeFree: boolean;
+  /** R35's `r35-save-block-only`: a value taken as live after a cold call only where its block reads it later */
+  blockOnly?: boolean;
 }
 
 interface Interval {
@@ -712,6 +718,42 @@ export function r31Off(part: string): boolean {
   return (globalThis.process?.env?.TMK_R31_OFF ?? "").split(",").includes(part);
 }
 
+/**
+ * R35's backend part put back as R30 had it, for tools/r35-pins.ts' timing (`TMK_R35_OFF=saves`): every value whose interval
+ * spans a cold call saved around it. Machine code only.
+ */
+export function r35Off(part: string): boolean {
+  return (globalThis.process?.env?.TMK_R35_OFF ?? "").split(",").includes(part);
+}
+
+/**
+ * R35: the values read after `call` in its block (by later instructions, the block's last word and its edges' arguments),
+ * as the allocator names them: what of a cold call's saves is needed past it, with what's live out of the block.
+ */
+function liveAfter(s: Selection, b: Func["blocks"][number], call: Instr): Set<number> {
+  const out = new Set<number>();
+  const tmp: number[] = [];
+  let past = false;
+  for (const ins of b.instrs) {
+    if (ins === call) {
+      past = true;
+      continue;
+    }
+    if (!past || skipInstr(s, ins)) continue;
+    tmp.length = 0;
+    regUses(s, ins, tmp);
+    for (const v of tmp) out.add(v);
+  }
+  tmp.length = 0;
+  const t = b.term;
+  if (t.k === "brif") addUse(s, t.cond, tmp);
+  if (t.k === "switch") addUse(s, t.val, tmp);
+  if (t.k === "ret") for (const v of t.vals) addUse(s, v, tmp);
+  for (const e of edgesOf(t)) for (const a of e.args) addUse(s, a, tmp);
+  for (const v of tmp) out.add(v);
+  return out;
+}
+
 /** `trap.code`: a call as far as registers go, but it never comes back, so nothing needs to be kept across it. */
 function neverReturns(ins: Instr): boolean {
   const n = ins.ops[0];
@@ -741,7 +783,7 @@ function allocateOnce0(
   const end = new Int32Array(n).fill(-1);
   const uses = new Float64Array(n);
   const callPos: number[] = [];
-  const coldAt: { pos: number; ins: Instr }[] = []; // R30: cold calls, in order
+  const coldAt: { pos: number; ins: Instr; bi: number }[] = []; // R30: cold calls, in order (R35: and their blocks)
   const depth = loopDepths(f);
   const hint = new Int32Array(n).fill(NONE);
   const hintValue = new Int32Array(n).fill(NONE);
@@ -791,7 +833,7 @@ function allocateOnce0(
         // around cold calls, a cold call's place is noted apart, and trap.code's not at all.
         hasCall = true;
         if (cold !== null && cold.has(ins)) {
-          if (!neverReturns(ins)) coldAt.push({ pos, ins });
+          if (!neverReturns(ins)) coldAt.push({ pos, ins, bi });
         } else if (cold === null || !neverReturns(ins)) callPos.push(pos);
         const argVals: number[] = [];
         for (const o of ins.ops) if (o.t === "v") argVals.push(s.alias[o.id]!);
@@ -998,10 +1040,25 @@ function allocateOnce0(
   // R30: at each cold call, what's in a register the caller doesn't need kept and live across it, a slot each value
   const coldSaves = new Map<Instr, { loc: number; slot: number }[]>();
   const slotOf = new Map<number, number>();
+  const savesAll = r35Off("saves");
   for (const c of coldAt) {
     const list: { loc: number; slot: number }[] = [];
+    // R35: what's live after the call, read later in its block or live out of it; `TMK_R35_OFF=saves` saves every value
+    // whose interval spans the call, as R30 did
+    const after = savesAll ? null : liveAfter(s, f.blocks[c.bi]!, c.ins);
+    if (after !== null && split?.blockOnly !== true) {
+      for (let w = 0; w < words; w++) {
+        let bits = liveOut[c.bi * words + w]!;
+        while (bits !== 0) {
+          const low = bits & -bits;
+          after.add(w * 32 + (31 - Math.clz32(low)));
+          bits ^= low;
+        }
+      }
+    }
     for (const it of intervals) {
       if (it.reg === NONE || !(it.start < c.pos && c.pos < it.end)) continue;
+      if (after !== null && !after.has(it.v)) continue;
       if ((it.fp ? calleeFp : calleeGp).has(it.reg)) continue;
       let k = slotOf.get(it.v);
       if (k === undefined) slotOf.set(it.v, (k = slotOf.size));

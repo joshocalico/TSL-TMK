@@ -352,7 +352,19 @@ export function termCost(t: Block["term"]): number {
  * before a split), `codeat` (class printing's `charCodeAt` in floats). Never set otherwise.
  */
 export function r26Off(part: string): boolean {
-  return (process.env.TMK_R26_OFF ?? "").split(",").includes(part);
+  return offList("TMK_R26_OFF").includes(part);
+}
+
+// The switches' lists, split once for each value the variable has (R35: range.ts asks for each value it looks at, and the
+// split was a few percent of -O1's check elimination). A test that changes the variable gets its new list.
+const offLists = new Map<string, { raw: string; list: string[] }>();
+function offList(name: string): string[] {
+  const raw = process.env[name] ?? "";
+  const was = offLists.get(name);
+  if (was !== undefined && was.raw === raw) return was.list;
+  const list = raw.split(",");
+  offLists.set(name, { raw, list });
+  return list;
 }
 
 /**
@@ -362,7 +374,16 @@ export function r26Off(part: string): boolean {
  * statements held in a temporary, as before); `units` is emit-rcstr.ts's (r32UnitsOff). Never set otherwise.
  */
 export function r32Off(part: string): boolean {
-  return (process.env.TMK_R32_OFF ?? "").split(",").includes(part);
+  return offList("TMK_R32_OFF").includes(part);
+}
+
+/**
+ * R35's parts put back as they were, for tools/r35-pins.ts (`TMK_R35_OFF`, a comma-separated list): `checks` (-O1 without
+ * check elimination's one round, as before), `saves` (the backend saving at a cold call every value whose interval spans
+ * it, live after it or not); `units` and `joined` are the printing's. Never set otherwise.
+ */
+export function r35Off(part: string): boolean {
+  return offList("TMK_R35_OFF").includes(part);
 }
 
 /** R28's parts turned off, a measurement only (`TMK_R28_OFF=grow`, say). */

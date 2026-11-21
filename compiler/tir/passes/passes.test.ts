@@ -930,10 +930,18 @@ bb3:
     true,
   );
   assert.equal(fn(opt(src("ult"), 1, ["loopbounds"]).text, "f").includes("bounds.chk"), false);
+  // R35: -O1 eliminates checks too, in one round, and the header's test proves this one; so `checks` is off as well to
+  // show loopbounds and conds are what remove it at -O1 without it, and on alone it removes it, and the increment's check
   assert.equal(
-    fn(opt(src("ult"), 1, ["loopbounds", "conds"]).text, "f").includes("bounds.chk"),
+    fn(opt(src("ult"), 1, ["loopbounds", "conds", "checks"]).text, "f").includes("bounds.chk"),
     true,
   );
+  const one = fn(opt(src("ult"), 1, ["loopbounds", "conds"]).text, "f");
+  assert.doesNotMatch(one, /bounds\.chk/, one);
+  assert.doesNotMatch(one, /add\.chk/, one);
+  // and where the last turn's index is the length, it stays at -O1 too
+  const le1 = fn(opt(src("ule"), 1).text, "f");
+  assert.match(le1, /bounds\.chk/, le1);
 });
 
 test("check elimination: a mask of the length less one is below the length, once the length isn't 0", () => {

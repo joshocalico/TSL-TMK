@@ -48,6 +48,8 @@ export interface RangeFaults {
   floatLe?: boolean;
   floatInt?: boolean;
   floatNaN?: boolean;
+  /** R35: -O1's one round taking a loop header's parameter from its edges before the loop alone. */
+  roundHeader?: boolean;
 }
 let rangeFaults: RangeFaults = {};
 export function setRangeFaults(f: RangeFaults): void {
@@ -147,9 +149,17 @@ export class Ranges {
   private readonly pre: number[];
   private readonly post: number[];
 
-  constructor(f: Func, cfg?: Cfg) {
+  /**
+   * R35 (SPEC 4.3, D44): -O1's one round. A loop header's parameters are anything their type allows, so one round in
+   * reverse postorder is the answer: every other block's edges in come from blocks before it, whose values are already
+   * final, and a header's back edge carries nothing the round has to wait for. No going round, so no widening: -O1's cost.
+   */
+  private readonly oneRound: boolean;
+
+  constructor(f: Func, cfg?: Cfg, opts: { oneRound?: boolean } = {}) {
     this.f = f;
     this.cfg = cfg ?? buildCfg(f);
+    this.oneRound = opts.oneRound === true;
     this.facts = f.blocks.map(() => null);
     this.pre = f.blocks.map(() => -1);
     this.post = f.blocks.map(() => -1);
@@ -255,6 +265,13 @@ export class Ranges {
         if (at !== this.cfg.rpo[0]) {
           b.params.forEach((p, i) => {
             const t = this.type(p);
+            // R35: -O1's one round takes a loop header's parameter as anything (the injected `r35-round-header` bug takes
+            // the edges before the loop alone, as a first round of going round would, and stops there)
+            if (this.oneRound && header.has(at) && rangeFaults.roundHeader !== true) {
+              if (isTracked(t)) this.val.set(p, top(t));
+              else this.fint.delete(p);
+              return;
+            }
             if (!isTracked(t)) {
               this.paramFloat(at, p, i);
               return;
@@ -301,8 +318,8 @@ export class Ranges {
       }
       if (narrowing) narrowLeft--;
       if (narrowing && narrowLeft <= 0) break;
-      // With no loop, one round in reverse postorder is the answer.
-      if (header.size === 0) break;
+      // With no loop, one round in reverse postorder is the answer; so it is in -O1's one round (R35).
+      if (header.size === 0 || this.oneRound) break;
     }
   }
 

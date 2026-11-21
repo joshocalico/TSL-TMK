@@ -134,7 +134,8 @@ export function backendFaults(): Shape {
           x.startsWith("r21-") ||
           x.startsWith("r23-") ||
           x.startsWith("r25-") ||
-          x.startsWith("r30-split-"),
+          x.startsWith("r30-split-") ||
+          x.startsWith("r35-save-"),
       ),
     ),
     on: (part) => !off.has(part),
@@ -316,7 +317,10 @@ class FuncEmit {
         this.sh?.on("remat") === true ? this.sh.faults : null,
         ctx.hosted === true,
         this.sh?.on("coldsplit") === true
-          ? { calleeFree: this.sh.faults.has("r30-split-callee-free") }
+          ? {
+              calleeFree: this.sh.faults.has("r30-split-callee-free"),
+              blockOnly: this.sh.faults.has("r35-save-block-only"),
+            }
           : null,
       );
       return [g, s, a, r.loads];

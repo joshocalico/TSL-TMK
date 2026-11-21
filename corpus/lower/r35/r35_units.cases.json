@@ -1,0 +1,18 @@
+[
+  { "fn": "rebuild", "args": ["", 3] },
+  { "fn": "rebuild", "args": ["abc", 2] },
+  { "fn": "rebuild", "args": ["héllo wörld", 40] },
+  { "fn": "rebuild", "args": ["é😀\ud800x\udc00ÿĀ", 60] },
+  { "fn": "rebuild", "args": ["ÿĀÿĀ", 30] },
+  { "fn": "scan", "args": ["abc", 4, 1] },
+  { "fn": "scan", "args": ["é😀\ud800x", 12, 1] },
+  { "fn": "scan", "args": ["é😀\ud800x", 12, 0.5] },
+  { "fn": "scan", "args": ["", 3, 1] },
+  { "fn": "units", "args": [250, 12] },
+  { "fn": "units", "args": [0, 3] },
+  { "fn": "units", "args": [55290, 20] },
+  { "fn": "units", "args": [65530, 6] },
+  { "fn": "joins", "args": ["ab", "é", "😀", 30] },
+  { "fn": "joins", "args": ["", "x", "", 5] },
+  { "fn": "joins", "args": ["\ud800", "\udc00", "ÿĀ", 25] }
+]

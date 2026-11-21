@@ -382,6 +382,17 @@ async function faultSteps(
   const engines = defaultEngines();
   return [
     {
+      // R35: -O1's check elimination in one round (range.ts) and the backend's saves around cold calls (regalloc.ts), on
+      // R35's TSL programs natively at -O1 and -O2, against V8 (seconds, so first: R35's bugs are caught here, and so may an
+      // earlier bug be, which changes only which step names it).
+      name: "R35's programs natively at -O1 and -O2 (corpus/r35, tools/r35-tests.ts)",
+      run: async () => {
+        const R35 = await import("./r35-tests.ts");
+        const n = await R35.r35Native(accel, jobs, [1, 2]);
+        return n.failures.length === 0 && n.cases > 0;
+      },
+    },
+    {
       // R32: range.ts's facts from a float compare's edge and check elimination's saturating ToInt32 (checks.ts), on R32's
       // program through both routes in rc and leak at -O1 and -O2, against V8 (seconds, so first: R32's bugs are caught
       // here, and so may an earlier bug be, which changes only which step names it).

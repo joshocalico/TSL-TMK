@@ -33,18 +33,30 @@ export interface ChecksFaults {
 
 const W: Record<string, number> = { i8: 8, i16: 16, i32: 32, i64: 64 };
 
-export function checksFunc(f: Func, stats: ChecksStats, faults: ChecksFaults = {}): boolean {
+export function checksFunc(
+  f: Func,
+  stats: ChecksStats,
+  faults: ChecksFaults = {},
+  oneRound = false,
+): boolean {
   // Only where there's something to prove: a check, a branch to a trap (a check written as a compare), or a float compare.
+  // R35: at -O1 a float compare only with a ToInt32 beside it (R32's fact is what -O1 wants of one), so a function of float
+  // arithmetic with no check isn't looked at, as -O1's time is gated
   const worth = f.blocks.some(
     (b) =>
       b.term.k === "trap" ||
       b.instrs.some((ins) => {
         const p = opParts(ins.op);
-        return p[1] === "chk" || p[0] === "bounds" || p[0] === "fcmp";
+        return (
+          p[1] === "chk" ||
+          p[0] === "bounds" ||
+          (oneRound ? ins.op === "js.toint32" : p[0] === "fcmp")
+        );
       }),
   );
   if (!worth) return false;
-  const R = new Ranges(f);
+  // R35: at -O1, range.ts's one round, a loop header's parameters taken as anything (SPEC 4.3)
+  const R = new Ranges(f, undefined, { oneRound });
   const slack = faults.offByOne === true ? 1n : 0n;
   const subst = new Map<number, number>();
   const removed = new Set<Instr>();

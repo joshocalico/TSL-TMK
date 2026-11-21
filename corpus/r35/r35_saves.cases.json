@@ -1,0 +1,17 @@
+[
+  { "fn": "joinAfter", "args": [0, 0] },
+  { "fn": "joinAfter", "args": [12, 1] },
+  { "fn": "joinAfter", "args": [-77, 1] },
+  { "fn": "joinAfter", "args": [99, 2] },
+  { "fn": "someWays", "args": [10, 0] },
+  { "fn": "someWays", "args": [10, 1] },
+  { "fn": "someWays", "args": [10, 2] },
+  { "fn": "someWays", "args": [-3, 2] },
+  { "fn": "loopCold", "args": [0, 3] },
+  { "fn": "loopCold", "args": [10, 3] },
+  { "fn": "loopCold", "args": [50, 7] },
+  { "fn": "loopCold", "args": [20, 1] },
+  { "fn": "floats", "args": [8, 0] },
+  { "fn": "floats", "args": [8, 1] },
+  { "fn": "floats", "args": [301, 1] }
+]
