@@ -1040,6 +1040,166 @@ class Expander {
     return leaf;
   }
 
+  /**
+   * R34 (D39's R34, 3.5): whether this `withTail(n, new C(…))` makes an object whose counted references are all null and
+   * stay so, which @tsl/gc's `makeTailLeaf` then makes in its store's leaf entry, freed as one step with no call. So: C has
+   * slots (it isn't a leaf already), each a reference field (no array, vector or map), C is in no cycle and has no
+   * superclass; each reference field is written only by C's constructor, as a statement of its own at its top level,
+   * `this.f = p` from one of its parameters that the constructor never assigns, or not at all with `null` as its initialiser;
+   * nothing else in any `rc` module writes a field of that name of a C (an assignment to it, or anywhere in a destructuring
+   * target); and here, each such parameter is given `null`. A flat string is one: `jsStrZeroed`'s `new JsStr(n, 0, null, 0)`.
+   * Were a case missed, an object made so would keep what a reference set in it later refers to alive for ever (a leak, never
+   * a fault: freeing never visits it). `TMK_R34_OFF=leaf` makes none so (tools/r34-pins.ts); `TMK_TEST_RC_TSL=r34-leaf-any`
+   * (an injected bug) takes every tailed `new` of a class with slots as one.
+   */
+  leafMake(c: CountedClass, e: ts.NewExpression): boolean {
+    if ((process.env.TMK_R34_OFF ?? "").split(",").includes("leaf")) return false;
+    if (c.target !== undefined || c.stack === true || c.cyclic === true || this.isLeaf(c))
+      return false;
+    if (fault() === "r34-leaf-any") return true;
+    const need = this.leafParams(c);
+    if (need === null) return false;
+    const args = e.arguments ?? [];
+    for (const i of need) {
+      let a: ts.Expression | undefined = args[i];
+      while (a !== undefined && ts.isParenthesizedExpression(a)) a = a.expression;
+      if (a === undefined || a.kind !== ts.SyntaxKind.NullKeyword) return false;
+    }
+    return true;
+  }
+
+  leafParamsOf = new Map<CountedClass, number[] | null>();
+
+  /** R34: the constructor parameters each reference field of c is set from (leafMake), or null if c doesn't qualify. */
+  leafParams(c: CountedClass): number[] | null {
+    const had = this.leafParamsOf.get(c);
+    if (had !== undefined) return had;
+    const out = this.findLeafParams(c);
+    this.leafParamsOf.set(c, out);
+    return out;
+  }
+
+  private findLeafParams(c: CountedClass): number[] | null {
+    const d = c.decl;
+    if (d.heritageClauses !== undefined) return null;
+    const fields = new Map<string, { init: ts.Expression | undefined; param: number | null }>();
+    let ctor: ts.ConstructorDeclaration | undefined;
+    for (const m of d.members) {
+      if (ts.isPropertyDeclaration(m)) {
+        if (this.vecElem(m.name) !== null || this.isJsArray(m.name) || this.mapOf(m.name) !== null)
+          return null;
+        if (this.classOf(m.name).cls === null) continue;
+        if (!ts.isIdentifier(m.name)) return null;
+        fields.set(m.name.text, { init: m.initializer, param: null });
+      } else if (ts.isConstructorDeclaration(m) && m.body !== undefined) ctor = m;
+    }
+    const params = ctor?.parameters ?? [];
+    params.forEach((p, i) => {
+      if (
+        (ts.getModifiers(p) ?? []).some((x) => isPropModifier(x.kind)) &&
+        ts.isIdentifier(p.name) &&
+        this.classOf(p.name).cls !== null
+      )
+        fields.set(p.name.text, { init: undefined, param: i });
+    });
+    if (fields.size === 0) return null;
+    // the constructor's own `this.f = p` statements, at its top level, from a parameter it never assigns
+    const ok = new Set<ts.Node>();
+    if (ctor?.body !== undefined) {
+      const assigned = new Set<string>();
+      const walk = (n: ts.Node): void => {
+        if (ts.isBinaryExpression(n) && isAssign(n.operatorToken.kind) && ts.isIdentifier(n.left))
+          assigned.add(n.left.text);
+        ts.forEachChild(n, walk);
+      };
+      walk(ctor.body);
+      for (const st of ctor.body.statements) {
+        if (!ts.isExpressionStatement(st)) continue;
+        const x = st.expression;
+        if (
+          !ts.isBinaryExpression(x) ||
+          !isAssign(x.operatorToken.kind) ||
+          !ts.isPropertyAccessExpression(x.left) ||
+          x.left.expression.kind !== ts.SyntaxKind.ThisKeyword ||
+          !ts.isIdentifier(x.right)
+        )
+          continue;
+        const f = fields.get(x.left.name.text);
+        const pi = params.findIndex(
+          (p) => ts.isIdentifier(p.name) && p.name.text === (x.right as ts.Identifier).text,
+        );
+        if (f === undefined || pi < 0 || assigned.has((x.right as ts.Identifier).text)) continue;
+        if (f.param !== null) return null; // set twice
+        f.param = pi;
+        ok.add(x.left);
+      }
+    }
+    // every other write to a field of that name, of a C, anywhere
+    let bad = false;
+    const names = new Set(fields.keys());
+    // of a C, or of what can't be told
+    const isC = (x: ts.Expression): boolean =>
+      (this.checker.getTypeAtLocation(x).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0 ||
+      this.classOf(x).cls === c;
+    const target = (x: ts.Expression): void => {
+      while (ts.isParenthesizedExpression(x) || ts.isNonNullExpression(x)) x = x.expression;
+      if (ts.isPropertyAccessExpression(x)) {
+        if (names.has(x.name.text) && !ok.has(x) && isC(x.expression)) bad = true;
+      } else if (ts.isElementAccessExpression(x)) {
+        if (isC(x.expression)) bad = true;
+      } else if (ts.isObjectLiteralExpression(x) || ts.isArrayLiteralExpression(x)) {
+        for (const el of ts.isArrayLiteralExpression(x) ? x.elements : x.properties) {
+          if (ts.isSpreadElement(el)) target(el.expression);
+          else if (ts.isPropertyAssignment(el)) target(el.initializer);
+          else if (ts.isSpreadAssignment(el)) target(el.expression);
+          else if (ts.isExpression(el)) target(el);
+        }
+      } else if (ts.isBinaryExpression(x) && isAssign(x.operatorToken.kind)) target(x.left);
+    };
+    for (const sf of this.modules) {
+      const walk = (n: ts.Node): void => {
+        if (bad) return;
+        if (
+          ts.isBinaryExpression(n) &&
+          n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+          n.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+        )
+          target(n.left);
+        ts.forEachChild(n, walk);
+      };
+      walk(sf);
+      if (bad) return null;
+    }
+    const need: number[] = [];
+    for (const f of fields.values()) {
+      if (f.param !== null) need.push(f.param);
+      else if (f.init === undefined || f.init.kind !== ts.SyntaxKind.NullKeyword) return null;
+    }
+    return need;
+  }
+
+  /**
+   * R34: whether a release function's visit of a reference field to c hands c's object to freeing at its last count
+   * (`handLeaf`), telling freeing so through what it gives (`RC_HANDED`), where R4's `visitLeaf` gave it back through
+   * `spare`: wherever c is a leaf (visitOf's `visitLeaf`), but for the injected `leaf-all` bug, which keeps R4's form. A
+   * field only (a view's buffer): an array's or vector's element, and a map's key and value, keep `visitLeaf`.
+   * `TMK_R34_OFF=hand` keeps R4's everywhere (tools/r34-pins.ts).
+   */
+  handOf(c: CountedClass): boolean {
+    if ((process.env.TMK_R34_OFF ?? "").split(",").includes("hand")) return false;
+    if (process.env.TMK_TEST_RC_TSL === "leaf-all") return false;
+    if (!this.isLeaf(c)) return false;
+    this.needGc.add("RC_HANDED");
+    return true;
+  }
+
+  /** R34: a room array's room given back through `trimHand` where R4's `trim` gave it back through `spare` (handOf). */
+  roomHand(): boolean {
+    if ((process.env.TMK_R34_OFF ?? "").split(",").includes("hand")) return false;
+    this.needGc.add("RC_HANDED");
+    return true;
+  }
+
   /** How a release function visits a reference to c: `visitLeaf` where c is a leaf (R4), `visit` otherwise. */
   visitOf(c: CountedClass): string {
     // `tmk milestone pipe-d`'s injected bug (R4): every class taken as a leaf, so freeing drops what it holds unvisited
@@ -1274,6 +1434,15 @@ class Expander {
         first = false;
         return s;
       };
+      // R34: what a release function gives where it handed a leaf to freeing: its count of slots and `RC_HANDED` at slot 0,
+      // the one call whose count freeing reads, and `RC_HANDED` alone past it (an arm for slot i > 0, or `at` tested where
+      // the arm can be either), so no add, and no check of one, where freeing reads only the flag
+      const handRet = (i: number | null): string =>
+        i === 0
+          ? "k + RC_HANDED"
+          : i !== null
+            ? "RC_HANDED"
+            : "at === 0 ? k + RC_HANDED : RC_HANDED";
       for (const s of refs) {
         const st = this.useStore(s.cls!);
         // the injected `rcstr-field-twice` bug (R10): a string field visited twice, so freeing its holder drops it twice
@@ -1285,6 +1454,10 @@ class Expander {
           r.push(
             `  ${kw()} (at === ${i}) {\n    const x = o.${s.name};\n    if (x !== null) { ${st}.${this.visitOf(s.cls!)}(x, op);${twice} }\n  }`,
           );
+        else if (s.nullable && this.handOf(s.cls!))
+          r.push(
+            `  ${kw()} (at === ${i}) {\n    const x = o.${s.name};\n    if (x !== null && ${st}.handLeaf(x, op)) return ${handRet(i)};\n  }`,
+          );
         else if (s.nullable)
           r.push(
             `  ${kw()} (at === ${i}) {\n    const x = o.${s.name};\n    if (x !== null) ${st}.${this.visitOf(s.cls!)}(x, op);\n  }`,
@@ -1292,6 +1465,10 @@ class Expander {
         else if (twice !== "")
           r.push(
             `  ${kw()} (at === ${i}) {\n    const x = o.${s.name};\n    ${st}.${this.visitOf(s.cls!)}(x, op);${twice}\n  }`,
+          );
+        else if (this.handOf(s.cls!))
+          r.push(
+            `  ${kw()} (at === ${i}) {\n    if (${st}.handLeaf(o.${s.name}, op)) return ${handRet(i)};\n  }`,
           );
         else r.push(`  ${kw()} (at === ${i}) ${st}.${this.visitOf(s.cls!)}(o.${s.name}, op);`);
         i++;
@@ -1343,6 +1520,8 @@ class Expander {
         const lines: string[] = [`    let j: usize = at - ${b0};`];
         vecs.forEach((v, n) => {
           const st = this.useStore(v.cls!);
+          // R34: an element keeps R4's visitLeaf: where most visits hand a leaf over (an array of leaves), handing it back
+          // through what the release function returns cost more than `spare` (bench/memory's acyclic, MEASURED)
           const visit = `{\n      const x = o.${v.name}.get(j);\n      if (x !== null) ${st}.${this.visitOf(v.cls!)}(x, op);\n    }`;
           if (n + 1 < vecs.length)
             lines.push(`    if (j < o.${v.name}.length) ${visit}`, `    j -= o.${v.name}.length;`);
@@ -1353,7 +1532,9 @@ class Expander {
           r.push(
             fault() === "js-free-keeps"
               ? `  ${kw()} (op !== Visit.Scan && op !== Visit.Trace && o.${v.name}.capacity > 0 && false) {\n  }`
-              : `  ${kw()} (op !== Visit.Scan && op !== Visit.Trace && o.${v.name}.trim()) {\n  }`,
+              : v.room === true && this.roomHand()
+                ? `  ${kw()} (op !== Visit.Scan && op !== Visit.Trace && o.${v.name}.rooms !== 0) {\n    if (o.${v.name}.trimHand()) return ${handRet(null)};\n  }`
+                : `  ${kw()} (op !== Visit.Scan && op !== Visit.Trace && o.${v.name}.trim()) {\n  }`,
           );
       }
       // the cycle collector looking (D41): a vector's elements visited where they are, nothing moved or given back
@@ -1383,6 +1564,7 @@ class Expander {
       // vector's buffer given back (`trim`), so a freed vector is never read again and every step is one of these
       for (const v of jsOnly ? [] : vecs) {
         const st = this.useStore(v.cls!);
+        // R34: an element keeps R4's visitLeaf (above)
         if (v.js === true)
           r.push(
             `  ${kw()} (o.${v.name}.length > 0) {\n    const x = o.${v.name}.pop(null);\n    if (x !== null) ${st}.${this.visitOf(v.cls!)}(x, op);\n  }`,
@@ -1391,10 +1573,19 @@ class Expander {
           r.push(
             `  ${kw()} (o.${v.name}.length > 0) ${st}.${this.visitOf(v.cls!)}(o.${v.name}.pop(), op);`,
           );
-        r.push(`  ${kw()} (o.${v.name}.trim()) {\n  }`);
+        r.push(
+          v.room === true && this.roomHand()
+            ? `  ${kw()} (o.${v.name}.rooms !== 0) {\n    if (o.${v.name}.trimHand()) return ${handRet(null)};\n  }`
+            : `  ${kw()} (o.${v.name}.trim()) {\n  }`,
+        );
       }
-      // a JsArray of numbers (R2): its buffer, given back
-      for (const v of bufs) r.push(`  ${kw()} (o.${v.name}.trim()) {\n  }`);
+      // a JsArray of numbers (R2): its buffer, given back (R34: a room through trimHand)
+      for (const v of bufs)
+        r.push(
+          v.room === true && this.roomHand()
+            ? `  ${kw()} (o.${v.name}.rooms !== 0) {\n    if (o.${v.name}.trimHand()) return ${handRet(null)};\n  }`
+            : `  ${kw()} (o.${v.name}.trim()) {\n  }`,
+        );
       r.push("  return k;");
     }
     r.push("}");
@@ -1850,9 +2041,11 @@ class FnExpand {
       if (cls !== null && ts.isNewExpression(inner)) {
         const n = this.borrowed(this.expr(e.arguments[0]!));
         const args = this.args(inner, inner.arguments ?? []);
+        // R34: an object whose references are all null and stay so, made in its store's leaf entry
+        const make = this.x.leafMake(cls, inner) ? "makeTailLeaf" : "makeTail";
         return {
           ...this.val(
-            `${this.x.useStore(cls)}.makeTail(${n}, new ${inner.expression.getText(sf)}(${args.join(", ")}))`,
+            `${this.x.useStore(cls)}.${make}(${n}, new ${inner.expression.getText(sf)}(${args.join(", ")}))`,
             e,
           ),
           own: true,

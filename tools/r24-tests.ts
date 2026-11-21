@@ -63,8 +63,10 @@ export const R24_FAULTS: {
     what: "visitLeaf taking two off a leaf's count where one is left, so a leaf still held is freed under its holder",
     patch: {
       file: RC,
+      // R34: and handLeaf's, the same line, which the expansion's release functions call where they called visitLeaf
       from: "        c.write(BigInt.asUintN(64, n - 1n));",
       to: "        c.write(BigInt.asUintN(64, n - 2n));",
+      times: 2,
     },
   },
   {

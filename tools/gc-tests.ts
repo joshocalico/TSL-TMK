@@ -59,8 +59,10 @@ export const GC_FAULTS: Fault[] = [
   {
     name: "a freed slot's generation left as it was, so a stale handle reads its next object",
     file: RC,
+    // R34: both ways a slot is given back, giveBack's and a run of leaves' (leafRun), which give back the same slots
     from: "g.write(gen); // even",
     to: "// even",
+    times: 2,
   },
 ];
 
@@ -97,14 +99,15 @@ export const RC_TSL_FAULTS: (Fault & {
     // which TSL_TEST_PATCH couldn't find, so the patch threw, and the box counted the thrown build as caught.) R19: and into
     // freeFlat's, the same loop in the same words (see the bug above). R33: each loop's visit is written twice, `spare` set
     // around the call where a release function may see it and not where none may, and makes the object in the call, so the
-    // bug is put into both ways of each, freeSteps' (`c`) and freeFlat's (`head`)
-    from: "          callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);\n          left = spare;\n          spare = 0n;\n        } else {\n          callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);\n          left = BigInt.asUintN(64, left - 1n);\n        }\n        a++;",
-    to: "          callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);\n          for (let j = a + 1; j < s; j++) callRelease(rel, objectAt<Counted0>(c), j, Visit.Drop);\n          left = spare;\n          spare = 0n;\n        } else {\n          callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);\n          for (let j = a + 1; j < s; j++) callRelease(rel, objectAt<Counted0>(c), j, Visit.Drop);\n          left = BigInt.asUintN(64, left - 1n);\n        }\n        a = s;",
+    // bug is put into both ways of each, freeSteps' (`c`) and freeFlat's (`head`). R34: each visit's result is kept (`r`), for
+    // a leaf the release function hands back, so the bug is put into those lines
+    from: "          r = callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);\n          left = spare;\n          spare = 0n;\n        } else {\n          r = callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);\n          left = BigInt.asUintN(64, left - 1n);\n        }\n        if (releasesTouch(handed) && r >= RC_HANDED) left = takeHanded(left); // R34\n        a++;",
+    to: "          r = callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);\n          for (let j = a + 1; j < s; j++) callRelease(rel, objectAt<Counted0>(c), j, Visit.Drop);\n          left = spare;\n          spare = 0n;\n        } else {\n          r = callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);\n          for (let j = a + 1; j < s; j++) callRelease(rel, objectAt<Counted0>(c), j, Visit.Drop);\n          left = BigInt.asUintN(64, left - 1n);\n        }\n        if (releasesTouch(handed) && r >= RC_HANDED) left = takeHanded(left); // R34\n        a = s;",
     more: [
       {
         file: RC,
-        from: "          callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);\n          left = spare;\n          spare = 0n;\n        } else {\n          callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);\n          left = BigInt.asUintN(64, left - 1n);\n        }\n        a++;",
-        to: "          callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);\n          for (let j = a + 1; j < s; j++) callRelease(rel, objectAt<Counted0>(head), j, Visit.Drop);\n          left = spare;\n          spare = 0n;\n        } else {\n          callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);\n          for (let j = a + 1; j < s; j++) callRelease(rel, objectAt<Counted0>(head), j, Visit.Drop);\n          left = BigInt.asUintN(64, left - 1n);\n        }\n        a = s;",
+        from: "          r = callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);\n          left = spare;\n          spare = 0n;\n        } else {\n          r = callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);\n          left = BigInt.asUintN(64, left - 1n);\n        }\n        if (releasesTouch(handed) && r >= RC_HANDED) left = takeHanded(left); // R34\n        a++;",
+        to: "          r = callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);\n          for (let j = a + 1; j < s; j++) callRelease(rel, objectAt<Counted0>(head), j, Visit.Drop);\n          left = spare;\n          spare = 0n;\n        } else {\n          r = callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);\n          for (let j = a + 1; j < s; j++) callRelease(rel, objectAt<Counted0>(head), j, Visit.Drop);\n          left = BigInt.asUintN(64, left - 1n);\n        }\n        if (releasesTouch(handed) && r >= RC_HANDED) left = takeHanded(left); // R34\n        a = s;",
       },
     ],
   },
@@ -114,9 +117,28 @@ export const RC_TSL_FAULTS: (Fault & {
     name: "unbounded freeing at an allocation with no collector linked",
     file: RC,
     // R17: on the path `make` takes, which is inlined and takes its slot in line, so tryMake's own isn't on it
-    // R24: where freeAlloc took over runSteps' place, given the same unbounded budget
+    // R24: where freeAlloc took over runSteps' place, given the same unbounded budget. R34: and in freeLeaves, a leaf's
+    // make's way (makeTailLeaf), which gives a run of leaves back in line and freeAlloc the rest: every budget it takes or
+    // passes on unbounded
     from: "      else if (waiting !== 0n || cur !== 0n) freeAlloc(budget);\n      const head = ptrAt(u64, heads).add(this.k);",
     to: "      else if (waiting !== 0n || cur !== 0n) freeAlloc(0x10_0000);\n      const head = ptrAt(u64, heads).add(this.k);",
+    more: [
+      {
+        file: RC,
+        from: "  if (head === 0n || cur !== 0n || stepping) {\n    freeAlloc(budget);\n    return;\n  }",
+        to: "  if (head === 0n || cur !== 0n || stepping) {\n    freeAlloc(0x10_0000);\n    return;\n  }",
+      },
+      {
+        file: RC,
+        from: "  if ((ptrAt(u64, entry).read() & EMPTY) === 0n) {\n    freeAlloc(budget);\n    return;\n  }",
+        to: "  if ((ptrAt(u64, entry).read() & EMPTY) === 0n) {\n    freeAlloc(0x10_0000);\n    return;\n  }",
+      },
+      {
+        file: RC,
+        from: "  const all = toU64(budget);\n  const n = leafRun(",
+        to: "  const all = toU64(0x10_0000);\n  const n = leafRun(",
+      },
+    ],
   },
   {
     // what a WeakRef that resurrects does: deref hands out an object whose count already reached zero

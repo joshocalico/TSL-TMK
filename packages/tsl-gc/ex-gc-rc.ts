@@ -41,6 +41,15 @@ export type Counted<T extends object> = T;
 export const RC_BUDGET: usize = 32;
 
 /**
+ * R34: what a release function gives to say that, in that call, it handed freeing a leaf (`Rc.handLeaf`): added to its count
+ * of slots in the call for slot 0, whose count freeing reads, and alone in a call for a slot past it, whose count it doesn't.
+ * Freeing gives the leaf back at once, as a step, where the budget has one to spare, and otherwise leaves it waiting. 2^52: a
+ * count of slots is far below it (an object of 2^52 slots would be more memory than there is), and a count plus it is exact
+ * on the host, whose `usize` is a double.
+ */
+export const RC_HANDED: usize = 0x10_0000_0000_0000;
+
+/**
  * What a release function is asked to do with the reference in a slot. `Drop` and `Collect` are freeing: the object is
  * going, so a vector may be emptied as it goes. `Scan` and `Trace` are the cycle collector looking (D41): the object may
  * well be alive, so a release function given either must change nothing, only visit the slot.
@@ -198,6 +207,7 @@ let slots: usize = 0; //     how many the object at the cursor has, from its rel
 let stepping: bool = false; // freeing or collecting is under way: a make inside a release function does no more
 let budget: usize = RC_BUDGET;
 let spare: u64 = 0n; //    while freeing visits a slot: steps the budget has left after it (R4), 0 everywhere else
+let handed: u64 = 0n; //   R34: a leaf whose last count `Rc.handLeaf` dropped, waiting for freeing to take it; 0 if none
 let rest: usize = 0; //     with the collector linked: what this allocation's budget has left after freeing one object
 // R17: a u64 added to in a wrap context, so not a checked add a step: a count of steps can't reach 2^64 (rcSteps converts it
 // back, checked).
@@ -243,6 +253,26 @@ let ccGaveUp: usize = 0;
 // SAFETY: id is a registered store's, below the table's capacity; this only forms the address.
 function entryOf(id: u32): u64 {
   return ptrAt(u64, table).add(toUsize((id << 2) >>> 0)).addr; // a store's number is 16 bits: four words an entry
+}
+
+/**
+ * Room in the table of stores for one more entry: the table grown, its entries copied, where it's full; false if there's no
+ * memory for it, or (with the collector) no store number left.
+ */
+// SAFETY: the new table is a fresh block of cap entries, the old one copied whole into it and then given back.
+function roomForStore(): bool {
+  if (stores + 1 < tableCap) return true;
+  if (cyclesLinked() && stores + 1 >= MAX_STORES) return false;
+  const cap: u32 = tableCap === 0 ? 16 : tableCap * 2;
+  const t = heap.allocBytes(toUsize(cap) * ENTRY);
+  if (t === 0n) return false;
+  if (table !== 0n) {
+    copyBytes(t, table, toUsize(tableCap) * ENTRY);
+    heap.freeBytes(table, toUsize(tableCap) * ENTRY);
+  }
+  table = t;
+  tableCap = cap;
+  return true;
 }
 
 /** Objects made and not yet given back, in every store: what each store's entry counts, added up (R17). */
@@ -459,6 +489,80 @@ function giveBack(slot: u64, owner: u32, entry: u64): void {
 }
 
 /**
+ * R34: a run of waiting leaves given back (D39's R34): `head`, just taken off the queue, an object of a store whose release
+ * function does nothing (EMPTY), then each next waiting object while it's of the same store, up to `left` in all: each one
+ * a step, as freeing would take it, giving its block back with no call, but the store's freed count brought up and the
+ * budget down once for the run, and the store's entry and its EMPTY bit found once. Gives how many it gave back, at least
+ * one and at most `left`. Without the collector only (freeLeaves'), so no waiting object is one a scan gave up, and a
+ * store's number is the owner word's top 24 bits. Not in freeAlloc's loop: a run there is mostly one object, which that
+ * loop gives back for 9 instructions fewer than a run's set-up and its test for a next one cost (adv_forof_mutation,
+ * MEASURED).
+ */
+/** @tsl.inline */
+// SAFETY: head is off the queue, a waiting slot of the store whose entry is `entry`, which is EMPTY; every object taken
+// after it is the queue's head, a waiting slot, and of the same store (its owner word's number), so EMPTY too, and taken off
+// before its block is given back. Nothing here calls anything, so nothing can come back in. left is at least 1.
+function leafRun(head: u64, owner: u32, entry: u64, left: u64): u64 {
+  const id = owner >>> 8;
+  let x = head;
+  let o = owner;
+  let n: u64 = 0n;
+  for (;;) {
+    retireObject(objectAt<Counted0>(x));
+    const g = genAt(x);
+    // unchecked, as giveBack's: a waiting object's generation is odd and below MAX_GEN
+    const gen = (g.read() + 1) >>> 0;
+    g.write(gen); // even: every reference to it is stale from now on
+    if (gen < MAX_GEN - 1) {
+      const list = ptrAt(u64, heads).add(toUsize(o % 0x100));
+      countAt(x).write(list.read());
+      list.write(x);
+    }
+    n = BigInt.asUintN(64, n + 1n); // at most left, a u64
+    if (n === left) break;
+    const next = waiting;
+    if (next === 0n) break;
+    const no = ownerAt(next).read();
+    if (no >>> 8 !== id) break; // another store's: freeAlloc's loop takes it
+    waiting = countAt(next).read() ^ WAITING;
+    x = next;
+    o = no;
+  }
+  const freed = ptrAt(u64, entry).add(1);
+  freed.write(BigInt.asUintN(64, freed.read() + n));
+  return n;
+}
+
+/**
+ * R34: a release function said it handed freeing a leaf (`RC_HANDED`, from `Rc.handLeaf`), and `left` is what the budget
+ * has after that call's step: the leaf's block given back at once as a step of its own if there's one left, as `visitLeaf`
+ * gives one back through `spare`; otherwise it waits on the queue, as `drop` would have put it there. Gives what the budget
+ * has left after it. A release function that says so without handing one over finds nothing here (handed is 0).
+ */
+/** @tsl.inline */
+// Freeing tests a release function's result for `RC_HANDED` only where one may hand a leaf over: `releasesTouch(handed)`,
+// R33's question of the call graph, as only handLeaf writes `handed`; where none may, the test is a constant false and goes
+// (a list's or a churn's programs, every TSL proper program but those calling handLeaf), and a result at or above it, which
+// a release function could give only by making it up, is taken as a count of slots, whose visits past the real ones do
+// nothing: steps spent, never a fault.
+// SAFETY: handed is 0 or a live counted slot whose last count handLeaf dropped (its count word made WAITING there), on no
+// list and not on the queue, of a store whose objects have no slots (handLeaf's caller's promise, visitLeaf's), so what
+// freeing would do with it is give its block back.
+function takeHanded(left: u64): u64 {
+  const lf = handed;
+  handed = 0n;
+  if (lf === 0n) return left;
+  if (left === 0n) {
+    countAt(lf).write(waiting | WAITING);
+    waiting = lf;
+    return left;
+  }
+  const owner = ownerAt(lf).read();
+  giveBack(lf, owner, entryOf(cyclesLinked() ? (owner % 0x100_0000) >>> 8 : owner >>> 8));
+  return BigInt.asUintN(64, left - 1n);
+}
+
+/**
  * Up to `n` steps of freeing (D39): each step visits one reference slot of the object at the cursor, through its store's
  * release function, or gives one block back. When the object at the cursor is done, the next is the one that waited last.
  * The cursor is held in locals while it runs and put back after, so a release function can't move it: a `make` one calls
@@ -515,6 +619,11 @@ function freeSteps(n: usize): u64 {
         s = callRelease(rel, objectAt<Counted0>(c), 0, Visit.Drop);
         left = BigInt.asUintN(64, left - 1n);
       }
+      // R34: a leaf the release function handed over, given back as a step if one is left, as `spare` lets visitLeaf
+      if (releasesTouch(handed) && s >= RC_HANDED) {
+        s = s - RC_HANDED;
+        left = takeHanded(left);
+      }
       a = 1;
     }
     if (s !== 0) {
@@ -522,15 +631,17 @@ function freeSteps(n: usize): u64 {
       // the optimiser sees in its body)
       while (a < s) {
         if (left === 0n) break;
+        let r: usize = 0;
         if (releasesTouch(spare)) {
           spare = BigInt.asUintN(64, left - 1n);
-          callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);
+          r = callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);
           left = spare;
           spare = 0n;
         } else {
-          callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);
+          r = callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);
           left = BigInt.asUintN(64, left - 1n);
         }
+        if (releasesTouch(handed) && r >= RC_HANDED) left = takeHanded(left); // R34
         a++;
       }
       // every slot visited, and the budget has room for giving the block back, a step of its own
@@ -640,6 +751,11 @@ function freeFlat(n: usize): u64 {
         s = callRelease(rel, objectAt<Counted0>(head), 0, Visit.Drop);
         left = BigInt.asUintN(64, left - 1n);
       }
+      // R34: a leaf the release function handed over (freeSteps')
+      if (releasesTouch(handed) && s >= RC_HANDED) {
+        s = s - RC_HANDED;
+        left = takeHanded(left);
+      }
     } else left = BigInt.asUintN(64, left - 1n);
     if (s > 1) {
       // the rest of its slots, one a step, as freeSteps visits them (R21: an object of one slot has no rest, and isn't
@@ -647,15 +763,17 @@ function freeFlat(n: usize): u64 {
       // budget tested inside, as freeSteps')
       while (a < s) {
         if (left === 0n) break;
+        let r: usize = 0;
         if (releasesTouch(spare)) {
           spare = BigInt.asUintN(64, left - 1n);
-          callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
+          r = callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
           left = spare;
           spare = 0n;
         } else {
-          callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
+          r = callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
           left = BigInt.asUintN(64, left - 1n);
         }
+        if (releasesTouch(handed) && r >= RC_HANDED) left = takeHanded(left); // R34
         a++;
       }
     }
@@ -750,6 +868,11 @@ function freeAlloc(n: usize): u64 {
         s = callRelease(rel, objectAt<Counted0>(head), 0, Visit.Drop);
         left = BigInt.asUintN(64, left - 1n);
       }
+      // R34: a leaf the release function handed over (freeSteps')
+      if (releasesTouch(handed) && s >= RC_HANDED) {
+        s = s - RC_HANDED;
+        left = takeHanded(left);
+      }
       if (releasesTouch(stepping)) stepping = false;
       if (s !== 0) {
         // R32: no step left, whatever its slots: the cursor left where freeFlat leaves it, at slot 1, for the next freeing
@@ -778,6 +901,38 @@ function freeAlloc(n: usize): u64 {
 }
 
 /**
+ * R34: a leaf's allocation's freeing without the collector linked, where something waits or the cursor is set
+ * (`makeTailLeaf`'s: where leaves are made, the object waiting is mostly the last one made, a leaf too): where the cursor
+ * is idle, nothing is under way and the next waiting object is a leaf (its store EMPTY), the run of its store's leaves is
+ * given back here, in line, as freeAlloc's first pass gives it back (leafRun), and freeAlloc takes what the budget has left
+ * only if something still waits; anything else is freeAlloc's whole. The same steps in the same order with the same
+ * effects, without freeAlloc's call where one run is all there is. Only there: in `make` and `makeTail`, where the next
+ * waiting object is mostly not a leaf, its tests before the call cost an allocation of a list's or an array's 17
+ * instructions for nothing (bench/memory's acyclic and arrays, MEASURED).
+ */
+/** @tsl.inline */
+// SAFETY: as freeAlloc's: the queue's head is a waiting slot holding its object, its owner word naming its store, whose
+// entry is EMPTY; it's taken off before leafRun gives it back.
+function freeLeaves(): void {
+  const head = waiting;
+  if (head === 0n || cur !== 0n || stepping) {
+    freeAlloc(budget);
+    return;
+  }
+  const owner = ownerAt(head).read();
+  const entry = entryOf(owner >>> 8);
+  if ((ptrAt(u64, entry).read() & EMPTY) === 0n) {
+    freeAlloc(budget);
+    return;
+  }
+  waiting = countAt(head).read() ^ WAITING;
+  const all = toU64(budget);
+  const n = leafRun(head, owner, entry, all);
+  stepsTaken = BigInt.asUintN(64, stepsTaken + n);
+  if (waiting !== 0n && n !== all) freeAlloc(toUsize(BigInt.asUintN(64, all - n)));
+}
+
+/**
  * R24: freeAlloc's object of more than one slot, its slot 0 visited, `n` steps left (at least one): its slots from 1 visited
  * in order, one a step, as freeFlat visits them, `spare` what the budget has left after each. Gives what's left; where the
  * budget runs out before its block's step, the cursor is left where freeFlat leaves it, for the next freeing to take on.
@@ -793,15 +948,17 @@ function freeRest(head: u64, entry: u64, s: usize, n: u64): u64 {
   if (releasesTouch(stepping)) stepping = true;
   while (a < s) {
     if (left === 0n) break;
+    let r: usize = 0;
     if (releasesTouch(spare)) {
       spare = BigInt.asUintN(64, left - 1n);
-      callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
+      r = callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
       left = spare;
       spare = 0n;
     } else {
-      callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
+      r = callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
       left = BigInt.asUintN(64, left - 1n);
     }
+    if (releasesTouch(handed) && r >= RC_HANDED) left = takeHanded(left); // R34
     a++;
   }
   if (releasesTouch(stepping)) stepping = false;
@@ -901,6 +1058,11 @@ function quickFree(slot: u64): u64 {
     // R33: `stepping` set around the call only where a release function may read it (freeSteps'); `spare` is 0 here
     if (releasesTouch(stepping)) stepping = true;
     s = callRelease(ptrAt(u32, entry).read(), objectAt<Counted0>(slot), 0, Visit.Drop);
+    // R34: a leaf the release function handed over waits, as with `spare` 0 visitLeaf leaves it waiting
+    if (releasesTouch(handed) && s >= RC_HANDED) {
+      s = s - RC_HANDED;
+      takeHanded(0n);
+    }
     if (releasesTouch(stepping)) stepping = false;
   }
   if (s === 1) {
@@ -923,7 +1085,8 @@ function quickFree(slot: u64): u64 {
     // a budget of one: `spare` 0 while the slot is visited, then the cursor one on), without the two calls and freeSteps'
     // frame; a thrown object (five slots) took both for every allocation that freed it
     if (releasesTouch(stepping)) stepping = true;
-    callRelease(ptrAt(u32, entry).read(), objectAt<Counted0>(slot), at, Visit.Drop);
+    const r = callRelease(ptrAt(u32, entry).read(), objectAt<Counted0>(slot), at, Visit.Drop);
+    if (releasesTouch(handed) && r >= RC_HANDED) takeHanded(0n);
     if (releasesTouch(stepping)) stepping = false;
     at++;
     stepsTaken = BigInt.asUintN(64, stepsTaken + 1n);
@@ -966,6 +1129,8 @@ function restIfWork(): void {
 /** Everything waiting, and what that releases. */
 function drainAll(): void {
   if (stepping) return; // inside a release function: the freeing under way goes on after it
+  // R34: a leaf handLeaf was given outside freeing (a hand-written call), which no freeing took: it waits with the rest
+  if (handed !== 0n) takeHanded(0n);
   while (waiting !== 0n || cur !== 0n) runSteps(0x10_0000);
 }
 
@@ -1591,6 +1756,13 @@ export class Rc<T extends object> {
   private tn: usize = 0; // R3: the tail length of its last object made with one, and that object's size class
   private tk: usize = 0;
   private tw: u32 = 0; // R21: and that object's owner word, worked out (checked) when tk is
+  // R34: the store's leaves, made by makeTailLeaf: their own number and entry (EMPTY), registered at the first, 0 before;
+  // that object's owner word with no tail, and the last leaf made's tail length, size class and owner word, as tn, tk, tw
+  private lid: u32 = 0;
+  private lowner: u32 = 0;
+  private ltn: usize = 0;
+  private ltk: usize = 0;
+  private ltw: u32 = 0;
 
   /** `release` is a top-level function, given each object as it's freed, one slot at a time (`Release`). */
   constructor(private release: Release<T>) {}
@@ -1609,8 +1781,14 @@ export class Rc<T extends object> {
   get size(): usize {
     if (this.id === 0) return 0;
     const e = ptrAt(u64, entryOf(this.id));
-    if (cyclesLinked()) return toUsize(e.add(2).read() - (e.add(1).read() & FREED));
-    return toUsize(e.add(2).read() - e.add(1).read());
+    // R34: and its leaves', in an entry of their own
+    let n: usize = 0;
+    if (this.lid !== 0) {
+      const l = ptrAt(u64, entryOf(this.lid));
+      n = toUsize(l.add(2).read() - (l.add(1).read() & FREED));
+    }
+    if (cyclesLinked()) return toUsize(e.add(2).read() - (e.add(1).read() & FREED)) + n;
+    return toUsize(e.add(2).read() - e.add(1).read()) + n;
   }
 
   /** The store's number and its entry, at its first make: its release function, typed for any class, and no objects. */
@@ -1618,18 +1796,7 @@ export class Rc<T extends object> {
   private register(): bool {
     if (this.id !== 0) return true;
     if (heads === 0n && !setUp()) return false; // a registered store's make reads its size's list straight away
-    if (stores + 1 >= tableCap) {
-      if (cyclesLinked() && stores + 1 >= MAX_STORES) return false;
-      const cap: u32 = tableCap === 0 ? 16 : tableCap * 2;
-      const t = heap.allocBytes(toUsize(cap) * ENTRY);
-      if (t === 0n) return false;
-      if (table !== 0n) {
-        copyBytes(t, table, toUsize(tableCap) * ENTRY);
-        heap.freeBytes(table, toUsize(tableCap) * ENTRY);
-      }
-      table = t;
-      tableCap = cap;
-    }
+    if (!roomForStore()) return false;
     // its release function's number: freeing and the collector call it by a comparison and a direct call (D70, R1d)
     const r = releaseIndex(this.release);
     if (r === 0) trap(Trap.Dispatch);
@@ -1641,6 +1808,30 @@ export class Rc<T extends object> {
     if (cyclesLinked()) ptrAt(u64, entryOf(this.id)).add(1).write(toU64(this.grp()) << 48n);
     this.k = sizeClass(SLOT_PREFIX + elemSize(this.elem));
     this.owner = this.id * 256 + toU32(this.k);
+    return true;
+  }
+
+  /**
+   * R34: the store's leaf entry, at its first leaf make (makeTailLeaf): a store number of its own, whose entry is EMPTY, so
+   * freeing gives each of its objects back as one step with no call, as it gives back an object of a class with no slots.
+   * Its release function's number is rooms' (an empty one every program has), never called for an EMPTY store but by the
+   * general loop's slot 0 visit (freeSteps), where it does nothing, as an object made here has nothing to visit. Only for a
+   * class in no cycle: its group is 0, as the entry's is.
+   */
+  /** @tsl.noinline */
+  // SAFETY: the table is grown to hold the entry before it's written (roomForStore).
+  private registerLeaf(): bool {
+    if (this.lid !== 0) return true;
+    if (!this.register()) return false;
+    if (!roomForStore()) return false;
+    const r = releaseIndex(roomRelease);
+    if (r === 0) trap(Trap.Dispatch);
+    stores++;
+    this.lid = stores;
+    ptrAt(u64, entryOf(this.lid)).write(toU64(r) | EMPTY);
+    ptrAt(u64, entryOf(this.lid)).add(1).write(0n);
+    ptrAt(u64, entryOf(this.lid)).add(2).write(0n);
+    this.lowner = this.lid * 256 + toU32(this.k);
     return true;
   }
 
@@ -1667,6 +1858,20 @@ export class Rc<T extends object> {
     return gen;
   }
 
+  /** R34: claim, for a leaf: its owner word the leaf entry's, and the leaf entry's count of what's made. */
+  /** @tsl.inline */
+  // SAFETY: as claim's; the leaf entry is registered before any leaf is made.
+  private claimLeaf(slot: u64, owner: u32): u32 {
+    countAt(slot).write(1n);
+    const g = genAt(slot);
+    const gen = (g.read() + 1) >>> 0; // as claim's
+    g.write(gen);
+    ownerAt(slot).write(owner);
+    const made = ptrAt(u64, entryOf(this.lid)).add(2);
+    made.write(BigInt.asUintN(64, made.read() + 1n));
+    return gen;
+  }
+
   /** @tsl.inline */
   // SAFETY: only an odd generation that matches, in a slot of this store's, is one of ours and not yet given back. A scan's
   // bits are in the top of the owner and generation words of an object whose class can be in a cycle, so those are masked.
@@ -1679,7 +1884,9 @@ export class Rc<T extends object> {
       if ((genAt(slot).read() % 0x1_0000) !== genOf(item)) trap(Trap.Stale);
       return slot;
     }
-    if (ownerAt(slot).read() >>> 8 !== this.id) trap(Trap.Stale);
+    // R34: or its leaves' number (a store's leaves are only of a class in no cycle, so only here)
+    const id = ownerAt(slot).read() >>> 8;
+    if (id !== this.id && (this.lid === 0 || id !== this.lid)) trap(Trap.Stale);
     if (genAt(slot).read() !== genOf(item)) trap(Trap.Stale);
     return slot;
   }
@@ -1843,6 +2050,92 @@ export class Rc<T extends object> {
   /** @tsl.noinline */
   private tailSlotAfter(): u64 {
     return freshSlot(this.tk);
+  }
+
+  /**
+   * R34: `makeTail` for an object whose counted references are all null when it's made and are never set (D39's R34, 3.5):
+   * tslc's expansion calls it only where it proves that of the class and the `new` it's given (a flat string, whose `buf`
+   * only its constructor writes, given `null`). It's made in the store's leaf entry, which is EMPTY, so freeing gives it
+   * back as one step with no call to its release function, whose visits of its slots, all null, would do nothing: one step
+   * where it was a step a slot and one for its block. For a class that can be in a cycle (or on the host, which can't tell
+   * whether it can), `makeTail`. The caller's promise is about leaks alone: were a reference set in it after all, freeing
+   * would never visit it, and what it refers to would keep a count forever, which is safe.
+   */
+  /** @tsl.moves item */
+  /** @tsl.tailed item */
+  /** @tsl.inline */
+  // SAFETY: the slot is a free one of size class ltk, as leafPlace needs.
+  makeTailLeaf(n: usize, item: T): Counted<T> {
+    if (cycleGroup<T>() !== 0) return this.tailFast(n, 0, item);
+    let slot: u64 = 0n;
+    if (
+      this.lid !== 0 &&
+      !(cyclesLinked() && (ccPhase !== 0 || (ccTop !== 0 && (ccGap === 0 || !pacing))))
+    ) {
+      // tailFast's, for the leaf entry: the same steps, the same slot
+      if (cyclesLinked()) idleStep();
+      else if (waiting !== 0n || cur !== 0n) freeLeaves();
+      if (n !== this.ltn || this.ltk === 0) {
+        const nk = sizeClass(SLOT_PREFIX + tailBytes(this.elem, n));
+        this.ltn = n;
+        if (nk !== this.ltk) {
+          this.ltk = nk;
+          this.ltw = tailOwner(this.lowner, nk);
+        }
+      }
+      const k = this.ltk;
+      const head = ptrAt(u64, heads).add(k);
+      slot = head.read();
+      if (slot !== 0n) head.write(countAt(slot).read());
+      else {
+        if (!cyclesLinked()) {
+          slot = pageCut(k);
+          if (slot !== 0n) genAt(slot).write(0);
+        } else if (rest === 0 || (waiting === 0n && cur === 0n)) {
+          slot = chunkCut(k);
+          if (slot !== 0n) genAt(slot).write(0);
+        }
+        if (slot === 0n) slot = this.leafSlotAfter();
+      }
+    } else slot = this.leafSlot(n);
+    if (slot === 0n) trap(Trap.OutOfMemory);
+    // tailPlace's, for the leaf entry
+    const made = placeTail(slot, this.claimLeaf(slot, this.ltw), n, item);
+    if (cyclesLinked() && rest !== 0) restIfWork();
+    return made;
+  }
+
+  /** R34: tailSlot, for a leaf: the leaf entry registered at the first, and its own last size class (ltn, ltk, ltw). */
+  /** @tsl.noinline */
+  // SAFETY: a slot on a list is free and 2^k bytes; slotFor's is too.
+  private leafSlot(n: usize): u64 {
+    if (cyclesLinked()) {
+      if (ccPhase !== 0 || (ccTop !== 0 && (ccGap === 0 || !pacing))) stepAll(budget);
+      else idleStep();
+    } else if (waiting !== 0n || cur !== 0n) freeAlloc(budget);
+    if (!this.registerLeaf()) return 0n;
+    let k = this.ltk;
+    if (n !== this.ltn || k === 0) {
+      k = sizeClass(SLOT_PREFIX + tailBytes(this.elem, n));
+      this.ltn = n;
+      if (k !== this.ltk) {
+        this.ltk = k;
+        this.ltw = tailOwner(this.lowner, k);
+      }
+    }
+    const head = ptrAt(u64, heads).add(k);
+    const slot = head.read();
+    if (slot !== 0n) {
+      head.write(countAt(slot).read());
+      return slot;
+    }
+    return slotFor(k);
+  }
+
+  /** R34: tailSlotAfter, for a leaf. */
+  /** @tsl.noinline */
+  private leafSlotAfter(): u64 {
+    return freshSlot(this.ltk);
   }
 
   /** @tsl.moves item */
@@ -2038,6 +2331,45 @@ export class Rc<T extends object> {
   }
 
 
+  /**
+   * R34: `visitLeaf` for a release function that tells freeing what it did through what it returns (3.5, D39's R34): for
+   * a class whose objects have no slots of their own, as visitLeaf is. Freeing's drop of a count above one takes one off, as
+   * visitLeaf does; of the last, the object is handed to freeing (`handed`, @tsl/gc's own) and this gives true, and the
+   * release function gives `RC_HANDED` (added to its count of slots in slot 0's call, alone past it, where freeing reads no
+   * count), so freeing gives the object back at once as a step of
+   * its own if the budget has one to spare after this one, and otherwise leaves it waiting, as `drop` would have queued it:
+   * visitLeaf's steps, without `spare` written before each release call and read back after. Anything else is `visit`,
+   * false. A leaf already handed over and not yet taken (this called outside freeing, which nothing generated does) is
+   * queued first, so nothing is lost.
+   */
+  /** @tsl.moves h */
+  /** @tsl.inline */
+  // SAFETY: slotIn checked it's ours and live, or tslc placed every count of T. T's objects have no slots (the caller's
+  // promise, visitLeaf's), so a count of one, the one this drops, is the last, and what freeing would do with the object is
+  // give its block back: its count word is made WAITING here, so a stale reference finds it gone, as on the queue; where
+  // T is counted exactly there's no stale reference to find it (3.5's proof), and freeing writes the word next either way.
+  handLeaf(h: Counted<T>, op: Visit): bool {
+    if (op === Visit.Drop && cycleGroup<T>() === 0) {
+      const slot = this.slotIn(h);
+      const c = countAt(slot);
+      const n = c.read();
+      if (n === 1n) {
+        if (handed !== 0n) takeHanded(0n);
+        // a reference tslc's expansion counts is never used past its last count (3.5's proof), so only another's finds this
+        if (!countedExactly<T>()) c.write(WAITING);
+        handed = slot;
+        return true;
+      }
+      // a count left, taken off as visitLeaf takes it off (above 1, so less one can't wrap)
+      if (n > 1n && (countedExactly<T>() || n < WAITING)) {
+        c.write(BigInt.asUintN(64, n - 1n));
+        return false;
+      }
+    }
+    this.visit(h, op);
+    return false;
+  }
+
   /** visit's collector part: Collect, Scan and Trace. */
   /** @tsl.moves h */
   // SAFETY: slotIn checked it's ours and live, or tslc placed every count of T.
@@ -2071,7 +2403,8 @@ export class Rc<T extends object> {
       if (genAt(slot).read() % 0x1_0000 !== genOf(h)) trap(Trap.Stale);
       return toU32(countAt(slot).read() & COUNT);
     }
-    if (ownerAt(slot).read() >>> 8 !== this.id) trap(Trap.Stale);
+    const id = ownerAt(slot).read() >>> 8; // R34: or its leaves'
+    if (id !== this.id && (this.lid === 0 || id !== this.lid)) trap(Trap.Stale);
     if (genAt(slot).read() !== genOf(h)) trap(Trap.Stale);
     return toU32(countAt(slot).read());
   }
@@ -2117,7 +2450,8 @@ export class Rc<T extends object> {
       if (m >= ST_WHITE) touch(slot);
       return objectAt<T>(slot);
     }
-    if (ownerAt(slot).read() >>> 8 !== this.id) return undefined;
+    const id = ownerAt(slot).read() >>> 8; // R34: or its leaves'
+    if (id !== this.id && (this.lid === 0 || id !== this.lid)) return undefined;
     if (genAt(slot).read() !== gen) return undefined;
     const n = countAt(slot).read();
     if (n === 0n || n >= WAITING) return undefined;
@@ -2188,4 +2522,13 @@ export function roomAddr(r: Counted<Room>): u64 {
 /** @tsl.moves r */
 export function roomDrop(r: Counted<Room>): void {
   rooms.visitLeaf(r, Visit.Drop);
+}
+
+/**
+ * R34: a room let go of by its holder's release function (`JsRoomArray.trimHand`): handed to freeing (`Rc.handLeaf`), so
+ * true, which the release function tells freeing by adding `RC_HANDED` to what it gives.
+ */
+/** @tsl.moves r */
+export function roomHand(r: Counted<Room>): bool {
+  return rooms.handLeaf(r, Visit.Drop);
 }

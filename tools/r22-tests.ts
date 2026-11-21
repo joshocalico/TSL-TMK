@@ -47,8 +47,9 @@ export const R22_FAULTS: {
     what: "freeOne's second step, taken in place, visiting slot 2 in place of slot 1, so slot 1's child is never let go of and slot 2's is let go of twice",
     patch: {
       file: RC,
-      from: "    callRelease(ptrAt(u32, entry).read(), objectAt<Counted0>(slot), at, Visit.Drop);",
-      to: "    callRelease(ptrAt(u32, entry).read(), objectAt<Counted0>(slot), at + 1, Visit.Drop);",
+      // R34: the visit's result is kept, for a leaf it hands back
+      from: "    const r = callRelease(ptrAt(u32, entry).read(), objectAt<Counted0>(slot), at, Visit.Drop);",
+      to: "    const r = callRelease(ptrAt(u32, entry).read(), objectAt<Counted0>(slot), at + 1, Visit.Drop);",
     },
   },
   {

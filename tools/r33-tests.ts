@@ -65,8 +65,9 @@ export const R33_FAULTS: {
     what: "freeSteps' loop over an object's slots without its budget test, so the cursor's object has every slot visited in one freeing, past the budget, against D39's bound",
     patch: {
       file: RC,
-      from: "      while (a < s) {\n        if (left === 0n) break;\n        if (releasesTouch(spare)) {\n          spare = BigInt.asUintN(64, left - 1n);\n          callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);",
-      to: "      while (a < s) {\n        if (releasesTouch(spare)) {\n          spare = BigInt.asUintN(64, left - 1n);\n          callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);",
+      // R34: each visit's result kept (`r`) for a leaf the release function hands back
+      from: "      while (a < s) {\n        if (left === 0n) break;\n        let r: usize = 0;\n        if (releasesTouch(spare)) {\n          spare = BigInt.asUintN(64, left - 1n);\n          r = callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);",
+      to: "      while (a < s) {\n        let r: usize = 0;\n        if (releasesTouch(spare)) {\n          spare = BigInt.asUintN(64, left - 1n);\n          r = callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);",
     },
   },
   {
@@ -74,8 +75,9 @@ export const R33_FAULTS: {
     what: "freeAlloc's slot 0 visit, where no release function may see `spare`, not counting its step, so an allocation frees a step more than its budget",
     patch: {
       file: RC,
-      from: "      } else {\n        s = callRelease(rel, objectAt<Counted0>(head), 0, Visit.Drop);\n        left = BigInt.asUintN(64, left - 1n);\n      }\n      if (releasesTouch(stepping)) stepping = false;",
-      to: "      } else {\n        s = callRelease(rel, objectAt<Counted0>(head), 0, Visit.Drop);\n      }\n      if (releasesTouch(stepping)) stepping = false;",
+      // R34: freeAlloc's test for a leaf the release function hands back follows the visit, before `stepping` is cleared
+      from: "      } else {\n        s = callRelease(rel, objectAt<Counted0>(head), 0, Visit.Drop);\n        left = BigInt.asUintN(64, left - 1n);\n      }\n      // R34: a leaf the release function handed over (freeSteps')\n      if (releasesTouch(handed) && s >= RC_HANDED) {\n        s = s - RC_HANDED;\n        left = takeHanded(left);\n      }\n      if (releasesTouch(stepping)) stepping = false;",
+      to: "      } else {\n        s = callRelease(rel, objectAt<Counted0>(head), 0, Visit.Drop);\n      }\n      // R34: a leaf the release function handed over (freeSteps')\n      if (releasesTouch(handed) && s >= RC_HANDED) {\n        s = s - RC_HANDED;\n        left = takeHanded(left);\n      }\n      if (releasesTouch(stepping)) stepping = false;",
     },
   },
 ];

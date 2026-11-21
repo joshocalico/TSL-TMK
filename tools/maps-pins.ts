@@ -27,6 +27,7 @@ import { r30Moved } from "./r30-moved.ts";
 import { r31Moved } from "./r31-moved.ts";
 import { r32Moved } from "./r32-moved.ts";
 import { r33Moved } from "./r33-moved.ts";
+import { r34Moved } from "./r34-moved.ts";
 import { clsidMoved } from "./clsid-moved.ts";
 import { r1dMoved } from "./r1d-moved.ts";
 import { r1fMoved } from "./r1f-moved.ts";
@@ -405,6 +406,7 @@ export const INT_MOVED: Record<string, string> = {
  */
 export const mapsMoved = (k: string): boolean =>
   r33Moved(k) ||
+  r34Moved(k) ||
   r32Moved(k) ||
   r31Moved(k) ||
   r30Moved(k) ||

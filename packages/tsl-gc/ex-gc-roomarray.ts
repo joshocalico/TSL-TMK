@@ -1,7 +1,7 @@
 // file: ex-gc-roomarray.ts
 import { idiv, toU64, Trap, trap, u16, u32, u64, u8, type bool, type usize } from "@tsl/core";
 import { copyBytes, elemSize, ptrAt, tailAddr, type ElemOf, type Ptr } from "@tsl/unsafe";
-import { roomAddr, roomDrop, roomMake, type Counted, type Room } from "./ex-gc-rc.ts";
+import { roomAddr, roomDrop, roomHand, roomMake, type Counted, type Room } from "./ex-gc-rc.ts";
 
 /**
  * A JS array of T as a lowered `rc` package holds it (R3, D66, D69): `JsArray`'s rules, with its elements in the counted
@@ -171,6 +171,20 @@ export class JsRoomArray<T> {
     this.room = null;
     roomDrop(r);
     return true;
+  }
+
+  /**
+   * R34: trim, for its holder's release function where it has a room of its own (`rooms` 1): the room handed to freeing
+   * (`roomHand`), true if it was, which the release function adds to what it gives as `RC_HANDED`.
+   */
+  trimHand(): bool {
+    const r = this.room;
+    this.len = 0;
+    this.data = 0n;
+    this.cap = 0;
+    if (r === null) return false;
+    this.room = null;
+    return roomHand(r);
   }
 
   /** Slot i, below the length, made a hole. */

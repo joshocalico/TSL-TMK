@@ -145,14 +145,15 @@ export const R2_FAULTS: R2Fault[] = [
   },
   {
     name: "trim-keeps",
-    // R3: a lowered `rc` array is @tsl/gc's JsRoomArray now, so the same bug is put in its trim
+    // R3: a lowered `rc` array is @tsl/gc's JsRoomArray now, so the same bug is put in its trim. R34: its holder's release
+    // function lets the room go through trimHand (handing it to freeing), so the bug is put there, where freeing reaches it
     what: "a lowered rc array's trim not giving its room back",
-    transform: "JsRoomArray's trim, the last step of freeing an array",
+    transform: "JsRoomArray's trimHand, the last step of freeing an array",
     where: "library",
     patch: {
       file: "ex-gc-roomarray.ts",
-      from: "    this.room = null;\n    roomDrop(r);\n    return true;",
-      to: "    this.room = null;\n    return true;",
+      from: "    this.room = null;\n    return roomHand(r);",
+      to: "    this.room = null;\n    return false;",
     },
     dirs: ["corpus/lower/rc-tsl"],
   },

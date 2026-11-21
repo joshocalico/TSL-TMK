@@ -1034,6 +1034,67 @@ class's references have no tag is given the address, with no generation read for
 steps in the same order with the same effects (D39, D41): every corpus/rc rc_steps* pin holds. `TMK_R33_OFF=touch` answers
 every question true, and `TMK_R33_OFF=order` keeps R25's order.
 
+*Batched frees, objects made as leaves, and leaves handed back through what a release function returns (R34, D39's R34).*
+Three changes to how @tsl/gc frees what has no slots, each with its own reasoning. (1) **A run of leaves.** At an
+allocation of a leaf (`makeTailLeaf`, below), where the cursor is idle, nothing is under way and the queue's head is an object
+whose store is EMPTY (its release function does nothing, R17), that object and each next waiting object while it's of the same
+store, up to what the budget has left, are given back in line, in one pass (`freeLeaves`, `leafRun`): each one a step, given
+back as giveBack gives one back (its generation made even, so every reference to it is stale, and its slot on its size's list
+unless it's out of generations), with the store's freed count brought up and the budget brought down once for the run, and
+the store's entry and its EMPTY bit read once; freeAlloc is called with what the budget has left only if something still
+waits, and anything else is freeAlloc's whole, as before. A string program frees about one string an allocation, so the
+call, its frame and its tests were most of what freeing a string cost. Only there: in `make` and `makeTail`, whose next
+waiting object is mostly not a leaf, the tests before the call cost 17 instructions an allocation for nothing, and in
+freeAlloc's own loop a run is mostly one object, which the loop gives back for 9 fewer than a run's set-up costs (MEASURED,
+M5's R34 record).
+(2) **Objects made as leaves.** `Rc.makeTailLeaf(n, item)` makes an object whose counted references are all null and are
+never set in its store's leaf entry: a second store number of the same `Rc`, registered at the first such make
+(`registerLeaf`), whose entry is EMPTY, with rooms' empty release function as its number (never called for an EMPTY store,
+but by the general loop's slot 0 visit, `freeSteps`, where it does nothing, as an object made so has nothing to visit). So
+freeing gives one back as one step with no call, where it was a step for each slot, all null, and one for its block. Only for
+a class in no cycle (a constant natively; on the host, which can't tell, `makeTail`). `share`, `drop` and the checks of a
+reference that isn't counted exactly take either number as the store's, `size` adds both entries, and `rcLive` counts both.
+tslc's expansion picks `makeTailLeaf` for `withTail(n, new C(…))` where C has slots, all reference fields (no array, vector
+or map), C is in no cycle and has no superclass, each reference field is written only by C's constructor, as a statement of
+its own at its top level from one of its parameters the constructor never assigns (or not at all, with `null` as its
+initialiser), nothing else in any `rc` module writes a field of that name of a C (an assignment, or anywhere in a
+destructuring target, or of a value whose type can't be told), and each such parameter is given `null` there. A flat string
+is one: `jsStrZeroed`'s `new JsStr(n, 0, null, 0)`, as `buf` is set only by the constructor. The rule's failure mode is a
+leak, never a fault: were a reference set in such an object after all, freeing would never visit it, and what it referred
+to would keep a count for ever. (3) **Leaves handed back.** `Rc.handLeaf(h, op)` is `visitLeaf` for a release function that
+tells freeing what it did through what it returns: freeing's drop of a count above one takes one off, as visitLeaf does; of
+the last, the object's count word is made WAITING where its class isn't counted exactly (a stale reference finds it gone, as
+on the queue; one counted exactly has none), it's put in @tsl/gc's own `handed`, and `handLeaf` gives true; the release
+function then gives `RC_HANDED` (2^52, far above any count of slots, and exact on the host): added to its count of slots in
+the call for slot 0, the one call whose count freeing reads, and alone in a call for any slot past it. Freeing, at each release call it makes (freeSteps, freeFlat, freeAlloc,
+freeRest, quickFree), where a release function may hand one over (`releasesTouch(handed)`, R33's question of the call graph:
+only `handLeaf` writes `handed`; where none may, the test is a constant false and goes, as in a list's or a churn's program),
+takes `RC_HANDED` off a result at or above it and takes `handed` (`takeHanded`): with a step left after
+that call's, the leaf's block is given back at once as a step of its own; with none (a budget of one, `quickFree`'s steps),
+it goes on the queue, as `drop` would have put it. That is exactly what `visitLeaf` did through `spare` (`spare` was what
+the budget had left after the step; a leaf was given back at once, a step, while it wasn't 0, and otherwise `drop`ped), so the
+same steps in the same order with the same effects; corpus/std/rc_r34_leaves.ts's `sameAsVisitLeaf` runs one shape both ways
+and checks every allocation's steps and live count agree. A room goes the same way: `JsRoomArray.trimHand` (`roomHand`) where
+the release function's step gives back a room of the array's own. The expansion writes `handLeaf` where it wrote `visitLeaf` for
+a reference field (a view's buffer), and `trimHand` for a room array's room; an array's or vector's element and a map's key
+and value keep `visitLeaf`: where most of a program's visits hand a leaf over (an array of leaves), handing it over through
+`handed` cost a few instructions more a leaf than `spare` (bench/memory's acyclic 0.696 → 0.742 at -O1 with elements handed,
+MEASURED), and a map's one call may visit two. So in a program whose release functions reached `spare` only through a field
+or a room (a string program whose arrays hold no leaves, strkeys among them), none reaches it now, `releasesTouch(spare)` is
+false, and freeing writes `spare` around no release call: seven instructions a release call, set before it and read back
+and cleared after. `visitLeaf`, `leafBack`, `roomDrop` and `spare` stay, for those
+visits, hand-written release functions and growth's `roomDrop`. *Why sound:* (1) the run takes only the queue's head, a waiting
+slot, and only while its owner word names the same store, whose entry is EMPTY, so each is what freeAlloc's loop would give
+back with no call next, in the same order; nothing in the run calls anything, so nothing comes back in; it stops at the
+budget, so an allocation still frees at most its budget. (2) An object made in the leaf entry is a counted slot like any
+other: claimed, generation odd, its owner word the leaf entry's number; a store's checks accept that number only where it's
+been registered. (3) `handed` is @tsl/gc's own, written only by `handLeaf` (which queues one still there first, so none is
+lost; `drainAll` queues one left by a call outside freeing), read only where a release function said it handed one, and 0
+everywhere else; a release function that says so falsely finds 0, and one that hands over a class with slots after all (the
+caller's promise, as visitLeaf's) has those slots' counts leak, never a fault. D41's collector is untouched: `handLeaf` hands
+over only for a class in no cycle, and the collector's visits (`Scan`, `Trace`, `Collect`) are `visit`'s. `TMK_R34_OFF=leaf`
+makes nothing as a leaf, and `TMK_R34_OFF=hand` keeps R4's `visitLeaf` and `trim` in the expansion.
+
 Closure calls (R3's kind switch): in `rc`, an environment class's `call` with several kinds prints `@tsl.inline`, and so does
 each kind's method of at most six lines with no loop, so a closure called in a loop is its compare chain and its kind's code
 there; tslc notes the kind and the captures, which only the environment's constructor stores, invariant (3.4's R19 rule), so
@@ -1284,6 +1345,15 @@ export type Counted<T extends object> = T;
 export const RC_BUDGET: usize = 32;
 
 /**
+ * R34: what a release function gives to say that, in that call, it handed freeing a leaf (`Rc.handLeaf`): added to its count
+ * of slots in the call for slot 0, whose count freeing reads, and alone in a call for a slot past it, whose count it doesn't.
+ * Freeing gives the leaf back at once, as a step, where the budget has one to spare, and otherwise leaves it waiting. 2^52: a
+ * count of slots is far below it (an object of 2^52 slots would be more memory than there is), and a count plus it is exact
+ * on the host, whose `usize` is a double.
+ */
+export const RC_HANDED: usize = 0x10_0000_0000_0000;
+
+/**
  * What a release function is asked to do with the reference in a slot. `Drop` and `Collect` are freeing: the object is
  * going, so a vector may be emptied as it goes. `Scan` and `Trace` are the cycle collector looking (D41): the object may
  * well be alive, so a release function given either must change nothing, only visit the slot.
@@ -1441,6 +1511,7 @@ let slots: usize = 0; //     how many the object at the cursor has, from its rel
 let stepping: bool = false; // freeing or collecting is under way: a make inside a release function does no more
 let budget: usize = RC_BUDGET;
 let spare: u64 = 0n; //    while freeing visits a slot: steps the budget has left after it (R4), 0 everywhere else
+let handed: u64 = 0n; //   R34: a leaf whose last count `Rc.handLeaf` dropped, waiting for freeing to take it; 0 if none
 let rest: usize = 0; //     with the collector linked: what this allocation's budget has left after freeing one object
 // R17: a u64 added to in a wrap context, so not a checked add a step: a count of steps can't reach 2^64 (rcSteps converts it
 // back, checked).
@@ -1486,6 +1557,26 @@ let ccGaveUp: usize = 0;
 // SAFETY: id is a registered store's, below the table's capacity; this only forms the address.
 function entryOf(id: u32): u64 {
   return ptrAt(u64, table).add(toUsize((id << 2) >>> 0)).addr; // a store's number is 16 bits: four words an entry
+}
+
+/**
+ * Room in the table of stores for one more entry: the table grown, its entries copied, where it's full; false if there's no
+ * memory for it, or (with the collector) no store number left.
+ */
+// SAFETY: the new table is a fresh block of cap entries, the old one copied whole into it and then given back.
+function roomForStore(): bool {
+  if (stores + 1 < tableCap) return true;
+  if (cyclesLinked() && stores + 1 >= MAX_STORES) return false;
+  const cap: u32 = tableCap === 0 ? 16 : tableCap * 2;
+  const t = heap.allocBytes(toUsize(cap) * ENTRY);
+  if (t === 0n) return false;
+  if (table !== 0n) {
+    copyBytes(t, table, toUsize(tableCap) * ENTRY);
+    heap.freeBytes(table, toUsize(tableCap) * ENTRY);
+  }
+  table = t;
+  tableCap = cap;
+  return true;
 }
 
 /** Objects made and not yet given back, in every store: what each store's entry counts, added up (R17). */
@@ -1702,6 +1793,80 @@ function giveBack(slot: u64, owner: u32, entry: u64): void {
 }
 
 /**
+ * R34: a run of waiting leaves given back (D39's R34): `head`, just taken off the queue, an object of a store whose release
+ * function does nothing (EMPTY), then each next waiting object while it's of the same store, up to `left` in all: each one
+ * a step, as freeing would take it, giving its block back with no call, but the store's freed count brought up and the
+ * budget down once for the run, and the store's entry and its EMPTY bit found once. Gives how many it gave back, at least
+ * one and at most `left`. Without the collector only (freeLeaves'), so no waiting object is one a scan gave up, and a
+ * store's number is the owner word's top 24 bits. Not in freeAlloc's loop: a run there is mostly one object, which that
+ * loop gives back for 9 instructions fewer than a run's set-up and its test for a next one cost (adv_forof_mutation,
+ * MEASURED).
+ */
+/** @tsl.inline */
+// SAFETY: head is off the queue, a waiting slot of the store whose entry is `entry`, which is EMPTY; every object taken
+// after it is the queue's head, a waiting slot, and of the same store (its owner word's number), so EMPTY too, and taken off
+// before its block is given back. Nothing here calls anything, so nothing can come back in. left is at least 1.
+function leafRun(head: u64, owner: u32, entry: u64, left: u64): u64 {
+  const id = owner >>> 8;
+  let x = head;
+  let o = owner;
+  let n: u64 = 0n;
+  for (;;) {
+    retireObject(objectAt<Counted0>(x));
+    const g = genAt(x);
+    // unchecked, as giveBack's: a waiting object's generation is odd and below MAX_GEN
+    const gen = (g.read() + 1) >>> 0;
+    g.write(gen); // even: every reference to it is stale from now on
+    if (gen < MAX_GEN - 1) {
+      const list = ptrAt(u64, heads).add(toUsize(o % 0x100));
+      countAt(x).write(list.read());
+      list.write(x);
+    }
+    n = BigInt.asUintN(64, n + 1n); // at most left, a u64
+    if (n === left) break;
+    const next = waiting;
+    if (next === 0n) break;
+    const no = ownerAt(next).read();
+    if (no >>> 8 !== id) break; // another store's: freeAlloc's loop takes it
+    waiting = countAt(next).read() ^ WAITING;
+    x = next;
+    o = no;
+  }
+  const freed = ptrAt(u64, entry).add(1);
+  freed.write(BigInt.asUintN(64, freed.read() + n));
+  return n;
+}
+
+/**
+ * R34: a release function said it handed freeing a leaf (`RC_HANDED`, from `Rc.handLeaf`), and `left` is what the budget
+ * has after that call's step: the leaf's block given back at once as a step of its own if there's one left, as `visitLeaf`
+ * gives one back through `spare`; otherwise it waits on the queue, as `drop` would have put it there. Gives what the budget
+ * has left after it. A release function that says so without handing one over finds nothing here (handed is 0).
+ */
+/** @tsl.inline */
+// Freeing tests a release function's result for `RC_HANDED` only where one may hand a leaf over: `releasesTouch(handed)`,
+// R33's question of the call graph, as only handLeaf writes `handed`; where none may, the test is a constant false and goes
+// (a list's or a churn's programs, every TSL proper program but those calling handLeaf), and a result at or above it, which
+// a release function could give only by making it up, is taken as a count of slots, whose visits past the real ones do
+// nothing: steps spent, never a fault.
+// SAFETY: handed is 0 or a live counted slot whose last count handLeaf dropped (its count word made WAITING there), on no
+// list and not on the queue, of a store whose objects have no slots (handLeaf's caller's promise, visitLeaf's), so what
+// freeing would do with it is give its block back.
+function takeHanded(left: u64): u64 {
+  const lf = handed;
+  handed = 0n;
+  if (lf === 0n) return left;
+  if (left === 0n) {
+    countAt(lf).write(waiting | WAITING);
+    waiting = lf;
+    return left;
+  }
+  const owner = ownerAt(lf).read();
+  giveBack(lf, owner, entryOf(cyclesLinked() ? (owner % 0x100_0000) >>> 8 : owner >>> 8));
+  return BigInt.asUintN(64, left - 1n);
+}
+
+/**
  * Up to `n` steps of freeing (D39): each step visits one reference slot of the object at the cursor, through its store's
  * release function, or gives one block back. When the object at the cursor is done, the next is the one that waited last.
  * The cursor is held in locals while it runs and put back after, so a release function can't move it: a `make` one calls
@@ -1758,6 +1923,11 @@ function freeSteps(n: usize): u64 {
         s = callRelease(rel, objectAt<Counted0>(c), 0, Visit.Drop);
         left = BigInt.asUintN(64, left - 1n);
       }
+      // R34: a leaf the release function handed over, given back as a step if one is left, as `spare` lets visitLeaf
+      if (releasesTouch(handed) && s >= RC_HANDED) {
+        s = s - RC_HANDED;
+        left = takeHanded(left);
+      }
       a = 1;
     }
     if (s !== 0) {
@@ -1765,15 +1935,17 @@ function freeSteps(n: usize): u64 {
       // the optimiser sees in its body)
       while (a < s) {
         if (left === 0n) break;
+        let r: usize = 0;
         if (releasesTouch(spare)) {
           spare = BigInt.asUintN(64, left - 1n);
-          callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);
+          r = callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);
           left = spare;
           spare = 0n;
         } else {
-          callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);
+          r = callRelease(rel, objectAt<Counted0>(c), a, Visit.Drop);
           left = BigInt.asUintN(64, left - 1n);
         }
+        if (releasesTouch(handed) && r >= RC_HANDED) left = takeHanded(left); // R34
         a++;
       }
       // every slot visited, and the budget has room for giving the block back, a step of its own
@@ -1883,6 +2055,11 @@ function freeFlat(n: usize): u64 {
         s = callRelease(rel, objectAt<Counted0>(head), 0, Visit.Drop);
         left = BigInt.asUintN(64, left - 1n);
       }
+      // R34: a leaf the release function handed over (freeSteps')
+      if (releasesTouch(handed) && s >= RC_HANDED) {
+        s = s - RC_HANDED;
+        left = takeHanded(left);
+      }
     } else left = BigInt.asUintN(64, left - 1n);
     if (s > 1) {
       // the rest of its slots, one a step, as freeSteps visits them (R21: an object of one slot has no rest, and isn't
@@ -1890,15 +2067,17 @@ function freeFlat(n: usize): u64 {
       // budget tested inside, as freeSteps')
       while (a < s) {
         if (left === 0n) break;
+        let r: usize = 0;
         if (releasesTouch(spare)) {
           spare = BigInt.asUintN(64, left - 1n);
-          callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
+          r = callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
           left = spare;
           spare = 0n;
         } else {
-          callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
+          r = callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
           left = BigInt.asUintN(64, left - 1n);
         }
+        if (releasesTouch(handed) && r >= RC_HANDED) left = takeHanded(left); // R34
         a++;
       }
     }
@@ -1993,6 +2172,11 @@ function freeAlloc(n: usize): u64 {
         s = callRelease(rel, objectAt<Counted0>(head), 0, Visit.Drop);
         left = BigInt.asUintN(64, left - 1n);
       }
+      // R34: a leaf the release function handed over (freeSteps')
+      if (releasesTouch(handed) && s >= RC_HANDED) {
+        s = s - RC_HANDED;
+        left = takeHanded(left);
+      }
       if (releasesTouch(stepping)) stepping = false;
       if (s !== 0) {
         // R32: no step left, whatever its slots: the cursor left where freeFlat leaves it, at slot 1, for the next freeing
@@ -2021,6 +2205,38 @@ function freeAlloc(n: usize): u64 {
 }
 
 /**
+ * R34: a leaf's allocation's freeing without the collector linked, where something waits or the cursor is set
+ * (`makeTailLeaf`'s: where leaves are made, the object waiting is mostly the last one made, a leaf too): where the cursor
+ * is idle, nothing is under way and the next waiting object is a leaf (its store EMPTY), the run of its store's leaves is
+ * given back here, in line, as freeAlloc's first pass gives it back (leafRun), and freeAlloc takes what the budget has left
+ * only if something still waits; anything else is freeAlloc's whole. The same steps in the same order with the same
+ * effects, without freeAlloc's call where one run is all there is. Only there: in `make` and `makeTail`, where the next
+ * waiting object is mostly not a leaf, its tests before the call cost an allocation of a list's or an array's 17
+ * instructions for nothing (bench/memory's acyclic and arrays, MEASURED).
+ */
+/** @tsl.inline */
+// SAFETY: as freeAlloc's: the queue's head is a waiting slot holding its object, its owner word naming its store, whose
+// entry is EMPTY; it's taken off before leafRun gives it back.
+function freeLeaves(): void {
+  const head = waiting;
+  if (head === 0n || cur !== 0n || stepping) {
+    freeAlloc(budget);
+    return;
+  }
+  const owner = ownerAt(head).read();
+  const entry = entryOf(owner >>> 8);
+  if ((ptrAt(u64, entry).read() & EMPTY) === 0n) {
+    freeAlloc(budget);
+    return;
+  }
+  waiting = countAt(head).read() ^ WAITING;
+  const all = toU64(budget);
+  const n = leafRun(head, owner, entry, all);
+  stepsTaken = BigInt.asUintN(64, stepsTaken + n);
+  if (waiting !== 0n && n !== all) freeAlloc(toUsize(BigInt.asUintN(64, all - n)));
+}
+
+/**
  * R24: freeAlloc's object of more than one slot, its slot 0 visited, `n` steps left (at least one): its slots from 1 visited
  * in order, one a step, as freeFlat visits them, `spare` what the budget has left after each. Gives what's left; where the
  * budget runs out before its block's step, the cursor is left where freeFlat leaves it, for the next freeing to take on.
@@ -2036,15 +2252,17 @@ function freeRest(head: u64, entry: u64, s: usize, n: u64): u64 {
   if (releasesTouch(stepping)) stepping = true;
   while (a < s) {
     if (left === 0n) break;
+    let r: usize = 0;
     if (releasesTouch(spare)) {
       spare = BigInt.asUintN(64, left - 1n);
-      callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
+      r = callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
       left = spare;
       spare = 0n;
     } else {
-      callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
+      r = callRelease(rel, objectAt<Counted0>(head), a, Visit.Drop);
       left = BigInt.asUintN(64, left - 1n);
     }
+    if (releasesTouch(handed) && r >= RC_HANDED) left = takeHanded(left); // R34
     a++;
   }
   if (releasesTouch(stepping)) stepping = false;
@@ -2144,6 +2362,11 @@ function quickFree(slot: u64): u64 {
     // R33: `stepping` set around the call only where a release function may read it (freeSteps'); `spare` is 0 here
     if (releasesTouch(stepping)) stepping = true;
     s = callRelease(ptrAt(u32, entry).read(), objectAt<Counted0>(slot), 0, Visit.Drop);
+    // R34: a leaf the release function handed over waits, as with `spare` 0 visitLeaf leaves it waiting
+    if (releasesTouch(handed) && s >= RC_HANDED) {
+      s = s - RC_HANDED;
+      takeHanded(0n);
+    }
     if (releasesTouch(stepping)) stepping = false;
   }
   if (s === 1) {
@@ -2166,7 +2389,8 @@ function quickFree(slot: u64): u64 {
     // a budget of one: `spare` 0 while the slot is visited, then the cursor one on), without the two calls and freeSteps'
     // frame; a thrown object (five slots) took both for every allocation that freed it
     if (releasesTouch(stepping)) stepping = true;
-    callRelease(ptrAt(u32, entry).read(), objectAt<Counted0>(slot), at, Visit.Drop);
+    const r = callRelease(ptrAt(u32, entry).read(), objectAt<Counted0>(slot), at, Visit.Drop);
+    if (releasesTouch(handed) && r >= RC_HANDED) takeHanded(0n);
     if (releasesTouch(stepping)) stepping = false;
     at++;
     stepsTaken = BigInt.asUintN(64, stepsTaken + 1n);
@@ -2209,6 +2433,8 @@ function restIfWork(): void {
 /** Everything waiting, and what that releases. */
 function drainAll(): void {
   if (stepping) return; // inside a release function: the freeing under way goes on after it
+  // R34: a leaf handLeaf was given outside freeing (a hand-written call), which no freeing took: it waits with the rest
+  if (handed !== 0n) takeHanded(0n);
   while (waiting !== 0n || cur !== 0n) runSteps(0x10_0000);
 }
 
@@ -2834,6 +3060,13 @@ export class Rc<T extends object> {
   private tn: usize = 0; // R3: the tail length of its last object made with one, and that object's size class
   private tk: usize = 0;
   private tw: u32 = 0; // R21: and that object's owner word, worked out (checked) when tk is
+  // R34: the store's leaves, made by makeTailLeaf: their own number and entry (EMPTY), registered at the first, 0 before;
+  // that object's owner word with no tail, and the last leaf made's tail length, size class and owner word, as tn, tk, tw
+  private lid: u32 = 0;
+  private lowner: u32 = 0;
+  private ltn: usize = 0;
+  private ltk: usize = 0;
+  private ltw: u32 = 0;
 
   /** `release` is a top-level function, given each object as it's freed, one slot at a time (`Release`). */
   constructor(private release: Release<T>) {}
@@ -2852,8 +3085,14 @@ export class Rc<T extends object> {
   get size(): usize {
     if (this.id === 0) return 0;
     const e = ptrAt(u64, entryOf(this.id));
-    if (cyclesLinked()) return toUsize(e.add(2).read() - (e.add(1).read() & FREED));
-    return toUsize(e.add(2).read() - e.add(1).read());
+    // R34: and its leaves', in an entry of their own
+    let n: usize = 0;
+    if (this.lid !== 0) {
+      const l = ptrAt(u64, entryOf(this.lid));
+      n = toUsize(l.add(2).read() - (l.add(1).read() & FREED));
+    }
+    if (cyclesLinked()) return toUsize(e.add(2).read() - (e.add(1).read() & FREED)) + n;
+    return toUsize(e.add(2).read() - e.add(1).read()) + n;
   }
 
   /** The store's number and its entry, at its first make: its release function, typed for any class, and no objects. */
@@ -2861,18 +3100,7 @@ export class Rc<T extends object> {
   private register(): bool {
     if (this.id !== 0) return true;
     if (heads === 0n && !setUp()) return false; // a registered store's make reads its size's list straight away
-    if (stores + 1 >= tableCap) {
-      if (cyclesLinked() && stores + 1 >= MAX_STORES) return false;
-      const cap: u32 = tableCap === 0 ? 16 : tableCap * 2;
-      const t = heap.allocBytes(toUsize(cap) * ENTRY);
-      if (t === 0n) return false;
-      if (table !== 0n) {
-        copyBytes(t, table, toUsize(tableCap) * ENTRY);
-        heap.freeBytes(table, toUsize(tableCap) * ENTRY);
-      }
-      table = t;
-      tableCap = cap;
-    }
+    if (!roomForStore()) return false;
     // its release function's number: freeing and the collector call it by a comparison and a direct call (D70, R1d)
     const r = releaseIndex(this.release);
     if (r === 0) trap(Trap.Dispatch);
@@ -2884,6 +3112,30 @@ export class Rc<T extends object> {
     if (cyclesLinked()) ptrAt(u64, entryOf(this.id)).add(1).write(toU64(this.grp()) << 48n);
     this.k = sizeClass(SLOT_PREFIX + elemSize(this.elem));
     this.owner = this.id * 256 + toU32(this.k);
+    return true;
+  }
+
+  /**
+   * R34: the store's leaf entry, at its first leaf make (makeTailLeaf): a store number of its own, whose entry is EMPTY, so
+   * freeing gives each of its objects back as one step with no call, as it gives back an object of a class with no slots.
+   * Its release function's number is rooms' (an empty one every program has), never called for an EMPTY store but by the
+   * general loop's slot 0 visit (freeSteps), where it does nothing, as an object made here has nothing to visit. Only for a
+   * class in no cycle: its group is 0, as the entry's is.
+   */
+  /** @tsl.noinline */
+  // SAFETY: the table is grown to hold the entry before it's written (roomForStore).
+  private registerLeaf(): bool {
+    if (this.lid !== 0) return true;
+    if (!this.register()) return false;
+    if (!roomForStore()) return false;
+    const r = releaseIndex(roomRelease);
+    if (r === 0) trap(Trap.Dispatch);
+    stores++;
+    this.lid = stores;
+    ptrAt(u64, entryOf(this.lid)).write(toU64(r) | EMPTY);
+    ptrAt(u64, entryOf(this.lid)).add(1).write(0n);
+    ptrAt(u64, entryOf(this.lid)).add(2).write(0n);
+    this.lowner = this.lid * 256 + toU32(this.k);
     return true;
   }
 
@@ -2910,6 +3162,20 @@ export class Rc<T extends object> {
     return gen;
   }
 
+  /** R34: claim, for a leaf: its owner word the leaf entry's, and the leaf entry's count of what's made. */
+  /** @tsl.inline */
+  // SAFETY: as claim's; the leaf entry is registered before any leaf is made.
+  private claimLeaf(slot: u64, owner: u32): u32 {
+    countAt(slot).write(1n);
+    const g = genAt(slot);
+    const gen = (g.read() + 1) >>> 0; // as claim's
+    g.write(gen);
+    ownerAt(slot).write(owner);
+    const made = ptrAt(u64, entryOf(this.lid)).add(2);
+    made.write(BigInt.asUintN(64, made.read() + 1n));
+    return gen;
+  }
+
   /** @tsl.inline */
   // SAFETY: only an odd generation that matches, in a slot of this store's, is one of ours and not yet given back. A scan's
   // bits are in the top of the owner and generation words of an object whose class can be in a cycle, so those are masked.
@@ -2922,7 +3188,9 @@ export class Rc<T extends object> {
       if ((genAt(slot).read() % 0x1_0000) !== genOf(item)) trap(Trap.Stale);
       return slot;
     }
-    if (ownerAt(slot).read() >>> 8 !== this.id) trap(Trap.Stale);
+    // R34: or its leaves' number (a store's leaves are only of a class in no cycle, so only here)
+    const id = ownerAt(slot).read() >>> 8;
+    if (id !== this.id && (this.lid === 0 || id !== this.lid)) trap(Trap.Stale);
     if (genAt(slot).read() !== genOf(item)) trap(Trap.Stale);
     return slot;
   }
@@ -3086,6 +3354,92 @@ export class Rc<T extends object> {
   /** @tsl.noinline */
   private tailSlotAfter(): u64 {
     return freshSlot(this.tk);
+  }
+
+  /**
+   * R34: `makeTail` for an object whose counted references are all null when it's made and are never set (D39's R34, 3.5):
+   * tslc's expansion calls it only where it proves that of the class and the `new` it's given (a flat string, whose `buf`
+   * only its constructor writes, given `null`). It's made in the store's leaf entry, which is EMPTY, so freeing gives it
+   * back as one step with no call to its release function, whose visits of its slots, all null, would do nothing: one step
+   * where it was a step a slot and one for its block. For a class that can be in a cycle (or on the host, which can't tell
+   * whether it can), `makeTail`. The caller's promise is about leaks alone: were a reference set in it after all, freeing
+   * would never visit it, and what it refers to would keep a count forever, which is safe.
+   */
+  /** @tsl.moves item */
+  /** @tsl.tailed item */
+  /** @tsl.inline */
+  // SAFETY: the slot is a free one of size class ltk, as leafPlace needs.
+  makeTailLeaf(n: usize, item: T): Counted<T> {
+    if (cycleGroup<T>() !== 0) return this.tailFast(n, 0, item);
+    let slot: u64 = 0n;
+    if (
+      this.lid !== 0 &&
+      !(cyclesLinked() && (ccPhase !== 0 || (ccTop !== 0 && (ccGap === 0 || !pacing))))
+    ) {
+      // tailFast's, for the leaf entry: the same steps, the same slot
+      if (cyclesLinked()) idleStep();
+      else if (waiting !== 0n || cur !== 0n) freeLeaves();
+      if (n !== this.ltn || this.ltk === 0) {
+        const nk = sizeClass(SLOT_PREFIX + tailBytes(this.elem, n));
+        this.ltn = n;
+        if (nk !== this.ltk) {
+          this.ltk = nk;
+          this.ltw = tailOwner(this.lowner, nk);
+        }
+      }
+      const k = this.ltk;
+      const head = ptrAt(u64, heads).add(k);
+      slot = head.read();
+      if (slot !== 0n) head.write(countAt(slot).read());
+      else {
+        if (!cyclesLinked()) {
+          slot = pageCut(k);
+          if (slot !== 0n) genAt(slot).write(0);
+        } else if (rest === 0 || (waiting === 0n && cur === 0n)) {
+          slot = chunkCut(k);
+          if (slot !== 0n) genAt(slot).write(0);
+        }
+        if (slot === 0n) slot = this.leafSlotAfter();
+      }
+    } else slot = this.leafSlot(n);
+    if (slot === 0n) trap(Trap.OutOfMemory);
+    // tailPlace's, for the leaf entry
+    const made = placeTail(slot, this.claimLeaf(slot, this.ltw), n, item);
+    if (cyclesLinked() && rest !== 0) restIfWork();
+    return made;
+  }
+
+  /** R34: tailSlot, for a leaf: the leaf entry registered at the first, and its own last size class (ltn, ltk, ltw). */
+  /** @tsl.noinline */
+  // SAFETY: a slot on a list is free and 2^k bytes; slotFor's is too.
+  private leafSlot(n: usize): u64 {
+    if (cyclesLinked()) {
+      if (ccPhase !== 0 || (ccTop !== 0 && (ccGap === 0 || !pacing))) stepAll(budget);
+      else idleStep();
+    } else if (waiting !== 0n || cur !== 0n) freeAlloc(budget);
+    if (!this.registerLeaf()) return 0n;
+    let k = this.ltk;
+    if (n !== this.ltn || k === 0) {
+      k = sizeClass(SLOT_PREFIX + tailBytes(this.elem, n));
+      this.ltn = n;
+      if (k !== this.ltk) {
+        this.ltk = k;
+        this.ltw = tailOwner(this.lowner, k);
+      }
+    }
+    const head = ptrAt(u64, heads).add(k);
+    const slot = head.read();
+    if (slot !== 0n) {
+      head.write(countAt(slot).read());
+      return slot;
+    }
+    return slotFor(k);
+  }
+
+  /** R34: tailSlotAfter, for a leaf. */
+  /** @tsl.noinline */
+  private leafSlotAfter(): u64 {
+    return freshSlot(this.ltk);
   }
 
   /** @tsl.moves item */
@@ -3281,6 +3635,45 @@ export class Rc<T extends object> {
   }
 
 
+  /**
+   * R34: `visitLeaf` for a release function that tells freeing what it did through what it returns (3.5, D39's R34): for
+   * a class whose objects have no slots of their own, as visitLeaf is. Freeing's drop of a count above one takes one off, as
+   * visitLeaf does; of the last, the object is handed to freeing (`handed`, @tsl/gc's own) and this gives true, and the
+   * release function gives `RC_HANDED` (added to its count of slots in slot 0's call, alone past it, where freeing reads no
+   * count), so freeing gives the object back at once as a step of
+   * its own if the budget has one to spare after this one, and otherwise leaves it waiting, as `drop` would have queued it:
+   * visitLeaf's steps, without `spare` written before each release call and read back after. Anything else is `visit`,
+   * false. A leaf already handed over and not yet taken (this called outside freeing, which nothing generated does) is
+   * queued first, so nothing is lost.
+   */
+  /** @tsl.moves h */
+  /** @tsl.inline */
+  // SAFETY: slotIn checked it's ours and live, or tslc placed every count of T. T's objects have no slots (the caller's
+  // promise, visitLeaf's), so a count of one, the one this drops, is the last, and what freeing would do with the object is
+  // give its block back: its count word is made WAITING here, so a stale reference finds it gone, as on the queue; where
+  // T is counted exactly there's no stale reference to find it (3.5's proof), and freeing writes the word next either way.
+  handLeaf(h: Counted<T>, op: Visit): bool {
+    if (op === Visit.Drop && cycleGroup<T>() === 0) {
+      const slot = this.slotIn(h);
+      const c = countAt(slot);
+      const n = c.read();
+      if (n === 1n) {
+        if (handed !== 0n) takeHanded(0n);
+        // a reference tslc's expansion counts is never used past its last count (3.5's proof), so only another's finds this
+        if (!countedExactly<T>()) c.write(WAITING);
+        handed = slot;
+        return true;
+      }
+      // a count left, taken off as visitLeaf takes it off (above 1, so less one can't wrap)
+      if (n > 1n && (countedExactly<T>() || n < WAITING)) {
+        c.write(BigInt.asUintN(64, n - 1n));
+        return false;
+      }
+    }
+    this.visit(h, op);
+    return false;
+  }
+
   /** visit's collector part: Collect, Scan and Trace. */
   /** @tsl.moves h */
   // SAFETY: slotIn checked it's ours and live, or tslc placed every count of T.
@@ -3314,7 +3707,8 @@ export class Rc<T extends object> {
       if (genAt(slot).read() % 0x1_0000 !== genOf(h)) trap(Trap.Stale);
       return toU32(countAt(slot).read() & COUNT);
     }
-    if (ownerAt(slot).read() >>> 8 !== this.id) trap(Trap.Stale);
+    const id = ownerAt(slot).read() >>> 8; // R34: or its leaves'
+    if (id !== this.id && (this.lid === 0 || id !== this.lid)) trap(Trap.Stale);
     if (genAt(slot).read() !== genOf(h)) trap(Trap.Stale);
     return toU32(countAt(slot).read());
   }
@@ -3360,7 +3754,8 @@ export class Rc<T extends object> {
       if (m >= ST_WHITE) touch(slot);
       return objectAt<T>(slot);
     }
-    if (ownerAt(slot).read() >>> 8 !== this.id) return undefined;
+    const id = ownerAt(slot).read() >>> 8; // R34: or its leaves'
+    if (id !== this.id && (this.lid === 0 || id !== this.lid)) return undefined;
     if (genAt(slot).read() !== gen) return undefined;
     const n = countAt(slot).read();
     if (n === 0n || n >= WAITING) return undefined;
@@ -3432,6 +3827,15 @@ export function roomAddr(r: Counted<Room>): u64 {
 export function roomDrop(r: Counted<Room>): void {
   rooms.visitLeaf(r, Visit.Drop);
 }
+
+/**
+ * R34: a room let go of by its holder's release function (`JsRoomArray.trimHand`): handed to freeing (`Rc.handLeaf`), so
+ * true, which the release function tells freeing by adding `RC_HANDED` to what it gives.
+ */
+/** @tsl.moves r */
+export function roomHand(r: Counted<Room>): bool {
+  return rooms.handLeaf(r, Visit.Drop);
+}
 ```
 
 *Arrays in the counted heap (R3, D66, D69).* A lowered `rc` package's array is `JsRoomArray<T>`, `JsArray`'s rules with its elements in the counted heap: its holder (`JsArr_C`) is made with a tail of its first room (`withTail`, `makeTail`), so a holder and the elements that fit are one counted allocation, and past that each room is a `Room` from `roomMake`, doubling, the one outgrown let go of at once. Freeing is the holder's: its elements a step each, then its own room if it has one (`rooms`, `trim`).
@@ -3440,7 +3844,7 @@ export function roomDrop(r: Counted<Room>): void {
 // file: ex-gc-roomarray.ts
 import { idiv, toU64, Trap, trap, u16, u32, u64, u8, type bool, type usize } from "@tsl/core";
 import { copyBytes, elemSize, ptrAt, tailAddr, type ElemOf, type Ptr } from "@tsl/unsafe";
-import { roomAddr, roomDrop, roomMake, type Counted, type Room } from "./ex-gc-rc.ts";
+import { roomAddr, roomDrop, roomHand, roomMake, type Counted, type Room } from "./ex-gc-rc.ts";
 
 /**
  * A JS array of T as a lowered `rc` package holds it (R3, D66, D69): `JsArray`'s rules, with its elements in the counted
@@ -3610,6 +4014,20 @@ export class JsRoomArray<T> {
     this.room = null;
     roomDrop(r);
     return true;
+  }
+
+  /**
+   * R34: trim, for its holder's release function where it has a room of its own (`rooms` 1): the room handed to freeing
+   * (`roomHand`), true if it was, which the release function adds to what it gives as `RC_HANDED`.
+   */
+  trimHand(): bool {
+    const r = this.room;
+    this.len = 0;
+    this.data = 0n;
+    this.cap = 0;
+    if (r === null) return false;
+    this.room = null;
+    return roomHand(r);
   }
 
   /** Slot i, below the length, made a hole. */
@@ -10144,6 +10562,29 @@ once", R19's `pair-elem-undropped` and R24's `r24-rest-from-two` patched lines R
 where it's written now (every way of each visit), and gc-tests' runner for bugs in `rc` as TSL applies a bug's further
 patches (`more`), as its runner for corpus/std did.
 
+**Batched frees, objects made as leaves, and leaves handed back through what a release function returns (R34).** `tmk
+milestone pipe-d` box 87 (tools/r34-tests.ts) checks where R34 applies: corpus/lower/r34/r34_leaves.ts through the TSL route
+in `rc` at -O1 makes its flat strings in a store's leaf entry (`registerLeaf` is built) and its freeAlloc writes no `spare`
+(its strings' release functions hand a view's buffer back, and its arrays' a room, through what they return), and with R34 off
+(`TMK_R34_OFF=leaf,hand`) there's no leaf entry and freeAlloc writes `spare`. corpus/lower/r34 (strings built by appending,
+views over growing buffers, made and let go of many times over in 48 pages, so a buffer lost or a view freed without its
+buffer runs memory out where JS doesn't; short strings made a unit at a time, freed in runs; arrays of strings outgrowing
+their holders into rooms; views and flat strings in turn, what's kept read after) runs through the dual route with class
+printing forced in `rc` at -O0, -O1 and -O2 (not in `leak`, where a program sized to fit only while what it lets go of is
+freed runs out); corpus/std/rc_r34_leaves.ts natively at -O0 and -O2 against V8 and JSC (strings in the runtime's shape by
+hand, flat ones made by `makeTailLeaf` and views handing their buffers back with `handLeaf`, runs of each broken by the other
+and by another store, every allocation's steps and live count mixed in at budgets from 1 up; and `sameAsVisitLeaf`, pinned
+to 1, running one shape once handing leaves back and once through `visitLeaf` and checking every allocation's steps and live
+count agree); and corpus/rc's rc_steps programs natively in `rc`. Box 88 puts in R34's bugs and requires each caught by a
+wrong answer or a trap: the patches `r34-run-over` (a run of leaves freeing one past the budget), `r34-run-any` (a run going
+on through an object of another store, one with slots), `r34-hand-lost` (a handed leaf taken and its step counted, its block
+never given back), `r34-hand-twice` (a handed leaf given back twice), and `r34-leaf-any` (the expansion making every tailed
+object with slots in its leaf entry, by name). Re-pointed: gc-tests' "a freed slot's generation left as it was" (both ways a slot is given
+back), "a freeing step that visits every slot of an object at once" and "unbounded freeing at an allocation with no collector
+linked" (also freeLeaves' budgets), R22's `r22-second-step`, R24's `r24-leaf-twice` (visitLeaf's and handLeaf's line), R33's
+`r33-loop-budget` and `r33-quiet-step`, and R2's `trim-keeps` (now `trimHand`) patched lines R34 rewrote or moved off the
+path freeing takes; each now patches the same bug where it's written now.
+
 **Quick ways out that return a constant, and chunks from the page source (R31).** `tmk milestone pipe-d` box 81
 (tools/r31-tests.ts) checks where R31's split change applies: corpus/r31/r31_split.ts's `quick` and `quickF`, whose calls are
 past a block that only returns a constant, have no cold call at -O1 and -O2, and one each with R31 off (`TMK_R31_OFF=split`).
@@ -10692,6 +11133,16 @@ bare-metal test runtime, the native corpus on HVF and TCG, and the decoder. It d
 - *Why, as far as shown:* the object-keyed build's machine code at -O2 in `leak`. `seek`, the chain walk every lookup makes, is 46 instructions to the direct route's 27, and a step along a chain is 13 to 9: `JsArray.get`'s bounds check on the key and on the chain link, each a load of its array's length, which nothing in the loop changes, a compare and a branch. Before the loop, `heads.length - 1` is a checked subtract (an underflow branch and a 53-bit test) and `heads.get` a bounds check that `& (b - 1)` already ensures; `getOr` checks the value's index again. With `get`'s check taken out of `JsArray` (a measurement only, `TSL_TEST_PATCH`), number keys are 1.04× at -O2 and 1.06× at -O1, object keys 1.14× and 1.16×: the checks are most of -O1's gap and little of -O2's. **What's left of the object-keyed gap at -O2 isn't diagnosed.** The checks are what optimiser phase B targets: the length loads are loop-invariant (LICM), the `& (b - 1)` bound and the subtract are check elimination's.
 - *Class printing:* with classes forced at -O2 in `leak` and `manual`, over the pipe corpora and `bench/` (316 builds), 140 class-print where 128 did with string keys refused (`TMK_EMIT_STRKEYS=0`), and 30 print a `JsMap` or `JsSet` where 10 did: `strkeys.ts`, `drop_bound.ts`, `gaps_context.ts`, `rc_churn.ts` and both string-keyed benchmarks newly print, and the four that printed the runtime's map print `JsMap`. `auto` is unchanged.
 - *Pins:* none moved. `auto` prints no maps or strings, so no `auto` build's TIR changed, and every pinned tirhash check passed in `tmk test --changed` and the gate. New: `keyDispatch`, `JsString`'s three methods and `jsUnitsHash`, `corpus/lower/pipe/strkeys.ts`, `maps.ts`'s `objectMisses`, the hand-written cases, the two benchmarks, `tmk bench memory --maps`, box 19, and `TMK_EMIT_STRKEYS`.
+
+**Pipeline, phase 2: batched frees, objects made as leaves, and leaves handed back through what a release function returns (R34, 3.5, 8.3, D39, D44), `tmk milestone pipe-d` boxes 87 and 88, MEASURED 2026-11-21** (same host; builder's record, for the coordinator to verify; the owner's choice of 2027-02-02; instruction counts, TCG with `TMK_ICOUNT=1`: tools/r14-time.ts under `TMK_TRUST_IN=rc:classes`, `tmk bench memory --classes --rc` and with `--strings` and `--exceptions` at `TMK_OPT=1` and `2`, and `tmk profile --instructions` of scratch programs calling strkeys' cases. "Before" is the tree at commit 3cfd89a, R33's verified state, measured from a worktree of it with its own `@tsl` package links).
+
+- **Measured first:** R33's figures exactly: strkeys 1.112 / 1.083, rc_strings 0.982 / 0.979, case_all 0.997 / 0.987 (40 passes, five runs), r14-time's whole `rc` list at 8 passes row for row, every benchmark's counts, coverage line for line. Against the direct route, a string made and freed in strkeys' `views(…, 20)` (one string waits at each allocation) was `jsStrZeroed` 119.9 and freeAlloc 80.7 a call at -O2 (140.6 and 78.7 at -O1), against `__rc_new` 104.5, `__rc_work` 49.3 and `__rc_block_free` 13.0; in `views` of a non-ASCII string, 1,476 strings, two waiting at most allocations, freeAlloc 112.0 a call against `__rc_work`'s 69.2. A string isn't slotless (`JsStr.buf`), so each was two steps: slot 0's visit, a release call (with `spare` written before it and read back after, seven instructions, as a string's release function reaches `spare` through a view's buffer), then its block.
+- **Built** (3.5, D39's R34): (1) a run of waiting leaves given back in one pass, in line at a leaf's allocation (`freeLeaves` and `leafRun`, in `makeTailLeaf`), freeAlloc called for what the budget has left only if something still waits; (2) `Rc.makeTailLeaf`, a store's leaf entry (EMPTY) for an object whose references are all null and stay so, which tslc's expansion picks for `withTail(n, new C(…))` by the rule 3.5 gives (a flat string); (3) `Rc.handLeaf` and `RC_HANDED`: a release function hands a leaf to freeing through what it returns (`RC_HANDED` with its count of slots in slot 0's call, alone past it), and freeing gives it back at once as a step where the budget has one left (`takeHanded`), as `visitLeaf` did through `spare`; a room the same way (`JsRoomArray.trimHand`, `roomHand`); the expansion writes them for a reference field (a view's buffer) and a room array's room; freeing tests for it only where a release function may hand one over (`releasesTouch(handed)`). *Tried and taken out:* `freeLeaves` in `make` and `makeTail` too (where the next waiting object isn't a leaf, its tests cost 17 instructions an allocation before the call: acyclic 0.696 → 0.777 at -O1); a run in freeAlloc's own loop (mostly one object there, 9 instructions dearer than the loop's own way: freeAlloc 58.1 → 67.2 a call in adv_forof_mutation's `forEachClears`, which went 0.983 → 1.049 at -O2 with it); handing an array's or vector's element back too (an array of leaves hands one at almost every visit, and `handed`'s round trip cost a few instructions more than `spare`'s: acyclic 0.696 → 0.742 at -O1); the hand-over's test in every program (list and churn 0.006 to 0.013 slower until it was put behind `releasesTouch(handed)`). *Tests:* corpus/lower/r34/r34_leaves.ts, corpus/std/rc_r34_leaves.ts, tools/r34-tests.ts, pipe-d boxes 87 and 88; tools/r34-pins.ts and r34-moved.ts. `TMK_R34_OFF=leaf,hand` turns tslc's parts off; @tsl/gc's change is undone by the pins tool from SPEC.md.bak-pre-r34.
+- **Why sound:** 3.5's argument: a run takes only the queue's head while it's of the same EMPTY store, each a step, stopping at the budget; an object made in a leaf entry is a counted slot like any other, and its store's checks take that number as its own; `handed` is @tsl/gc's own, written only by `handLeaf`, read only where a release function says it handed one, and a false claim finds 0. D39's bound holds as a bound (its R34 amendment): a step is still one slot visited or one block given back; a leaf-made object is one step where it was one a slot and one for its block. D41's collector is untouched. Every corpus/rc rc_steps* pin holds; corpus/std/rc_r34_leaves.ts's `sameAsVisitLeaf` shows handing a leaf back takes visitLeaf's steps, allocation by allocation.
+- **After** (before → after, -O1 / -O2): strkeys 1.112 / 1.083 → **1.045 / 1.005**, rc_strings 0.982 / 0.979 → **0.913 / 0.908**, case_all 0.997 / 0.987 → **0.957 / 0.944** (40 passes, five runs). A string made and freed in `views(…, 20)`: `jsStrZeroed` with its freeing in line 160.1 at -O2 and 180.8 at -O1, where it was 119.9 + 78.9 and 140.6 + 77.0, against the direct route's `__rc_new`, `__rc_zero`, `__rc_work` and `__rc_block_free` 181.0 and 193.8 (`views` 471,938 → 434,629 a call against 443,624 at -O2, 515,715 → 480,178 against 442,674 at -O1); in `views` of a non-ASCII string 185.6 → 150.0 at -O2 against 155.4 (533,818 → 483,319 a call against 467,334; at -O1 170.8 against 156.3, 584,224 → 535,561 against 494,773). r14-time's whole `rc` list (`--passes 8 --runs 1`, both trees): over 1.00 before, strkeys 1.112 / 1.083; after, strkeys 1.044 / 1.005 alone. Lower: rc_strings at 8 passes 0.960 / 0.955 → 0.898 / 0.890, strings.ts 0.961 / 0.974 → 0.925 / 0.937, drop_bound 0.921 / 0.975 → 0.901 / 0.956, rc_churn 0.847 / 0.818 → 0.836 / 0.806, smoke 0.930 / 0.928 → 0.913 / 0.907, frag 0.184 / 0.180 → 0.180 / 0.176. Higher, all under 1.00: strict_objects 0.823 / 0.857 → 0.834 / 0.874, read_checks 0.925 / 0.969 → 0.932 / 0.979, closure_selected 0.958 / 0.946 → 0.965 / 0.956, cyc_exhaust 0.980 / 0.959 → 0.987 / 0.971 (to the trap, as before), adv_self_assign_swap 0.756 / 0.815 → 0.765 / 0.825, cyc_large 0.852 / 0.833 → 0.858 / 0.839; and by at most 0.006, store_closure, closure_escape, closure_outlives, grow_reuse, maps, adv_closure_clears_holder, adv_large_drop, adv_temporaries, adv_forof_mutation (0.983 → 0.984 at -O2). What raised them: a release call's test for a leaf handed back, where a program's release functions hand one over, and freeing's frames. `AUTO_RC`'s benchmarks: list 0.467 / 0.505 and churn 0.787 / 0.781 the same, cycles 1.010 / 0.882 the same (over at -O1 by instructions since R19; box 26 judges on time), arrays 0.663 / 0.696 → 0.670 / 0.704, acyclic 0.696 / 0.760 → 0.705 / 0.767, number-keyed maps 0.928 / 0.913 the same, object-keyed 0.867 / 0.816 → 0.871 / 0.843. Strings all faster: appends 0.806 / 0.827 → 0.794 / 0.813, short joins 0.673 / 0.732 → 0.613 / 0.668, substrings 0.887 / 0.881 → 0.867 / 0.861, scans 0.902 / 0.926 → 0.852 / 0.887, split and join 0.893 / 0.885 → 0.878 / 0.870. Exceptions in `rc`, all ≤ 1.00: 1.000 ×4 the same; throws 0.745 / 0.821 → 0.752 / 0.828, 0.794 / 0.859 → 0.800 / 0.865, 0.930 / 0.955 → 0.932 / 0.957. The JPEG decoder and S4's six programs give byte-identical TIR at -O1 and -O2 with R34 on and off (the same tree, R34 undone by patch and switch), so their machine code is unchanged; not timed.
+- **`TRUSTED_IN` rc:** strkeys is still over 1.00 (1.045 / 1.005), so it stays off, with no carve-out; `auto` takes nothing new. Coverage (route-blockers, -O2) the same line for line: `strict` 30 + 18, `leak` and `manual` 63 + 43, `rc` 19 + 0. *What's left in strkeys* (a pass of its 17 cases, -O2 1,348,000 instructions against 1,340,900, -O1 1,500,300 against 1,436,300): making and freeing a string now costs less than the direct route at -O2 (above), and every case but the two `views` is under it at -O2 (`lastUnit("k", 64)`, `stringSet`, `wordCounts` and `lookups` 1 to 9% under) and at -O1 but `lastUnit("k", 64)` (154,741 against 154,096, 0.4% over). At -O2 the 7,100 left is `views` of a non-ASCII string (+16,000 a call: concatenation, `jsStrJoined` and `JsStr.concat` against `concatFlat` and `strConcat`, +4,300; a one-unit string of a unit past the table, `jsStrUnitMade`, 9,900, which the direct route makes in line), less `views(…, 20)`'s −9,000 and the other cases' few thousand. At -O1 the 64,000 left is the same two cases' loop bodies and making: the unit read `long[j]` and its one-unit string in `views`' body (92,024 against the direct route's `views`, `strIndex` and `strChar`, 66,358), concatenation +12,500, and `jsStrZeroed`'s size class with its checked arithmetic, which -O2's range facts prove and -O1 doesn't (20 instructions a string: 180.8 against 160.1 at -O2). None of it is freeing's.
+- **Injected bugs** (box 88; cases caught, wrong answers among them): `r34-run-over` 7 (7), `r34-run-any` 16 (16), `r34-hand-lost` 67 (67), `r34-hand-twice` 92 (90), `r34-leaf-any` 6 (6). Re-pointed (8.3): gc-tests' "a freed slot's generation left as it was" (both ways a slot is given back now, `times: 2`, caught 6), "a freeing step that visits every slot of an object at once" (the visit's result kept, caught 5, as before), "unbounded freeing at an allocation with no collector linked" (make's line as before, and freeLeaves' budget, caught 65); R22's `r22-second-step` (the visit's result kept, caught 17), R24's `r24-leaf-twice` (visitLeaf's and handLeaf's line, `times: 2`, caught 12), R33's `r33-loop-budget` (3) and `r33-quiet-step` (8); and R2's `trim-keeps` (a room array's room not let go of), which patched `trim`, now patches `trimHand`, what a holder's release function calls (caught 15, as before; my first gate found it caught 0).
+- **Pins:** 20 of 3,864 moved, in the five lowered `rc` programs whose pins R31 to R33 moved (list and churn benchmarks, closure_outlives, escape_global, store_closure): -O0 in pre-std and pre-strings, -O1 and -O2 in opt, five set aside by key in the read-only pre-strings file. Stage `gc` (the library) moved all of them; `hand` also moved closure_outlives', escape_global's and store_closure's (their environments' leaf fields handed back); `leaf` moved none (none makes a flat string). TSL proper's moved: none.
 
 **Pipeline, phase 2: @tsl/gc's freeing flags written only where a release function can see them, the release chain's order, and freeing's loops (R33, 3.5, 4.3, 8.3, D39, D44), `tmk milestone pipe-d` boxes 85 and 86, MEASURED 2026-11-21** (same host; builder's record, for the coordinator to verify; instruction counts, TCG with `TMK_ICOUNT=1`: tools/r14-time.ts under `TMK_TRUST_IN=rc:classes`, `tmk bench memory --classes --rc` and with `--strings` and `--exceptions` at `TMK_OPT=1` and `2`, and `tmk profile --instructions` of scratch programs calling strkeys' cases and of rc_strings' `keepMany`. "Before" is the tree at commit ff68290, R32's verified state, measured from a worktree of it with its own `@tsl` package links).
 
@@ -12786,13 +13237,13 @@ Each row has a default. Work proceeds on the default without waiting. **Confirm 
 | D37 | A field given a direct `new` at construction, and assigned nowhere else, holds its object in place (3.4). `this.all = new Slab<Timer>(heap, 64)` and "a `Vec` in a field" need it | Keeping every class-typed field at 8 bytes, as 3.4 first read: `ex-memory.ts` then fails TSL3001 at that line, because nothing owns the object. Making the example take a `Slab` from a parameter: then a caller needs a `Slab` of `Slab`s or a static, for every container in a field. Price: such a field isn't a rebindable reference | Decided by the author on 2026-11-03, delegated by the owner. Found by phase B |
 | D36 | A down-lowered export called natively gets its memory from a caller-supplied arena, and results stay there until the caller resets it (4.5). `throw` natively is the trap path, with its message on serial. With exceptions (D49) that's still what a caller gets that doesn't ask, with the thrown value described; one that calls `__exc_catch_use(1)` takes it with `__exc_pending` and `__exc_take` instead (4.5). **R5 (M5's R5 record):** the layout is listed, not implicit in the direct route: `DownMeta.heap`'s offsets and sizes, by D36's rule, are the contract whichever route built the module (4.5's "The layout, listed, through both routes"). The TSL route prints each class that crosses an export in it (fields in D36's order, what D36's slot has past TSL's type as padding fields, D36's size, `@tsl.size`), tslc checks each offset, the size and that the class is plain, and refuses the printing otherwise; an array that crosses is a `JsArray`, whose first three words are D36's header, placed by the module's own `__vec_place_<id>` export (`VecDesc.place`), the one call a caller makes differently. `rc`, maps, closures, unions, tuples, optional scalars and typed arrays as fields aren't printed this way yet. **R6 (M5's R6 record), the owner's ruling of 2026-11-09 (D62) applied:** D36's rule is TSL's own layout (3.4), so the padding fields are gone: a `bool` 1 byte, an optional scalar a `bool` flag then its value at the value's alignment, a size rounded to the largest alignment only (allocated at least 8), in the direct route, phase 1's printing, the native caller (tools/native-exec.ts) and the Wasm glue alike; each pinned build the change moved is listed in `tools/r6-pins.ts` with what in it the two rules lay out differently, and no TSL proper build moved. And in a lowered `leak` or `manual` package the export call's bounded allocations are tslc's per-call region (4.5), the call arena itself, given back as each export returns **R7 (M5's R7 record):** the layout doesn't move; what prints does. An optional number or boolean field prints as its two fields, a `bool` flag then the value, which TSL lays out where D36 lists the optional (tslc's `checkBoundary` checks both offsets); a typed-array field as a runtime class of its pointer and length held in place (D37), D36's two words at the field's offset; and a `Map` or `Set` crossing an export as `@tsl/jsrt`'s `JsMap` or `JsSet` (D72), built by a caller through the exports D36 already names for it (`make`, `put`, `size`, `has`, `iter`, `step`, `key`, `val`, printed from compiler/rt/map.ts's surface onto JsMap) and read by JsMap's layout as tslc laid it out (`DownMeta.tslMaps`). `rc`, closures, unions and tuples crossing still aren't printed this way, and `auto` still doesn't take the boundary (`AUTO_BOUNDARY` off: within 0.2% of the direct route in instructions, not under it in every timed cell). **R8 (M5's R8 record):** `rc`'s counted objects and arrays cross through the TSL route, with the direct route's ownership unchanged (a result's count the caller's, arguments borrowed, a count for each reference a caller stores, every count given back) and the layout unchanged: a counted object is at its address, its references plain addresses (3.5's "A counted reference is an address"). What changes is whose calls a caller makes there: the package's own `__rc_place_<id>`, `__rc_retain_<id>`, `__rc_release_<id>` and `__rc_collect`, named in `DownMeta`, in place of `__rc_new`, `__rc_retain`, `__rc_release` and `__rc_collect` (4.5's "The ABI in `rc` through the TSL route"); and every class and array that crosses is `long` there, as nothing of the package's is in the arena. **R9 (M5's R9 record):** an array of booleans crosses as `@tsl/jsrt`'s `JsArray` of bytes (`JsArray<u8>`, each element 0 or 1: a `bool`'s own 1-byte layout, 3.4), so its header is D36's and its element slot 1 byte, as the direct route lays it out and `DownMeta.heap` already listed it: nothing a caller reads or writes moves, and no pin moved. A typed array crosses as before, as its pointer and length. Not `auto`'s choice (`AUTO_R9`). **R10 (M5's R10 record):** in `rc` through the TSL route a string crosses as the program's own `JsStr`, whose layout the build publishes (`DownMeta.rcStr.layout`, 4.5), as `JsString`'s can't be kept in an `rc` package (no dispatch interface or unsafe module there); a caller places one with `__str_place` as before and counts it by the package's own `__rc_retain_str` and `__rc_release_str`, R8's pattern. Forced only (`AUTO_RC_STRINGS`). **R11 (M5's R11 record):** with exceptions through the TSL route in `rc`, a caller gives a taken exception back with the module's own `__exc_release` (`DownMeta.exc.release`), R8's pattern. **R13 (M5's R13 record):** in a lowered `strict` package the TSL route keeps what crosses an export in the call arena until the caller resets it, as the direct route does, so a class is long there only where module state reaches it; what module state holds is what `__init` made before it commits the arena, and tslc refuses a package where something made after can reach it (4.5's "Arrays in `strict`"). Through Wasm such a build's references crossing an export are i64s (`DownMeta.refI64`), which the glue converts; natively a caller types each call by the module's signature. | Copying results out to caller-owned buffers: a second allocator for no gain. A hidden arena parameter on every function: a register per function, when a call never changes arena. R5: keeping D36's old layout and padding TSL's classes to it, as cheaper (R5 built that): it contradicted the owner's explicit ruling of 2026-11-09, and every caller written to it would have had to move later, so R6 moved D36 to TSL's layout (decisions.md, 2026-12-08). Publishing each route's own offsets: two layouts of one program, and a caller would have to know which route built it. A layout class per exported type (`u32()` fields): layout classes hold no references and have no constructor, and the printing would read nothing like the TS. Placing an array by D36's `__vec_new*`: their 24-byte header has no room for JsArray's element description and its giving back, so JsArray would read past it | Accepted by the owner on 2026-11-03, delegated to the author. R5's listed layout and checking: delegated, decisions.md 2026-12-07. R6's layout: the owner's ruling (D62); the per-call region: within the same ruling (tslc's escape analysis, no annotation), decisions.md 2026-12-08 |
 | D38 | `noStd` and memory modes, per package in `tsl.json` and by `--memory` for `tmk lower`. `"noStd": true` keeps `@tsl/std` out. `"memory"` is `strict` (default, today's behaviour), `leak` (an escaping `new` comes from the registered page source and is never freed, safe, code 14 when out) or `manual` (the registered heap, `unsafeFree`, no generation check, true unsafe). `rc` was reserved here, and is D39. Direction: `leak` should eventually be a debug mode, not a production one. It stays selectable and safe; once `rc` exists, `rc` becomes the production mode for escaping allocations in lowered code, and `leak` remains as a debugging baseline: a program that behaves differently under `leak` than under `rc` or `manual` has a freeing bug or a refcounting bug. Built: the one registered thing is a page source, and `manual`'s heap is a size-class allocator over it; a `leak` object in TSL proper is a static object made at run time, with a prefix, so it can be mixed with `Slab` objects and stored in `strict` packages; results natively are in long-lived memory, not the arena; closures have environment structs in down-lowered code, not in TSL proper. | Only `strict` (D28 as first written): real TS with lists and stored closures doesn't compile natively, and nothing tells `Slab`-free code what to do about it. A collector: a runtime in everything, and D4 rules one out where it matters. Registering a heap, as well as or instead of a page source: `@tsl/alloc` linked into everything, for one environment-specific function already there. Plain pointers for `leak`: cheaper by 8 bytes an object, but a field couldn't tell a `Slab` object from a leak one without a new check, and a leak reference couldn't enter a `strict` package. | Owner's decision, 2026-11-03. Direction for `leak` added by the owner, 2026-11-03. Since D63 (owner, 2026-11-09), each mode is defined as a desugaring onto TSL: `strict`, nothing escapes without a library (`Slab`, `Vec`, arenas, `Rc`); `leak`, a plain `new` from a never-free allocator; `manual`, a plain `new` and `unsafeFree`; `rc`, sugar for `@tsl/gc`'s `Rc`, built in TSL proper by D74. `leak` stays the debugging baseline for the `leak`-against-`rc` differential: corpus/rc/rc_churn.ts completes in `rc` where its twin in `leak` traps 14 |
-| D39 | `rc`: for lowered code, what isn't on the stack is counted, from the page source, per thread with non-atomic counts. A decrement to zero queues with an intrusive link, and each allocation does at most `RC_BUDGET` steps of freeing, one reference slot or one block a step, with a cursor, so a large drop never costs one allocation more than that. A pending free is drained before trap 14. Arguments are borrowed and results owned, in the module and across the native ABI (D36). A borrow is kept only where a whole-program fact shows nothing can overwrite a counted slot in between. Cycles leak with D41's collector off, and `tmk lower --report` says where they can. `WeakRef` clears at count zero. Counts are added to the finished tree in one pass. **R4:** freeing visits an object's slots in a loop of its own, its release function found once, and while it visits a slot a release function knows what the budget has left after that step (`spare`); dropping the last count of an object with no slots of its own (a leaf, which tslc's expansion visits with `Rc.visitLeaf`: a class with no counted field, array or map, a weak reference's, a `Room`) gives that object's block back at once and spends one of those steps on it, where it used to wait on the queue to take that step later. So each block given back is still a step and each slot visited is one, an allocation does at most its budget exactly (it gives a leaf back at once only with a step to spare, and runSteps counts the step), the steps freeing takes in all are the same, and with no step to spare (a budget of 1, or `quickFree`'s first step) the leaf waits as before; corpus/rc/rc_steps_nocc.ts's `leavesDrop` pin moved from 3201970 to 163201970 for that reason alone: the first allocation's 32 steps visit 16 references and free their 16 leaves, where they visited 32 and freed none, and collecting the rest is 1,970 steps either way (M5's R4 record). **R8:** the native ABI's convention holds through the TSL route unchanged, now that counted objects cross there: arguments borrowed, results owned, a caller's counts added and given back through the package's own exports, which the expansion counts like any of its own (4.5); a caller's last count given back only queues the object, and later allocations free it a budget of steps at a time, as any drop (tools/r8-tests.ts checks both, and that only what module state keeps is live after each case) **R11:** a map's tables in a lowered `rc` package through the TSL route are `@tsl/std`'s, and each takes the steps of one allocation (`rcAllocSteps`), the per-allocation bound unchanged; `@tsl/std` running out frees everything waiting first, as the counted heap's own exhaustion does. **R17:** the same steps, at the direct route's cost (M5's R17 record, 3.5). A store whose release function's body is `return 0;` alone (tslc's `releaseIsEmpty`, a constant over the closed set of release functions; a leaf's, a weak reference's, a room's) is marked in its entry, and freeing gives one of its objects back without the call, as one step, which is what the call came to: told there are no slots, freeing gave the block back as that step. `runSteps` takes such objects in a loop that calls nothing, so nothing can come back into it, and hands the rest of the budget to the general loop (`freeSteps`) at the first object that isn't one, or one a scan gave up (D41); the general loop takes slot 0's visit first, as before, and the budget is a u64 counted down unchecked since it's tested above zero first. `make`, `makeTail` and `makeTailKeep` are inlined, freeing's steps first as `tryMake` takes them (a call, only with something waiting), then a free slot off its list in line. The counts of objects made and given back are each store's, in its entry, and `rcLive` adds them up when asked, so neither freeing nor making counts every store's. Each allocation still takes at most its budget, exactly as many steps as before in the same order with the same effects (corpus/rc/rc_steps_leaves.ts pins them, and every existing count is unchanged), and the collector's code isn't touched. **R18 (3.5, M5's R18 record):** class printing in `rc` keeps on the stack, uncounted, what down-lowering keeps there, each object of a class the lowering places on its function's stack (`@tsl.stack`, left uncounted by the expansion, placed and checked by tslc's escape checking); `@tsl/gc` is unchanged, its bound and its collector with it, and such an object is one fewer to count and free, as in the direct route. **R19 (3.5's "`rc` class printing's remaining costs", M5's R19 record):** the same steps at less cost: an object whose release function isn't empty is freed, with the cursor idle, by `freeFlat`, `freeSteps`' loop without its frame (each slot a step, the block one more but for an object with no slots, the cursor left where `freeSteps` would have it where the budget runs out); without the collector a fresh slot of up to 2048 bytes is cut from a page of its size class, as here, not taken from the heap one `allocBytes` at a time; a tail of any length is made in line. Each allocation takes exactly the steps it took, in the same order (every pinned step count holds), and the collector's code is untouched. **R22 (M5's R22 record):** with the collector linked, an allocation's two steps are taken where it is: the first visits the next waiting object's slot 0, as since R1f, and for an object of more than one slot the second, slot 1's visit, is now taken there too (`quickFree`), with `spare` 0 while it runs and the cursor left at slot 2, as `runSteps(1)` took it through `freeSteps` with a budget of one; and a tail's owner word is the store's number and its size class with no checked multiply, worked out only where the class changes. The same steps, in the same order, with the same effects (every pinned step count holds), and the collector's code is untouched. **R24 (M5's R24 record):** without the collector linked, an allocation's freeing is one call (`freeAlloc`), where `runSteps` handed an object with slots to `freeFlat`: an object of one slot is freed there in place, slot 0's visit and its block a step each, an object of more slots goes on to `freeRest` for its slots from 1, the cursor is left at slot 1 where the budget runs out after slot 0, and anything else is `runSteps`' as before; `visitLeaf` reads a leaf's count once. The same steps, in the same order, with the same effects: corpus/rc/rc_steps_r24.ts's counts were pinned with `@tsl/gc` as it was before, and every pinned step count holds; the collector's code is untouched. **R25 (M5's R25 record):** `freeAlloc` takes its last step in place too (slot 0's visit, the cursor left at slot 1), and where the cursor is set with every slot of its object visited it takes that block's step first, as `freeSteps` takes it, then frees on itself, where both went to `runSteps`: a one-slot object's two steps split by a budget had left every later allocation in `freeSteps`' general loop. And `callRelease`'s chain has the release functions that do something first, the empty ones (never called) last. The same steps and calls, in the same order, with the same effects: corpus/rc/rc_steps_r25.ts's counts were pinned with `@tsl/gc` as it was before, and every pinned step count holds, corpus/rc/rc_steps_r24.ts's 57 among them; the collector's code is untouched. **R33 (M5's R33 record):** freeing writes `stepping` and `spare` around a release call only where `releasesTouch` says a release function may read or write them, over the whole program's call graph (3.5's proof); its loops over an object's slots test the budget inside; and the release chain has the classes made in the most places first. The same steps, in the same order, with the same effects: every pinned step count holds, and the collector's code is untouched. | A tracing collector: the owner doesn't want a pause. Freeing recursively at a decrement to zero: a long list is unbounded stack, and a large array is an unbounded pause. A callee taking its own count on every parameter: simple and always sound, and this is what elision removes, more than half of the counts over the corpus (M5). Counts in the walk that builds the tree: it runs until it settles, and it isn't known what's counted until it has. Keeping the call arena under `rc`, as first asked: a loop in one call runs it out (MEASURED, 4.5). A cycle collector now: optional, and off the plan unless measurement forces it (since asked for, D41). Per-object cursor state: there's one object being scanned at a time, so it's two globals. Price: 16 bytes a block, and time on every store of a reference | Owner's decisions (no tracing GC, `rc` the production mode, `leak` the baseline), 2026-11-05. The design is the author's, delegated. Since D63 (owner, 2026-11-09): `rc` is to be sugar for `@tsl/gc`'s `Rc`, with one counting implementation, the library's; this counted heap stays what lowered `rc` builds use, by the direct route, until that sugar is built and meets the speed rule, and its elision, freeing bound and collector (D41) are what the library has to match. D74 built the sugar in TSL proper: `@tsl/gc` now frees exactly as counted here, a slot or a block a step with a cursor, from every store at every allocation, everything before trap 14, with the same borrow rule and `WeakRef` clearing at zero; the collector isn't ported yet R1b made `@tsl/gc`'s counted heap this one's shape: size classes, powers of two from 32 bytes, that every counted class shares, where R1 had a pool per class (memory one class freed was only that class's, so corpus/rc/rc_shared.ts ran out in 64 pages, trap 14, where it now completes); one queue of objects waiting and one cursor, with each store's release function found through the slot's prefix, as `meta` finds a descriptor here; the bound and the drain before trap 14 are unchanged, and every pinned step count still holds. R1e: with the collector linked, `@tsl/gc` frees one object an allocation, more if the size's list is empty, as this heap does with D41's collector (3.5's budget), within the same bound; corpus/rc/rc_steps.ts's and corpus/std/rc_gc.ts's pinned counts moved with it (M5's R1e record) |
+| D39 | `rc`: for lowered code, what isn't on the stack is counted, from the page source, per thread with non-atomic counts. A decrement to zero queues with an intrusive link, and each allocation does at most `RC_BUDGET` steps of freeing, one reference slot or one block a step, with a cursor, so a large drop never costs one allocation more than that. A pending free is drained before trap 14. Arguments are borrowed and results owned, in the module and across the native ABI (D36). A borrow is kept only where a whole-program fact shows nothing can overwrite a counted slot in between. Cycles leak with D41's collector off, and `tmk lower --report` says where they can. `WeakRef` clears at count zero. Counts are added to the finished tree in one pass. **R4:** freeing visits an object's slots in a loop of its own, its release function found once, and while it visits a slot a release function knows what the budget has left after that step (`spare`); dropping the last count of an object with no slots of its own (a leaf, which tslc's expansion visits with `Rc.visitLeaf`: a class with no counted field, array or map, a weak reference's, a `Room`) gives that object's block back at once and spends one of those steps on it, where it used to wait on the queue to take that step later. So each block given back is still a step and each slot visited is one, an allocation does at most its budget exactly (it gives a leaf back at once only with a step to spare, and runSteps counts the step), the steps freeing takes in all are the same, and with no step to spare (a budget of 1, or `quickFree`'s first step) the leaf waits as before; corpus/rc/rc_steps_nocc.ts's `leavesDrop` pin moved from 3201970 to 163201970 for that reason alone: the first allocation's 32 steps visit 16 references and free their 16 leaves, where they visited 32 and freed none, and collecting the rest is 1,970 steps either way (M5's R4 record). **R8:** the native ABI's convention holds through the TSL route unchanged, now that counted objects cross there: arguments borrowed, results owned, a caller's counts added and given back through the package's own exports, which the expansion counts like any of its own (4.5); a caller's last count given back only queues the object, and later allocations free it a budget of steps at a time, as any drop (tools/r8-tests.ts checks both, and that only what module state keeps is live after each case) **R11:** a map's tables in a lowered `rc` package through the TSL route are `@tsl/std`'s, and each takes the steps of one allocation (`rcAllocSteps`), the per-allocation bound unchanged; `@tsl/std` running out frees everything waiting first, as the counted heap's own exhaustion does. **R17:** the same steps, at the direct route's cost (M5's R17 record, 3.5). A store whose release function's body is `return 0;` alone (tslc's `releaseIsEmpty`, a constant over the closed set of release functions; a leaf's, a weak reference's, a room's) is marked in its entry, and freeing gives one of its objects back without the call, as one step, which is what the call came to: told there are no slots, freeing gave the block back as that step. `runSteps` takes such objects in a loop that calls nothing, so nothing can come back into it, and hands the rest of the budget to the general loop (`freeSteps`) at the first object that isn't one, or one a scan gave up (D41); the general loop takes slot 0's visit first, as before, and the budget is a u64 counted down unchecked since it's tested above zero first. `make`, `makeTail` and `makeTailKeep` are inlined, freeing's steps first as `tryMake` takes them (a call, only with something waiting), then a free slot off its list in line. The counts of objects made and given back are each store's, in its entry, and `rcLive` adds them up when asked, so neither freeing nor making counts every store's. Each allocation still takes at most its budget, exactly as many steps as before in the same order with the same effects (corpus/rc/rc_steps_leaves.ts pins them, and every existing count is unchanged), and the collector's code isn't touched. **R18 (3.5, M5's R18 record):** class printing in `rc` keeps on the stack, uncounted, what down-lowering keeps there, each object of a class the lowering places on its function's stack (`@tsl.stack`, left uncounted by the expansion, placed and checked by tslc's escape checking); `@tsl/gc` is unchanged, its bound and its collector with it, and such an object is one fewer to count and free, as in the direct route. **R19 (3.5's "`rc` class printing's remaining costs", M5's R19 record):** the same steps at less cost: an object whose release function isn't empty is freed, with the cursor idle, by `freeFlat`, `freeSteps`' loop without its frame (each slot a step, the block one more but for an object with no slots, the cursor left where `freeSteps` would have it where the budget runs out); without the collector a fresh slot of up to 2048 bytes is cut from a page of its size class, as here, not taken from the heap one `allocBytes` at a time; a tail of any length is made in line. Each allocation takes exactly the steps it took, in the same order (every pinned step count holds), and the collector's code is untouched. **R22 (M5's R22 record):** with the collector linked, an allocation's two steps are taken where it is: the first visits the next waiting object's slot 0, as since R1f, and for an object of more than one slot the second, slot 1's visit, is now taken there too (`quickFree`), with `spare` 0 while it runs and the cursor left at slot 2, as `runSteps(1)` took it through `freeSteps` with a budget of one; and a tail's owner word is the store's number and its size class with no checked multiply, worked out only where the class changes. The same steps, in the same order, with the same effects (every pinned step count holds), and the collector's code is untouched. **R24 (M5's R24 record):** without the collector linked, an allocation's freeing is one call (`freeAlloc`), where `runSteps` handed an object with slots to `freeFlat`: an object of one slot is freed there in place, slot 0's visit and its block a step each, an object of more slots goes on to `freeRest` for its slots from 1, the cursor is left at slot 1 where the budget runs out after slot 0, and anything else is `runSteps`' as before; `visitLeaf` reads a leaf's count once. The same steps, in the same order, with the same effects: corpus/rc/rc_steps_r24.ts's counts were pinned with `@tsl/gc` as it was before, and every pinned step count holds; the collector's code is untouched. **R25 (M5's R25 record):** `freeAlloc` takes its last step in place too (slot 0's visit, the cursor left at slot 1), and where the cursor is set with every slot of its object visited it takes that block's step first, as `freeSteps` takes it, then frees on itself, where both went to `runSteps`: a one-slot object's two steps split by a budget had left every later allocation in `freeSteps`' general loop. And `callRelease`'s chain has the release functions that do something first, the empty ones (never called) last. The same steps and calls, in the same order, with the same effects: corpus/rc/rc_steps_r25.ts's counts were pinned with `@tsl/gc` as it was before, and every pinned step count holds, corpus/rc/rc_steps_r24.ts's 57 among them; the collector's code is untouched. **R33 (M5's R33 record):** freeing writes `stepping` and `spare` around a release call only where `releasesTouch` says a release function may read or write them, over the whole program's call graph (3.5's proof); its loops over an object's slots test the budget inside; and the release chain has the classes made in the most places first. The same steps, in the same order, with the same effects: every pinned step count holds, and the collector's code is untouched. **R34 (the owner's choice of 2027-02-02; 3.5, M5's R34 record): batched frees, and how a step is counted.** An object made by `Rc.makeTailLeaf` (tslc's expansion picks it where it proves the object's counted references are all null when it's made and are never set: a flat string) is in its store's leaf entry, which is EMPTY, so freeing gives it back as **one step**, its block, with no call to its release function and no visit of its slots, which are all null; it was a step for each slot (each visit doing nothing) and one for its block. That is the amendment: such an object's null slots are no longer counted as steps. A run of waiting leaves (objects of an EMPTY store, as R17 gives back with no call) is given back in one pass, in line at a leaf's allocation (`makeTailLeaf`; `freeLeaves`, `leafRun`), still **a step each**, the budget brought down once by the run's length and never past it. And a leaf whose last count a release function drops from a reference field (a view's buffer), or a room it lets go of, is handed back to freeing through what that function returns (`Rc.handLeaf`, `RC_HANDED`), not through `spare`: given back at once as a step of its own where the budget has one left after that call's, and otherwise queued, exactly as `visitLeaf` did through `spare` (the same steps). *The bound, before and after:* before, a step was one slot visited (one release call, which drops one reference; a leaf it gives back at once is a further step, only while the budget had one) or one block given back; after, a step is one slot visited (the same, a leaf handed back a further step only while the budget has one) or one block given back, a leaf-made object's included. So each step is still O(1): at most one release call, or one block's generation, list link and the store's count; an allocation still takes at most `RC_BUDGET` steps, the run stopping at what its budget has left; what freeing does in a step is never more than before, and only a leaf-made object's count of steps falls (from s + 1 to 1), skipping visits that did nothing. Drained before trap 14 as before; D41's collector is untouched (a leaf is made so only for a class in no cycle, and handed back only for one). Every corpus/rc rc_steps* pin holds: those programs make no object as a leaf (they're hand-written `Rc`, which only tslc's expansion calls `makeTailLeaf` for), and their leaves' steps, handed or not, are visitLeaf's; corpus/std/rc_r34_leaves.ts checks that handing a leaf back takes visitLeaf's steps, allocation by allocation. | A tracing collector: the owner doesn't want a pause. Freeing recursively at a decrement to zero: a long list is unbounded stack, and a large array is an unbounded pause. A callee taking its own count on every parameter: simple and always sound, and this is what elision removes, more than half of the counts over the corpus (M5). Counts in the walk that builds the tree: it runs until it settles, and it isn't known what's counted until it has. Keeping the call arena under `rc`, as first asked: a loop in one call runs it out (MEASURED, 4.5). A cycle collector now: optional, and off the plan unless measurement forces it (since asked for, D41). Per-object cursor state: there's one object being scanned at a time, so it's two globals. Price: 16 bytes a block, and time on every store of a reference | Owner's decisions (no tracing GC, `rc` the production mode, `leak` the baseline), 2026-11-05. The design is the author's, delegated. Since D63 (owner, 2026-11-09): `rc` is to be sugar for `@tsl/gc`'s `Rc`, with one counting implementation, the library's; this counted heap stays what lowered `rc` builds use, by the direct route, until that sugar is built and meets the speed rule, and its elision, freeing bound and collector (D41) are what the library has to match. D74 built the sugar in TSL proper: `@tsl/gc` now frees exactly as counted here, a slot or a block a step with a cursor, from every store at every allocation, everything before trap 14, with the same borrow rule and `WeakRef` clearing at zero; the collector isn't ported yet R1b made `@tsl/gc`'s counted heap this one's shape: size classes, powers of two from 32 bytes, that every counted class shares, where R1 had a pool per class (memory one class freed was only that class's, so corpus/rc/rc_shared.ts ran out in 64 pages, trap 14, where it now completes); one queue of objects waiting and one cursor, with each store's release function found through the slot's prefix, as `meta` finds a descriptor here; the bound and the drain before trap 14 are unchanged, and every pinned step count still holds. R1e: with the collector linked, `@tsl/gc` frees one object an allocation, more if the size's list is empty, as this heap does with D41's collector (3.5's budget), within the same bound; corpus/rc/rc_steps.ts's and corpus/std/rc_gc.ts's pinned counts moved with it (M5's R1e record) |
 | D40 | Threads don't share ordinary objects (owner, 2026-11-05). Each thread has its own heap with non-atomic counts, and a safe reference can't cross threads. Threads share layout classes over shared frames through `atomic.*`, and, by opting in, a shared type with atomic counts on its own heap, like Rust's `Arc`, whose contents must themselves be safe to share. The compiler must reject module state reached from two threads and an ordinary object placed in shared memory. Kernel SMP at M12 is 5.5's plan, with a per-CPU struct from M4. The opt-in type's name and rules, and the checks, are undesigned, and all of it is unbuilt. | Shared object graphs by default: atomic counts would slow every program for a rare case, and wouldn't save `Vec` or `Heap`, where one thread can free a buffer under another's reader. The race rule in 3.9 covers torn values, not memory freed under a reader. Fine-grained kernel locking from the start: nothing has measured a need for it. | Owner's decision, 2026-11-05. |
 | D41 | `rc` has a cycle collector, on by default (`--cycles`, `"cycles"`): trial deletion that never changes a count, over a side count of edges in the objects' own link fields, with a barrier on every count operation and count-preserving move, for types the type graph says can be in a cycle. A change to an object in a scan marks it held, so nothing restarts. Steps are bounded per allocation with freeing, at `RC_BUDGET`. Candidates are a fixed table, and one whose count reaches zero leaves in constant time. Exhaustion drains the queue, runs the collector to completion, and walks the heap if a candidate was ever replaced, and only then traps 14: the one permitted pause. `off` is byte-identical to D39's. **R1d** (M5's R1d record): the wait after a scan that frees nothing no longer goes 16 times faster with fewer than 16 candidates waiting, in `@tsl/gc` (churn 2.03x to 1.17x the direct route), and the cycle churn tests forbid exhaustion's heap walk (`rcSetWalk(false)`), so pacing that falls behind traps 14 there; release and scan visits are closed-world calls (D63). **R1e** (M5's R1e record; decisions.md 2026-12-01, flagged for the owner): a scan gives up an object whose count reaches zero before it decides, in `@tsl/gc` and on the direct route alike: out of the scan and onto the freeing queue, and the scan decides nothing while what it gave up still holds references it counted (3.5's argument, case (6), and 4.5's). With that, `@tsl/gc` frees one object an allocation with the collector linked, as the direct route does, and corpus/rc/rc_shared.ts completes; the direct route had the same latent fault, which corpus/lower/rc/rc_shared.ts shows (trap 14 without giving up). **R1f** (M5's R1f record): the collector's per-step cost, found by profiling (`tmk profile`) rather than guessed: most of what made `@tsl/gc` slower than the direct route was TSL's code for its prefix arithmetic (a remainder by a power of two compiled to a division, 64-bit constant shifts with a guard for counts of 64 and more, a checked `<<`'s test kept where nothing can be lost), fixed in the optimiser for every TSL program; the rest was freeing's loop for an allocation's one object (now `quickFree`, the same two steps), a call to the collector after every allocation that had nothing to do, the generation bits checked on references that can't be stale, and the phase dispatch. Steps, their order and every pinned step count are unchanged, so the argument in 3.5 is too. **R19:** unchanged. With the collector linked a fresh slot is cut from its size class's chunk as before (`cutSlot`, which the heap walk reads), an object a scan gave up is still `freeSteps`' to free (`freeFlat` leaves it, and checks after each visit as `freeSteps` does), and `quickFree` and the collector's code are untouched (M5's R19 record). | Giving up with no wait before the decision, as R1e was first written: unsound, as the edges found from the object stay counted while it still holds them, so what it holds can be decided garbage and freed twice (3.5, case (6)); the injected bug is caught. Keeping a scan's dead members held until the decision (D41 as first built): a list being freed waits behind them (R1d's rc_shared.ts trap 14). Trial deletion that changes counts, and restores them: to run it incrementally, every store has to be caught, since a restore that sees a changed slot loses a count for good, and that's the naive unsound version. Aborting or restarting a scan on a touch: a hot object would starve it, and marking the object does as well with no restart at all. A side table of trial counts, or a larger header for cyclic types: needs memory at exhaustion, when it's scarcest, or doubles small objects (32 to 64 bytes for a list node). Candidates in an intrusive list, which never fills: tried, MEASURED worse. A list node that dies while on the list holds back everything it holds until the list gets there, and a dropped list is a chain of those, at 7 times the list's time. Pacing by heap growth: tried, MEASURED worse, as a heap at its limit never pays. Scanning per candidate: tried, MEASURED worse, 24 seconds in `__rc_collect`s on a 400,000-node live list, where one scan with them all as roots is one pass. A tracing collector: the owner doesn't want a pause. | The owner's requirements: "I don't want a gc pause", no tracing collector, cycles shouldn't leak. The design: owner asked for it 2026-11-05, design delegated. Owner's ruling 2026-11-06: the heap walk at exhaustion stays. **In `@tsl/gc` since R1c** (3.5's "The cycle collector in `@tsl/gc`", `tmk milestone pipe-d` boxes 22 and 23): the same design in TSL, for `rc` packages and hand-written `Rc` users alike; the type graph is `cycleGroup<T>()`, a constant per class natively and a table by class name on the host; a scan's state is in the slot prefix's spare bits (no `meta` there: the count's top bits, the generation's and the owner's), so a block is still 16 bytes of prefix and a scan allocates nothing; visits go through each class's release function's `op` (`Scan`, `Trace`, `Collect`); the barrier is in `share`, `drop`, `upgrade` and the expansion's vector moves; the budget is shared with freeing, which keeps D39's bound and every pinned step count; exhaustion's walk is over chunks each size class's fresh slots are cut from, with the collector linked; and a program whose counted classes are in no cycle reaches the code it did before. *Differs from the direct route, on purpose:* exhaustion and `rcCollect` scan the table round after round while a round frees anything, as a scan under way can hold back what its next round frees (found by the random programs) |
 | D42 | `Map`, `Set` and run-time strings lower in `leak`, `manual` and `rc`, and stay fallbacks in `strict`. They're ordinary TS in `compiler/rt`, lowered by the compiler into what reaches them, over a few intrinsics, so `rc`'s counts, descriptors, elision, cycles, freeing bound and poisoning apply with no new code in `rc`, and a module that doesn't use them doesn't change by a byte. A string is one pointer to immutable UTF-16, flat or a view, with a tail-sharing buffer for concatenation and no ropes. Literals are static with a count that can't reach zero. A substring shares only within 4 times its length. A map is parallel vectors in insertion order with a chained table of positions and tombstones, and a chain of generations for cursors, with nothing registered. Strings hash with keyed HalfSipHash-1-3, and numbers and addresses with a keyed finaliser. Number to text is Burger and Dybvig's free-format printing by exact integers, and text to number Clinger's AlgorithmR. Copy-on-write is for strings only. **D72:** the map, as `@tsl/jsrt`'s `JsMap` and `JsSet`, written in TSL, which class printing prints a lowered program's maps as, with classes forced; `compiler/rt/map.ts` stays the direct route's. **R10 (M5's R10 record):** through the TSL route in `rc`, strings are two classes the printing puts in the program, `JsStr` and `JsStrBuf` (3.5's "Strings counted by the expansion"), counted by tslc's `rc` expansion: D42's representation kept in substance (flat strings and views into a concatenation's buffer, appends and prepends in place, the sharing bound), a substring of a flat string copying, and a one-unit string made each time. Forced only: 1.54x to 2.34x the direct route at -O1 and -O2 (`AUTO_RC_STRINGS` off). | Over `@tsl/alloc`, as first planned: `Vec` holds no counted reference, has generation checks on what it stores, takes a heap, and the collector can't see through it, so a map over it would be a second memory system beside `rc`'s (4.5). A runtime in TIR beside the counted heap: Ryu and a hash table by hand in TIR, with its own descriptors and barriers, each a chance to be wrong in `rc`, when lowering gets them right by construction. Ropes: a test on every read, a flatten that's linear at a read nobody expects, a mutable node, and they don't help reading between appends, which a shared tail does. One-byte strings alongside two-byte, as V8 has: half the memory on ASCII for a branch on every read, and two paths everywhere. Ryu: tables of 10 KiB or more, and 128-bit arithmetic TS has no words for; exact integers are slower on a random double, MEASURED in M5, but have no tables, no fallback and no proof to trust beyond a page of arithmetic. Registering live iterators on the map: an iterator dropped without finishing has to be removed, which `leak` and a trap can't do. A sequence number per entry: 8 bytes an entry for what generations do for nothing unless a table compacts under an iterator. Copy-on-write for `.slice()` and spread: the write test costs almost nothing, MEASURED in M5, but every slice in the corpus is 16 elements or fewer, where a shared header saves about nothing, and a buffer with its own count changes what the freeing walk, the collector's edge counts and a native caller's view of a vector can assume. Not built, only measured. Price: UTF-16 doubles ASCII, 32 bytes of headers a string, growth is a linear operation in one call, and no entropy means no defence against flooding until a caller provides a key. | Owner's requirements 2026-11-05: no tracing GC, no pause, COW only for strings and visible copies, no third-party runtime dependencies. The design: delegated. Not over `@tsl/alloc`, which the owner asked for: says why here, for the owner to rule on. Owner's ruling 2026-11-06: accepted, the runtime stays in `compiler/rt`. Its core is also written as a TSL class, `@tsl/jsrt`'s `JsString` (D67), with these same rules, which class printing prints strings as; not yet `auto`'s choice. Since D69 (pipe-tails) that class keeps a flat string's units, and a concatenation buffer's room, in its tail, so a flat string is one allocation in both routes; views and buffers are as above, a view being an object with a tail of none. Since pipe-split that class is three behind dispatch interfaces (D70): a flat string (`JsFlat`, a 12-byte header and its units), a view (`JsView`, 32 bytes) and a buffer (`JsBuf`, a 16-byte header and its room), which only a view reaches; every rule above holds as written (UTF-16 units with lone surrogates kept, an append in place only at a buffer's end and a prepend only at its head, the second append making a buffer that doubles, sharing from 32 units and within 4× of what the owner keeps alive, a view of a view judged against the first owner). **strkeys (D72):** a `JsString` is a `JsMap` key by its own `hashKey` and `sameKey`, which `keyHash` and `keySame` reach through its class id (D70): `hashKey` is this hash, HalfSipHash-1-3 under the hash key over the units two to a word, in 30 bits, the same number `strHash` gives, kept in the same hash word (bit 0 known, the hash from bit 2, GROWN kept the class's own), and `JsMap` puts it through its keyed finaliser as it does every key's; `sameKey` is `===` on units, two known hash words that differ saying no first, as `strEq`. The hash key is `JsMap`'s (`jsMapKey`), which a native caller's `__hash_key_use` sets with the program's, and both start at the same default, so a hash word either route's code kept is right for the other. |
 
 | D43 | `@tsl/std` is the third layer: `Vec`, `Map`, `Set`, `Slab`, `Str` and `StrBuilder` over one global allocator, for programs that aren't the kernel or a driver, and TSL1018 keeps it out of a `noStd` package at any depth. Each is `@tsl/alloc`'s `Vec` or `Slab` in a field. An allocator is named by `@tsl.global-allocator` on a top-level `const h = globalAllocator(pageSource)`, read at compile time natively and run as the module loads on V8 and JSC, at most one in a program. With none, it's a `Heap` over the page source `setPageSource` registers. Out of memory is trap 14, with `try` forms. A `Map` and a `forEach` take a loan, so changing a collection in one is trap 13, and a stored reference is checked before it reaches a closure. `Heap` tells std about whole-page runs it's given back, and that's no code at all without std. A stack object can hold a stack object of its own frame. `Shared<T>` is written down, and not built. | A `Vec` of `@tsl/std`'s own over raw `Ptr`: one call less per operation, and a second copy of the safety code in `ex-vec.ts`. Over `compiler/rt`: not possible, as its vectors are lowered arrays, and 3.5 has what was looked for and why. A pluggable allocator algorithm, two function values or a trait: D38 rejected those, and `@tsl/alloc`'s `Vec` takes a `Heap`. A global allocator registered only at run time: a top-level `new Vec` would have to allocate or check at every call. A tag alone: V8 and JSC don't read comments, so they'd use a different allocator from native. `get` giving `V \| null`: null is only for references (TSL1008), so `getOr`, and `get` traps 2. JS's behaviour for changing a `Map` during `forEach`: cursors and generations, for what's almost always a bug. Returning `false` from `push`: a result nobody reads loses data silently. A `Heap` rewrite to reuse runs: it would have moved every `@tsl/alloc` user's bytes. Price: with no inliner, a `Vec.get` is one more call than `@tsl/alloc`'s, and the `Vec` row is 2.03×, MEASURED in M5. A `Str` is 16 bytes of slot, a `Vec` and its hash, about 72 bytes before its text, worked out from its fields and not measured. A `Vec` made in a function in `strict` can't be returned. | Owner's decisions 2026-11-05: three layers, a global allocator, per thread in concept, `noStd` kernel and drivers, runs on V8 and JSC and matches native, no GC pause. Exhaustion as expected by the owner. The design: delegated. D42's evidence is in 3.5 and M5's Phase G, for the owner to rule on. Owner's ruling 2026-11-06: two maps, see D47. |
-| D44 | Optimiser levels: `-O0` is direct translation and the comparison baseline; `-O1` is fast passes only, and what S5 measures; `-O2` is everything that needs more time or the whole program, and is the default for `tmk lower` and the kernel. No level changes results or trap codes: only timing, memory and stack use differ (3.10). A check goes only if proved unable to fire. The same source, level and profile give byte-identical output, and the level is part of the boot cache key. A profile is an input to `-O2`, not a level. The full suite runs at `-O0` and `-O2`, and a smaller set at `-O1`. A program that differs between `-O0` and `-O2` has a compiler bug, which works where V8 can't run the code. Built in phase A (4.3, D46, M5's Optimiser phase A): the three levels through `tmk lower`, `tslc` and every harness, `-O2` the default for `tmk lower`, and the full suite at `-O0` and `-O2` with the quick tier at `-O1`. There's no boot cache yet, and 6.3 says where the level goes when there is. **Owner's ruling, 2026-11-15:** -O0 means no optimisation, and is exempt from the pipeline's speed rule (D62): a feature switches to the TSL route when it's no slower than the direct route at -O1 and -O2. **Phase B (D73), 2026-11:** the rules hold as written: a check goes only where `range.ts` proves it can't fire, a load or check moves or is shared only where `-O0`'s trap order and `keep` are unchanged, and `-O0` is untouched. `-O1` gains value numbering and loop-invariant code motion, once each; `-O2` also check elimination, unswitching and peeling, and LICM's proofs of a loop's first turn. Check elimination is `-O2`'s because `-O1`'s compile time is gated at 1.25 times `-O0`'s (opt-a box 6), MEASURED 1.18× with it left out and 1.21× to 1.27× with it in. **R7:** `-O1` also removes a bounds check its loop's own test proves (`loopbounds`, D73), with no intervals and no fixpoint: -O1's compile time is 1.12× -O0's with it (1.11× without), MEASURED by opt-a box 6's corpus. And at `-O1` and `-O2` the AArch64 backend leaves an explicit null check to the load right after it (D75), where the runtime makes that load's fault through null trap 6 everywhere, as the check was: a check goes only where what replaces it gives the same code, inside a driver's case and outside one; on Wasm, where a load near 0 reads memory, the TIR keeps it. **R15:** `-O1` and `-O2` also remove a test a test above them answered (`conds`, D73: one walk of the dominator tree, so within -O1's limit), and `-O2` versions loops (`version`, D73): a fast copy without the checks a guard before the loop proves, the loop as it was the fallback, so a check goes only where proved, as this decision says, and -O0 is untouched (no -O0 pin moved; M5's R15 record). **R26:** `range.ts` reads a signed test whose smaller side isn't negative as the unsigned one, decides a float compare of converted `i32`s from the integers as known where it is, and reaches a target through its own `zext`; `-O1`'s `loopbounds` takes `k < 0` as false for a signed test's index that's never negative; `-O2` copies loops in up to three rounds with value numbering between, under the same limits; and the inliner keeps a loop's split block in the loop. Each is `-O1`'s or `-O2`'s alone, a check still goes only where proved, and `-O0` is untouched; the TSL proper pins they move at `-O1` and `-O2` are listed in M5's R26 record. **R27 (D77):** a field's read is kept across a store into a block tslc proved no object is in, and across a call that writes only such blocks, at `-O1` and `-O2`; a check goes only where the existing proofs then prove it, `-O0` is untouched, and lowering's notes are outside the canonical text, so no `-O0` pin moves. **R28:** `simplify` takes a tag off before `ref.addr`, `conds` takes equal constants as one operand, the inliner lets a callee no bigger than its call past the growth limit, and `-O2` versions the loops its copying rounds left; each `-O1`'s or `-O2`'s alone (versioning `-O2`'s), a check goes only where proved, and `-O0` is untouched; the TSL proper pins they move at `-O1` and `-O2` are listed in M5's R28 record. **R29 (D79):** the inliner takes a JsArray read's leading bounds check out of a call tslc's table-links proof marked in bounds, at `-O1` and `-O2`; the check goes only where that proof shows it can't fire, lowering's notes are outside the canonical text, and no `-O0` pin moves by it (the `-O0` pins that move are JsMap's own source, a library change; M5's R29 record lists them). **R30:** scalar replacement writes a copy out of a frame slot (a new object placed in its counted slot) as stores of its fields, at `-O2`, and at `-O1` that alone, nothing else of `-O2`'s scalar replacement (compile time within opt-a box 6's limit); and at `-O1` and `-O2` the AArch64 backend splits values live across cold calls only around them (D80), machine code only. A check goes nowhere by either, and `-O0` is untouched (the `-O0` pins that move are @tsl/gc's own source, a library change); the TSL proper pins they move at `-O1` and `-O2` are listed in M5's R30 record. **R31:** the backend's quick ways out (D80) are machine code only, and @tsl/gc's chunk pages are a library change, whose `-O0` pins are listed in M5's R31 record; no TSL proper pin moves. **R32:** `range.ts`'s facts from a float compare's edge and check elimination's saturating ToInt32 are `-O2`'s (`checks`), a check goes only where they prove it can't fire, and `-O0` and `-O1` are untouched (no pin at either moves by them, nor at `-O2`); the printing's nested `s[x]` and one-unit table read, and its string literals read where they're used, are a printer's change in `rc`, and freeAlloc's tests a library's, whose pins (all freeAlloc's, none TSL proper's) M5's R32 record lists. **R33:** @tsl/gc's freeing (a library change) and tslc's answers to `releasesTouch` and order of the release chain (compiler changes, the same at every level) move the pins of programs that free, at every level; none is the optimiser's, and M5's R33 record lists them. | `-Ofast`, or any level that drops checks: `manual` is the declared, audited way to opt out, and a flag would undo that. `-O3`: a profile does that job. `-Os` and per-package levels: nothing has shown a need, and whole-program compilation favours one level a build. | Owner's decision in principle, 2026-11-06. |
+| D44 | Optimiser levels: `-O0` is direct translation and the comparison baseline; `-O1` is fast passes only, and what S5 measures; `-O2` is everything that needs more time or the whole program, and is the default for `tmk lower` and the kernel. No level changes results or trap codes: only timing, memory and stack use differ (3.10). A check goes only if proved unable to fire. The same source, level and profile give byte-identical output, and the level is part of the boot cache key. A profile is an input to `-O2`, not a level. The full suite runs at `-O0` and `-O2`, and a smaller set at `-O1`. A program that differs between `-O0` and `-O2` has a compiler bug, which works where V8 can't run the code. Built in phase A (4.3, D46, M5's Optimiser phase A): the three levels through `tmk lower`, `tslc` and every harness, `-O2` the default for `tmk lower`, and the full suite at `-O0` and `-O2` with the quick tier at `-O1`. There's no boot cache yet, and 6.3 says where the level goes when there is. **Owner's ruling, 2026-11-15:** -O0 means no optimisation, and is exempt from the pipeline's speed rule (D62): a feature switches to the TSL route when it's no slower than the direct route at -O1 and -O2. **Phase B (D73), 2026-11:** the rules hold as written: a check goes only where `range.ts` proves it can't fire, a load or check moves or is shared only where `-O0`'s trap order and `keep` are unchanged, and `-O0` is untouched. `-O1` gains value numbering and loop-invariant code motion, once each; `-O2` also check elimination, unswitching and peeling, and LICM's proofs of a loop's first turn. Check elimination is `-O2`'s because `-O1`'s compile time is gated at 1.25 times `-O0`'s (opt-a box 6), MEASURED 1.18× with it left out and 1.21× to 1.27× with it in. **R7:** `-O1` also removes a bounds check its loop's own test proves (`loopbounds`, D73), with no intervals and no fixpoint: -O1's compile time is 1.12× -O0's with it (1.11× without), MEASURED by opt-a box 6's corpus. And at `-O1` and `-O2` the AArch64 backend leaves an explicit null check to the load right after it (D75), where the runtime makes that load's fault through null trap 6 everywhere, as the check was: a check goes only where what replaces it gives the same code, inside a driver's case and outside one; on Wasm, where a load near 0 reads memory, the TIR keeps it. **R15:** `-O1` and `-O2` also remove a test a test above them answered (`conds`, D73: one walk of the dominator tree, so within -O1's limit), and `-O2` versions loops (`version`, D73): a fast copy without the checks a guard before the loop proves, the loop as it was the fallback, so a check goes only where proved, as this decision says, and -O0 is untouched (no -O0 pin moved; M5's R15 record). **R26:** `range.ts` reads a signed test whose smaller side isn't negative as the unsigned one, decides a float compare of converted `i32`s from the integers as known where it is, and reaches a target through its own `zext`; `-O1`'s `loopbounds` takes `k < 0` as false for a signed test's index that's never negative; `-O2` copies loops in up to three rounds with value numbering between, under the same limits; and the inliner keeps a loop's split block in the loop. Each is `-O1`'s or `-O2`'s alone, a check still goes only where proved, and `-O0` is untouched; the TSL proper pins they move at `-O1` and `-O2` are listed in M5's R26 record. **R27 (D77):** a field's read is kept across a store into a block tslc proved no object is in, and across a call that writes only such blocks, at `-O1` and `-O2`; a check goes only where the existing proofs then prove it, `-O0` is untouched, and lowering's notes are outside the canonical text, so no `-O0` pin moves. **R28:** `simplify` takes a tag off before `ref.addr`, `conds` takes equal constants as one operand, the inliner lets a callee no bigger than its call past the growth limit, and `-O2` versions the loops its copying rounds left; each `-O1`'s or `-O2`'s alone (versioning `-O2`'s), a check goes only where proved, and `-O0` is untouched; the TSL proper pins they move at `-O1` and `-O2` are listed in M5's R28 record. **R29 (D79):** the inliner takes a JsArray read's leading bounds check out of a call tslc's table-links proof marked in bounds, at `-O1` and `-O2`; the check goes only where that proof shows it can't fire, lowering's notes are outside the canonical text, and no `-O0` pin moves by it (the `-O0` pins that move are JsMap's own source, a library change; M5's R29 record lists them). **R30:** scalar replacement writes a copy out of a frame slot (a new object placed in its counted slot) as stores of its fields, at `-O2`, and at `-O1` that alone, nothing else of `-O2`'s scalar replacement (compile time within opt-a box 6's limit); and at `-O1` and `-O2` the AArch64 backend splits values live across cold calls only around them (D80), machine code only. A check goes nowhere by either, and `-O0` is untouched (the `-O0` pins that move are @tsl/gc's own source, a library change); the TSL proper pins they move at `-O1` and `-O2` are listed in M5's R30 record. **R31:** the backend's quick ways out (D80) are machine code only, and @tsl/gc's chunk pages are a library change, whose `-O0` pins are listed in M5's R31 record; no TSL proper pin moves. **R32:** `range.ts`'s facts from a float compare's edge and check elimination's saturating ToInt32 are `-O2`'s (`checks`), a check goes only where they prove it can't fire, and `-O0` and `-O1` are untouched (no pin at either moves by them, nor at `-O2`); the printing's nested `s[x]` and one-unit table read, and its string literals read where they're used, are a printer's change in `rc`, and freeAlloc's tests a library's, whose pins (all freeAlloc's, none TSL proper's) M5's R32 record lists. **R33:** @tsl/gc's freeing (a library change) and tslc's answers to `releasesTouch` and order of the release chain (compiler changes, the same at every level) move the pins of programs that free, at every level; none is the optimiser's, and M5's R33 record lists them. **R34:** @tsl/gc's batched frees, leaf entries and handed leaves (a library change) and tslc's expansion handing leaves back and making flat strings as leaves (compiler changes, the same at every level) move the pins of programs that free, at every level; none is the optimiser's, and M5's R34 record lists them (none TSL proper's). | `-Ofast`, or any level that drops checks: `manual` is the declared, audited way to opt out, and a flag would undo that. `-O3`: a profile does that job. `-Os` and per-package levels: nothing has shown a need, and whole-program compilation favours one level a build. | Owner's decision in principle, 2026-11-06. |
 | D45 | Tests are made fast without testing less (owner, 2026-11-06): every milestone records seconds per box and suite (8.3); a test image's per-case output goes through RAM, with serial keeping the sentinels and a byte count and checksum of what's in RAM (8.2); the test process lowers and links on worker threads; `tmk test` is a quick tier that verifies nothing; and there's no cache of results. Only a milestone run in full from `tmk clean` verifies. | Results over serial: 1.6 µs a byte under HVF, MEASURED. virtio-console: a driver in the runtime for the same effect. Reading RAM through the monitor's `pmemsave`: needs QEMU alive, so it loses what a killed run did. A results cache: saves nothing on a change to the compiler or tools, and nothing from clean (M5). Raising `--jobs`: the host carries the owner's VMs. | Owner agreed the plan, 2026-11-06; channel, workers, tier and no cache MEASURED, M5. |
 | D46 | The optimiser's phase A and what each level holds (4.3). **-O1**: folding, copy propagation, dead code, branch folding and block merging, two rounds, and inlining only where the callee costs no more than its call (4 plus its parameters and results), or since B3 where it calls nothing, costs up to 16 and the call is in a loop (a block between a backward edge's target and its source, in block order: no dominators at -O1), one function at a time, bottom-up, so nothing grows by more than a few instructions a hot site; a load `-O0` ran is kept. **-O2**: all of that, three rounds, plus the whole call graph: inlining by cost, partial inlining, calls through a known function's address made direct, scalar replacement of frame slots, and a round of cleanup after. **Cost** is about the instructions the backend emits: nothing for a constant, an address, a rename or a frame slot; 4 plus its arguments for a call; 4 for a `Math` function, `mem.fill` or `mem.copy`; 3 for a division; 2 for a check; 1 for the rest; and 1 for a two-way branch or a return. **-O2's threshold** for a callee is 16, plus 8 for a leaf, 4 for each constant argument up to 3, times 3 at a call in a loop, and at least 200 for the one call site of a function nothing else can reach (not exported, no address taken). A caller may grow to twice its size or by 150, whichever is more, and never past 30,000 or 64 KiB of frame slots more. **Never inlined**: a call into the caller's own cycle of the call graph, or into a function whose copy the call is already inside, so recursion and mutual recursion unroll at most once into a caller outside the cycle; `@tsl.noinline`; `export_c` and `section`, which stay as written; a callee without the caller's `noalloc` or `nosleep`, so those facts keep holding; and a callee with frame slots into a caller that recurses. **Always**, short of those and a hard limit of 2,000: `@tsl.inline`. **Partial inlining**: a callee too big to inline has its side-effect-free entry (arithmetic, loads and checks, with no loop) inlined, with every path from there that makes no call, and every other edge out of it calls the whole function from the start. That's sound because nothing before the call changed any state, and a check or a load that traps in the copy traps the same at `-O0`. It's how an allocator's or a counter's fast path is inlined and its slow path isn't. An exported function is inlined as a copy and keeps its body and symbol. Removing a function is the image linker's, by what's reachable. Phase B's passes, and what each adds to `-O1` and `-O2`, are D73's; phase A's cost model and rules are unchanged by it. **R20 (M5's R20 record):** a callee whose entry gives a frame slot (`alloca`, which is no effect when it runs) is taken partially where nothing the copy holds uses the slot, which is left out of the copy; before, any slot in the entry refused it, so an `rc` class printing's function that builds an object in a slot on a rare path (a throw's `Dyn`) was never inlined where the direct route's is. -O2 only; 76 pins moved, all at -O2 (tools/r20-pins.ts). | Inlining everything up to 40, with a caller growing to 4 times: tried, MEASURED 27% more code in `rc`'s corpus for 5% fewer calls in the module, and the runtime's functions each grew to the limit. Unrolling a cycle through inlining's own copies (only the call graph's cycles refused): tried, the runtime's mutually recursive `__rc_zero` and `__rc_dec` unrolled to the growth limit at every site. Outlining a slow path into a new function: more for the same effect, since calling the whole function again needs nothing new. A profile: D44's input to `-O2`, and there's none yet. Heuristics from LLVM's or GCC's inliners: their licences (D35); this is the author's design from published descriptions of bottom-up inlining and partial inlining. Inlining at `-O0`: `-O0` is the comparison baseline. | Owner's levels (D44), 2026-11-06. The cost model and the rules are the author's, delegated |
 | D47 | Two maps, by the owner, 2026-11-06. One is JS's: `get` on a missing key gives `undefined`, and changing it during iteration does what JS does. The other, `ExactMap`, traps on a missing key (2) and on a change during iteration (13), for code that wants a missing key to be a bug. `Set` stays JS's only: with no `get` to miss, a trapping set would differ only on iteration. `Map` keeps JS's meaning everywhere, and the trapping one gets its own name, so the same name never means two things. `Map` growth becomes incremental, so no `set` does work proportional to the table, which owner confirmed with "no pause". **Built** (M5's Maps phase, `tmk milestone maps`). In `@tsl/std`, `Map` and `Set` are JS's, and `ExactMap` is the trapping map as it was; `get` of a scalar is `V \| undefined`, a flag and a value in two registers, the one place TSL proper lets you write a nullable scalar (3.3, rule 12). In lowered code, a full table is replaced by one made at its final size, and the old one moved into it in order, 4 positions an insert or delete, with lookups in both meanwhile and each old position recording where it went for the cursors (3.5). `Map` and `Set` are opaque to a native caller, read through `size`, `has` and a cursor (4.5). Not met in full: the new table's vectors are one allocation, and zeroing it is proportional to the table, which the page source or `rc`'s reuse of a run does inside that one `set`: 11.0 ms at 2^20 entries, against 19.2 ms before, and 23.5 µs with the zeroing taken out (MEASURED, M5). Not built: `ExactMap` in lowered code, and incremental growth in `@tsl/std`, whose vectors grow by copying in `@tsl/alloc`. **D72:** `@tsl/jsrt`'s `JsMap` grows as lowered code does, incrementally, 4 positions an insert or delete, and its cursors have JS's rules under change, as map.ts's. | One map that traps: the same name as JS's with a different meaning, which is what the owner rejected. One JS-style map only: a missing key would then be a value to check everywhere it's a bug. A boxed `V \| undefined` for `get`: an allocation for every lookup, in a layer with no collector. Rebuilding the table a slice at a time in place, as linear hashing does: insertion order is positions, so a cursor would have to follow entries as they move, where moving them in order to a new table lets each old position say where it went. Chunked tables, so no one allocation grows with the table: what the zeroing above needs, a load on every access, not built until the owner says it's worth it. | Owner's decision, 2026-11-06, including the name `ExactMap`. |

@@ -1,0 +1,10 @@
+[
+  { "fn": "appends", "args": [600] },
+  { "fn": "appends", "args": [1] },
+  { "fn": "units", "args": [800] },
+  { "fn": "units", "args": [0] },
+  { "fn": "rooms", "args": [300] },
+  { "fn": "rooms", "args": [1] },
+  { "fn": "mixed", "args": [40] },
+  { "fn": "mixed", "args": [1] }
+]

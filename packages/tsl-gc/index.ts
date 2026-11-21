@@ -4,6 +4,7 @@
 export {
   Rc,
   RC_BUDGET,
+  RC_HANDED,
   rcAllocSteps,
   rcCcFreed,
   rcCcGaveUp,
@@ -21,6 +22,7 @@ export {
   Room,
   roomAddr,
   roomDrop,
+  roomHand,
   roomMake,
   Visit,
   Weak,

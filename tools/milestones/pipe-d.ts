@@ -3084,6 +3084,48 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     });
   });
 
+  // 87. R34: batched frees (a run of waiting leaves given back in one pass, in line where it's all there is), leaves made
+  // in their store's leaf entry, and leaves handed to freeing through what a release function returns.
+  M.unit("87", async () => {
+    const R34 = timedModule("r34", await import("../r34-tests.ts"));
+    const failures: string[] = [];
+    const sh = await R34.r34Shapes();
+    failures.push(...sh.failures);
+    const d = await R34.r34Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of corpus/lower/r34 ran");
+    const sd = await R34.r34Std(accel, jobs);
+    failures.push(...sd.failures);
+    if (sd.cases === 0) failures.push("no case of corpus/std/rc_r34_leaves.ts ran");
+    const st = await R34.r34Steps(accel, jobs);
+    failures.push(...st.failures);
+    if (st.cases === 0) failures.push("no case of corpus/rc's rc_steps programs ran");
+    report({
+      box: "87. R34 (3.5, D39's R34): @tsl/gc gives a run of waiting leaves back in one pass, a step each with the budget brought down once (leafRun), in line at an allocation where that run is all its freeing is (freeLeaves); an object whose references are all null when it's made and stay so is made in its store's leaf entry (`makeTailLeaf`, which tslc's expansion picks: a flat string), so freeing gives it back as one step with no call; and a leaf whose last count a release function drops is handed to freeing through what that function returns (`handLeaf`, `RC_HANDED`, a room through `trimHand`), not through `spare`: r34_leaves.ts through the TSL route in rc at -O1 has a leaf entry and its freeAlloc writes no `spare`, and with R34 off (TMK_R34_OFF=leaf,hand) neither holds; corpus/lower/r34 through the dual route with class printing forced in rc at -O0, -O1 and -O2 (sized for a small memory, so not leak); corpus/std/rc_r34_leaves.ts (leaves made and handed by hand, each allocation's steps and live count at budgets from 1, and handing a leaf back taking visitLeaf's steps exactly) natively at -O0 and -O2; corpus/rc's rc_steps programs natively in rc (tools/r34-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${sh.rows.join("; ")}; dual ${d.agreed}/${d.cases}; std ${sd.agreed}/${sd.cases}; rc_steps ${st.agreed}/${st.cases}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 88. R34's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("88", async () => {
+    const R34 = timedModule("r34", await import("../r34-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R34.R34_FAULTS) {
+      const x = await R34.r34Fault(f, accel, jobs);
+      rows.push(`${f.name}: ${caughtText(x)}`);
+      if (x.caught === 0) failures.push(`${f.name} wasn't caught: ${x.first}`);
+    }
+    report({
+      box: `88. R34: each of ${R34.R34_FAULTS.length} bugs is caught by a wrong answer or a trap, with how many cases caught it: a run of leaves freeing one past the budget; a run taking an object of another store, one with slots; a handed leaf taken and never given back; a handed leaf given back twice; the expansion making every tailed object with slots in its leaf entry; each over corpus/rc's rc_steps programs natively, corpus/std/rc_r34_leaves.ts natively at -O2, and corpus/lower/r34 through the dual route in rc at -O2; against V8 (tools/r34-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
   M.vms(
     "8",
     "8. No QEMU process of this run is left, and the owner's UTM and QEMU processes were only observed",
