@@ -5611,8 +5611,20 @@ class Emitter {
         const t = e.val.ty;
         if (e.mem.length === 0) this.fail("a store of nothing as a value");
         const std = stdMem(t, e.mem[0]!.off);
-        if (std !== null && memText(std) === memText(e.mem))
-          return `${this.lowered("store", true)}<${this.tyText(t)}>(${base}, ${e.mem[0]!.off}, ${v}${rc})`;
+        if (std !== null && memText(std) === memText(e.mem)) {
+          // R37's injected bugs (TMK_TEST_EMIT), in phase 1's printing of down-exc.ts's exception flag, which `auto` takes in
+          // leak and manual since R37: `r37-exc-flag-unset`, a throw's setting of the flag printed as clearing it (nothing
+          // sees the exception); `r37-exc-flag-kept`, a catch's clearing of it printed as setting it (a caught exception
+          // goes on being seen). Nothing else is printed differently.
+          const flag = !this.classes && base === 'addr("__exc_on")';
+          const val =
+            flag && this.fault === "r37-exc-flag-unset" && v === "1"
+              ? "0"
+              : flag && this.fault === "r37-exc-flag-kept" && v === "0"
+                ? "1"
+                : v;
+          return `${this.lowered("store", true)}<${this.tyText(t)}>(${base}, ${e.mem[0]!.off}, ${val}${rc})`;
+        }
         // As for loads (D72 deleted @tsl/lowered's storeAt).
         return this.fail(`a store of ${memText(e.mem)} as ${this.tyText(t)}`);
       }

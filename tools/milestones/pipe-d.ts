@@ -2302,9 +2302,9 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
         if (!d.taken.includes(`${p} ${mode}`))
           failures.push(`${p} isn't taken reshaped by auto in ${mode}`);
     report({
-      box: "47. R14 (D62, pile item 9): auto takes a program phase 1 printed reshaped only by the kinds it trusts (a statement-expression's statements before an operand, after a sequence's first part, in a conditional's arm, on a logical operator's right side; tslc.ts's TRUSTED_RESHAPES and TRUSTED_IN), never one with exceptions or another kind, and each such build at -O1 and -O2 gives the direct route's TIR byte for byte; every program auto takes reshaped, in strict, leak and manual at -O0 and -O2, agrees with the direct route natively and as printed on V8 and JSC with the source (tools/r14-tests.ts)",
+      box: "47. R14 (D62, pile item 9): auto takes a program phase 1 printed reshaped only by the kinds it trusts (a statement-expression's statements before an operand, after a sequence's first part, in a conditional's arm, on a logical operator's right side; tslc.ts's TRUSTED_RESHAPES and TRUSTED_IN), never one of another kind, nor one with exceptions in a mode R37's TRUSTED_EXC_IN doesn't trust, and each such build without exceptions at -O1 and -O2 gives the direct route's TIR byte for byte (one with exceptions is held to the direct route's machine code byte for byte by box 93); every program auto takes reshaped, in strict, leak and manual at -O0 and -O2, agrees with the direct route natively and as printed on V8 and JSC with the source (tools/r14-tests.ts)",
       ok: failures.length === 0 && hvf.ok,
-      detail: `taken reshaped at -O2: ${JSON.stringify(k.taken)}, by kind ${JSON.stringify(k.kinds)}; phase 1's TIR the direct route's in ${k.phase1Same} builds at -O1 and -O2; natively ${d.agreed}/${d.cases} cases in ${d.taken.length} programs; the third route ${d.printedSame}/${d.printedCases} (3.10's allowed divergences, named: ${JSON.stringify(d.divergences)})${skipNote}`,
+      detail: `taken reshaped at -O2: ${JSON.stringify(k.taken)}, by kind ${JSON.stringify(k.kinds)}; phase 1's TIR the direct route's in ${k.phase1Same} builds at -O1 and -O2 (${k.exc} with exceptions, box 93's); natively ${d.agreed}/${d.cases} cases in ${d.taken.length} programs; the third route ${d.printedSame}/${d.printedCases} (3.10's allowed divergences, named: ${JSON.stringify(d.divergences)})${skipNote}`,
       failures: failures.slice(0, 40),
     });
   });
@@ -3197,6 +3197,43 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     }
     report({
       box: `92. R36: each of ${R36.R36_FAULTS.length} bugs is caught, with how many cases caught it: LICM keeping the graph and loops after a loop had something moved out (refused by the optimiser's verifier: what it moves uses a preheader's values it can't reach); value numbering's constant table kept from one function to the next (wrong answers); every module optimised where it is, given up or not (the shapes: the module given is changed); over corpus/r36 natively and corpus/lower/r36 through the dual route in rc at -O1 and -O2, against V8 (tools/r36-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
+  // 93. R37: auto takes a program with exceptions in leak and manual, giving the direct route's machine code, and agreeing.
+  M.unit("93", async () => {
+    const R37 = timedModule("r37", await import("../r37-tests.ts"));
+    const failures: string[] = [];
+    const sh = await R37.r37Shapes();
+    failures.push(...sh.failures);
+    const d = await R37.r37Dual(accel, jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0 || d.agreed !== d.cases)
+      failures.push(`${d.cases - d.agreed} of ${d.cases} cases differ through the two routes`);
+    if (d.generated < 63) failures.push(`${d.generated} generated programs taken, not 63`);
+    report({
+      box: "93. R37 (4.5, D49, D62): auto takes a program with exceptions printed reshaped only by the kinds it trusts in the modes tslc.ts's TRUSTED_EXC_IN names, leak and manual, through phase 1's printing of down-exc.ts's flag and its checks (81 programs in each), and none in rc or strict; each such build at -O1 and -O2 gives the direct route's machine code byte for byte (the speed rule, as a fact), and with the switch off (TMK_R37_OFF=exc) none is taken; every such program of corpus/lower/exc, its 63 generated ones with every way out through finally included, agrees with the direct route through auto's own build in leak and manual at -O0 and -O2, natively and as printed on V8 and JSC with the source (tools/r37-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${sh.rows.join("; ")}; natively ${d.agreed}/${d.cases} cases, ${d.taken.length} programs by mode (${d.generated} generated); the third route ${d.printedSame}/${d.printedCases} (3.10's allowed divergences, named: ${JSON.stringify(d.divergences)})${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 94. R37's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("94", async () => {
+    const R37 = timedModule("r37", await import("../r37-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R37.R37_FAULTS) {
+      const x = await R37.r37Fault(f, accel, jobs);
+      rows.push(`${f.name}: ${caughtText(x)}`);
+      if (x.caught === 0) failures.push(`${f.name} wasn't caught: ${x.first}`);
+    }
+    report({
+      box: `94. R37: each of ${R37.R37_FAULTS.length} bugs put into phase 1's printing of the exception flag is caught by the differential on auto's own builds of corpus/lower/exc in leak at -O2, with how many cases caught it: a throw's setting of the flag printed as clearing it, and a catch's clearing of it printed as setting it (tools/r37-tests.ts)`,
       ok: failures.length === 0 && hvf.ok,
       detail: `${rows.join("; ")}${skipNote}`,
       failures,

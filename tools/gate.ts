@@ -699,10 +699,17 @@ export async function runGate(o: GateOptions): Promise<GateRun> {
   });
   const vmsAfter = otherVms();
   const loadEnd = loadavg();
-  const { storeStats } = await import("./store.ts");
+  const { storeStats, removeStoreDir } = await import("./store.ts");
   const store = storeWanted ? storeStats(storeAt) : null;
+  // R37: removed only once every job has exited (runPool waits for each, stopped or not), and again while a stopped job's
+  // own children still finish a write into it; a removal that still fails fails the run, and says why.
+  let storeCleanup = "removed";
   if (storeWanted) {
-    rmSync(storeAt, { recursive: true, force: true });
+    const rm = await removeStoreDir(storeAt);
+    if (!rm.ok) {
+      storeCleanup = rm.why;
+      console.error(`${o.command}: ${rm.why}`);
+    }
     if (storeWas.dir === undefined) delete process.env.TMK_STORE;
     else process.env.TMK_STORE = storeWas.dir;
     if (storeWas.run === undefined) delete process.env.TMK_STORE_RUN;
@@ -715,6 +722,7 @@ export async function runGate(o: GateOptions): Promise<GateRun> {
   const ok =
     [...outcomes.values()].every((j) => j.ok) &&
     (store === null || store.mismatches.length === 0) &&
+    storeCleanup === "removed" &&
     (o.only !== undefined || topViews.every((v) => v.ok)) &&
     treeHash(inputsBefore) === treeHash(inputsAfter);
   // Durations for next time's longest first.
@@ -825,6 +833,7 @@ export async function runGate(o: GateOptions): Promise<GateRun> {
             verify: store.verify,
             byKind: store.byKind,
             mismatches: store.mismatches,
+            cleanup: storeCleanup,
           },
     sweep:
       o.sweepKey !== undefined
@@ -1125,7 +1134,7 @@ export interface Manifest {
   };
   matrix: { views: string[] };
   sweep?: { mode: string; key?: string };
-  store?: { mode: string; mismatches: string[] };
+  store?: { mode: string; mismatches: string[]; cleanup?: string };
   jobs: (ManifestJob & { milestone: string; unit: string; level: LevelKey; free: boolean })[];
   views: { milestone: string; level: LevelKey; ok: boolean; passed: number; total: number }[];
 }
@@ -1153,6 +1162,13 @@ export async function verifyManifest(
     problems.push(
       `the build store had ${m.store.mismatches.length} mismatch(es): a reused build differed when made again`,
     );
+  // R37: the run's store removed at its end (an older manifest doesn't say)
+  if (
+    m.store !== undefined &&
+    m.store.mode === "run" &&
+    (m.store.cleanup ?? "removed") !== "removed"
+  )
+    problems.push(`the build store wasn't removed at the end: ${m.store.cleanup}`);
   const ext = externalInputs();
   for (const [k, v] of Object.entries(m.inputs.external))
     if (ext[k] !== v) problems.push(`${k}: it ran with ${v}, here it's ${ext[k] ?? "absent"}`);
@@ -1211,11 +1227,21 @@ export function measuredDetail(s: string): string {
     /\n?[ \t]*WARNING: load [\d.]+ on \d+ CPUs: these numbers are rough/g,
     "",
   );
-  return normalizeDetail(quiet.replace(/(\d),(?=\d{3}\b)/g, "$1"))
+  return normalizeDetail(caughtVerdicts(quiet).replace(/(\d),(?=\d{3}\b)/g, "$1"))
     .replace(/tirhash [0-9a-f]+/g, "tirhash #")
     .replace(/\d+/g, "#")
     .replace(/#(?:[.e+-]*#)*/g, "#")
     .replace(/ {2,}/g, " ");
+}
+
+/**
+ * A measuring box's injected bugs, each by whether it was caught, not by which of its measured criteria fired: `name: caught
+ * (same page, medians)` is `name: caught (#)` (native-e box 9 listed both criteria in R36's gate and one in a sample, as its
+ * medians move under load). Whether a bug was caught is kept word for word: `NOT CAUGHT` (or `not caught`) is never `caught`,
+ * so a bug caught in one run and not in the other still differs (R37).
+ */
+export function caughtVerdicts(s: string): string {
+  return s.replace(/(^|[^A-Za-z])caught \([^()]*\)/g, "$1caught (#)");
 }
 
 /**

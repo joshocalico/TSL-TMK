@@ -386,6 +386,38 @@ export interface StoreStats {
   mismatches: string[];
 }
 
+/**
+ * Removes a run's store at its end (R37). A run stopped early (`--fail-fast`) has had its jobs killed, but a job's own
+ * children run in process groups of their own and can still be finishing a write into the store as it's removed, so a
+ * removal that finds a directory refilled under it (ENOTEMPTY) or busy (EBUSY) waits and tries again, up to `deadlineMs`.
+ * Anything else, or still failing at the deadline, is a failure, given back with why for the gate to fail on and say:
+ * nothing is hidden. `rm` is for the tests.
+ */
+export async function removeStoreDir(
+  dir: string,
+  o: { deadlineMs?: number; delayMs?: number; rm?: (d: string) => void } = {},
+): Promise<{ ok: boolean; tries: number; why: string }> {
+  const rm = o.rm ?? ((d: string) => fs.rmSync(d, { recursive: true, force: true }));
+  const deadline = Date.now() + (o.deadlineMs ?? 120_000);
+  const delay = o.delayMs ?? 500;
+  for (let tries = 1; ; tries++) {
+    try {
+      rm(dir);
+      return { ok: true, tries, why: "" };
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      const transient = code === "ENOTEMPTY" || code === "EBUSY";
+      if (!transient || Date.now() + delay > deadline)
+        return {
+          ok: false,
+          tries,
+          why: `the run's store ${dir} couldn't be removed after ${tries} tr${tries === 1 ? "y" : "ies"}: ${e instanceof Error ? e.message : String(e)}`,
+        };
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+}
+
 /** What the run's store did: every process's and thread's events, summed. */
 export function storeStats(dir: string): StoreStats {
   const byKind: StoreStats["byKind"] = {};

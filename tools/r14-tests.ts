@@ -2,8 +2,8 @@
 // kind it trusts (tslc.ts's TRUSTED_RESHAPES): the lowering's statement-expressions inside an expression, whose statements
 // go before the statement holding them in the order JS runs them. Every program `auto` now takes reshaped agrees with the
 // direct route natively at -O0 and -O2 in every mode, and as printed on V8 and JSC with the source (the three-way
-// differential, on `auto`'s own build); each bug put into a trusted kind's order is caught; and nothing with exceptions,
-// nor any kind not trusted, is taken reshaped.
+// differential, on `auto`'s own build); each bug put into a trusted kind's order is caught; and nothing with exceptions in
+// a mode R37's TRUSTED_EXC_IN doesn't trust, nor any kind not trusted, is taken reshaped.
 //
 //   node tools/r14-tests.ts [--accel hvf|tcg] [--jobs n] [--faults] [--modes leak,rc]
 import { join, relative } from "node:path";
@@ -62,8 +62,11 @@ export async function autoReshapedDual(
 
 /**
  * What `auto` takes reshaped, and by which kinds, compiled only, at -O1 and -O2: none of a kind it doesn't trust, none with
- * exceptions (R14_TRUST_EXC), none in a printing TRUSTED_IN doesn't trust (class printing in `leak` and `rc`), and every one
- * phase 1 printed gives the direct route's TIR byte for byte, so its machine code too (the speed rule, as a fact).
+ * exceptions in a mode TRUSTED_EXC_IN doesn't trust (R14_TRUST_EXC; R37 trusts `leak` and `manual`), none in a printing
+ * TRUSTED_IN doesn't trust (class printing in `leak` and `rc`), and every one phase 1 printed without exceptions gives the
+ * direct route's TIR byte for byte, so its machine code too (the speed rule, as a fact). R37: one with exceptions, which
+ * phase 1 prints with a constant made where JS evaluates it (the direct route makes it first), is counted apart, `exc`, and
+ * held to the direct route's machine code byte for byte by pipe-d box 93 (tools/r37-tests.ts).
  */
 export async function autoReshapedKinds(
   modes: PipeMode[] = ["strict", "leak", "manual", "rc"],
@@ -73,8 +76,10 @@ export async function autoReshapedKinds(
   kinds: Record<string, number>;
   phase1Same: number;
   classes: number;
+  exc: number;
 }> {
-  const { lowerFile, TRUSTED_RESHAPES, TRUSTED_IN } = await import("../compiler/host/tslc.ts");
+  const { lowerFile, TRUSTED_RESHAPES, TRUSTED_IN, TRUSTED_EXC_IN } =
+    await import("../compiler/host/tslc.ts");
   const { PIPE_DIRS } = await import("./pipe-tests.ts");
   const files = R14_DIRS(PIPE_DIRS)
     .flatMap((d) => listPrograms(join(ROOT, d)))
@@ -84,6 +89,7 @@ export async function autoReshapedKinds(
   const kinds: Record<string, number> = {};
   let phase1Same = 0;
   let classes = 0;
+  let exc = 0;
   for (const mode of modes)
     for (const f of files)
       for (const opt of [1, 2] as const) {
@@ -101,8 +107,12 @@ export async function autoReshapedKinds(
           if (opt === 2) kinds[k] = (kinds[k] ?? 0) + 1;
           if (!TRUSTED_RESHAPES.includes(k)) failures.push(`${at}: taken reshaped by "${k}"`);
         }
-        if (a.tsl.stats.rcExc === true || (a.meta as { exc?: unknown }).exc !== undefined)
-          failures.push(`${at}: taken reshaped with exceptions`);
+        const withExc =
+          a.tsl.stats.rcExc === true || (a.meta as { exc?: unknown }).exc !== undefined;
+        if (withExc && TRUSTED_EXC_IN[mode] !== true)
+          failures.push(
+            `${at}: taken reshaped with exceptions in a mode TRUSTED_EXC_IN doesn't trust`,
+          );
         const cls = a.tsl.stats.classes === true;
         if (TRUSTED_IN[mode]?.[cls ? "classes" : "phase1"] !== true)
           failures.push(`${at}: taken reshaped in a printing TRUSTED_IN doesn't trust`);
@@ -110,12 +120,17 @@ export async function autoReshapedKinds(
           classes++;
           continue;
         }
+        // R37: phase 1's printing with exceptions, its machine code checked by pipe-d box 93
+        if (withExc) {
+          exc++;
+          continue;
+        }
         const d = lowerFile(f, { memory: mode, opt, route: "direct" });
         if (d.tirHash === a.tirHash) phase1Same++;
         else
           failures.push(`${at}: phase 1's printing, reshaped, gives TIR the direct route doesn't`);
       }
-  return { failures, taken, kinds, phase1Same, classes };
+  return { failures, taken, kinds, phase1Same, classes, exc };
 }
 
 /** The bugs put into the trusted kinds' printing (emit-tsl.ts, TMK_TEST_EMIT), each to be caught by the differential. */
@@ -179,6 +194,7 @@ if (import.meta.main) {
         kinds: k.kinds,
         phase1Same: k.phase1Same,
         classes: k.classes,
+        exc: k.exc,
       }),
     );
     for (const x of k.failures) console.log(`  FAIL ${x}`);

@@ -2,11 +2,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  caughtVerdicts,
   decisionDetail,
   detailCounts,
   isBenchmarkDetail,
   loadFreeCounts,
   measuredDetail,
+  normalizeDetail,
   sameListedItems,
   suiteCountDiffs,
 } from "./gate.ts";
@@ -171,4 +173,34 @@ test("a compile's suite is named by its program, so runs that kept different pro
   // the same program's table changed still differs
   const changed = [s("corpus/std/std_new_safety.ts", { "meta.strings.abd": 4 })];
   assert.equal(suiteCountDiffs(gate, changed).length, 1);
+});
+
+// native-e box 9 (a quiet box, so measuring) in R36's gate and in the coordinator's sample of the same tree: both runs caught
+// both injected bugs, the gate by two of its measured criteria and the sample by one, as the medians move under load. Which
+// criteria fired is a measurement; whether each bug was caught is compared exactly (R37).
+test("a measuring box's injected bugs are compared by caught or not, and which measured criteria fired isn't", () => {
+  const gate =
+    "check ok; free-list-keeps-order: caught (same page, medians), reused-tenth: caught (medians)";
+  const sample =
+    "check ok; free-list-keeps-order: caught (same page), reused-tenth: caught (medians)";
+  assert.equal(measuredDetail(gate), measuredDetail(sample));
+  assert.equal(
+    caughtVerdicts(gate),
+    "check ok; free-list-keeps-order: caught (#), reused-tenth: caught (#)",
+  );
+  // a bug caught in one run and not caught in the other still differs, either way round and in either spelling
+  const missed = "check ok; free-list-keeps-order: NOT CAUGHT, reused-tenth: caught (medians)";
+  assert.notEqual(measuredDetail(gate), measuredDetail(missed));
+  assert.notEqual(measuredDetail(missed), measuredDetail(sample));
+  assert.notEqual(measuredDetail("a: caught (medians)"), measuredDetail("a: not caught (medians)"));
+  // which bug, and the rest of the words, still count
+  assert.notEqual(
+    measuredDetail(gate),
+    measuredDetail(sample.replace("reused-tenth", "reused-half")),
+  );
+  assert.notEqual(measuredDetail(gate), measuredDetail(gate.replace("check ok", "check FAILED")));
+  // a box that doesn't measure is compared as before, criteria and all
+  assert.notEqual(normalizeDetail(gate), normalizeDetail(sample));
+  // "uncaught" is a word of its own, not a verdict
+  assert.equal(caughtVerdicts("an uncaught (TypeError) throw"), "an uncaught (TypeError) throw");
 });

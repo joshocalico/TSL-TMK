@@ -225,6 +225,14 @@ export function r36Off(part: "trust"): boolean {
 }
 
 /**
+ * R37: whether a part of R37 is turned off by TMK_R37_OFF, for computing what it moved (tools/r37-pins.ts): `exc`, `auto`
+ * not taking a program with exceptions reshaped in a mode TRUSTED_EXC_IN trusts (tslc.ts), as before R37.
+ */
+export function r37Off(part: "exc"): boolean {
+  return (process.env.TMK_R37_OFF ?? "").split(",").includes(part);
+}
+
+/**
  * R17: whether a part of R17 is turned off by TMK_R17_OFF, for computing what it moved (tools/r17-pins.ts): `pop`, the
  * lowering's pop clearing the slot it drops in an array of references in every mode (before R17, only in `rc`); `jsrt` and
  * `holes`, the printing's JsArray constructor (emit-tsl.ts).

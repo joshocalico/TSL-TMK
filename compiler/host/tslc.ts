@@ -24,7 +24,7 @@ import { lowerToTir } from "./lower.ts";
 import { placeRegion } from "./region.ts";
 import { markSeparatedFields } from "./separate.ts";
 import { markLinkedChecks } from "./links.ts";
-import { r13Off, r14Off, r36Off, r6Off } from "./down-model.ts";
+import { r13Off, r14Off, r36Off, r37Off, r6Off } from "./down-model.ts";
 import {
   isArchFile,
   isCoreFile,
@@ -1210,8 +1210,37 @@ function strictClassesIn(): boolean {
  * them, with what was evaluated ahead of them held in a temporary.
  */
 export const R14_TRUST = true;
-/** R14: whether the trust extends to a program with exceptions (the lowering's `excSource`): off, see untrustedReshapes. */
+/** R14: whether the trust extends to a program with exceptions (the lowering's `excSource`) in every mode: off, see untrustedReshapes. */
 export const R14_TRUST_EXC = false;
+/**
+ * R37: the modes in which the trust extends to a program with exceptions, each only where every program it newly takes
+ * there met the speed rule at -O1 and -O2 (M5's R37 record). `TMK_R37_OFF=exc` takes it back, for tools/r37-pins.ts.
+ *
+ * `leak` and `manual`: there `auto` takes such a program through phase 1's printing (class printing needs its strings,
+ * which `auto` doesn't print in those modes), which prints down-exc.ts's flag and its checks as the direct route compiles
+ * them; each of the 81 programs it newly takes gives the direct route's machine code byte for byte at -O1 and -O2 in both
+ * modes (its TIR at -O1 differs only in where a constant is made, which the backend makes at its use; pipe-d box 93
+ * checks every one). Not `rc`: there class printing takes them, and two are over 1.00 at -O2 (exc_exhaust at equal work,
+ * 1.009, the freeing of a thrown `Dyn` and its message through @tsl/gc's steps; gen_finally_catch_finally_breakOuter,
+ * 1.0002, stores and loads around concatenation calls the allocator takes as cold), and adv_exc_drop isn't measured (the
+ * direct route's timing image fills its bulk channel), M5's R37 record.
+ */
+export const TRUSTED_EXC_IN: Record<string, boolean> = {
+  strict: false,
+  leak: true,
+  manual: true,
+  rc: false,
+};
+
+/**
+ * Whether `auto` takes a program with exceptions reshaped in a mode (R14_TRUST_EXC, R37's TRUSTED_EXC_IN). TMK_TRUST_IN's
+ * `mode:exc` (measurement only) trusts them there too, so tools/r14-time.ts can time what `auto` would take.
+ */
+function excTrusted(memory: string): boolean {
+  if ((process.env.TMK_TRUST_IN ?? "").split(",").includes(`${memory}:exc`)) return true;
+  if (R14_TRUST_EXC) return true;
+  return TRUSTED_EXC_IN[memory] === true && !r37Off("exc");
+}
 export const TRUSTED_RESHAPES: readonly string[] = [
   "a sequence with statements in a part after the first",
   "statements before an operand",
@@ -1272,8 +1301,8 @@ export function untrustedReshapes(
   // Exceptions: every program with them prints reshaped (a call that can throw is a flag check after it), so none was ever
   // `auto`'s, and their throws measured 1.00 to 1.02x the direct route in `leak` (M5's pipe-h record). Trusting the
   // reshapes mustn't switch them over by the way: they wait for their own speed rule (R14_TRUST_EXC).
-  if (r.excSource !== undefined && !R14_TRUST_EXC)
-    return ["exceptions, which auto doesn't take reshaped (R14_TRUST_EXC)"];
+  if (r.excSource !== undefined && !excTrusted(memory))
+    return ["exceptions, which auto doesn't take reshaped (R14_TRUST_EXC, TRUSTED_EXC_IN)"];
   const env = process.env.TMK_TRUST_RESHAPES;
   const off = !R14_TRUST || r14Off("trust") || env === "0";
   const trusted = off ? [] : env !== undefined && env !== "" ? env.split("|") : TRUSTED_RESHAPES;

@@ -1,12 +1,20 @@
 // The build store (tools/store.ts, D76): what's made is reused within a run, a reuse made again differs only if what's made
 // does, and nothing is used from outside a run's store.
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { serialize, deserialize } from "node:v8";
-import { childKey, storeKey, stored, storeStats, StoreMismatch, valueHash } from "./store.ts";
+import {
+  childKey,
+  removeStoreDir,
+  storeKey,
+  stored,
+  storeStats,
+  StoreMismatch,
+  valueHash,
+} from "./store.ts";
 
 function withStore<T>(verify: string, f: (dir: string) => T): T {
   const dir = mkdtempSync(join(tmpdir(), "tmk-store-test-"));
@@ -129,4 +137,51 @@ test("a pure child's key takes a file outside the tree by its bytes, and anythin
       rmSync(d, { recursive: true, force: true });
     }
   });
+});
+
+// R36's first gate: after a fail-fast stop, `runGate`'s removal of its store threw ENOTEMPTY (tools/gate.ts) while a stopped
+// job's children were still writing into it. A directory refilled or busy is tried again; anything else, or still failing at
+// the deadline, is given back as a failure with why, never hidden.
+test("a run's store is removed though writers are still finishing, and a removal that can't succeed says so", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "tmk-store-rm-"));
+  mkdirSync(join(dir, "child", "ab"), { recursive: true });
+  writeFileSync(join(dir, "child", "ab", "x"), "1");
+  const busy = (code: string): Error =>
+    Object.assign(new Error(`${code}: directory not empty`), { code });
+  // refilled twice under the removal, then gone
+  let calls = 0;
+  const flaky = (d: string): void => {
+    calls++;
+    if (calls <= 2) throw busy(calls === 1 ? "ENOTEMPTY" : "EBUSY");
+    rmSync(d, { recursive: true, force: true });
+  };
+  const ok = await removeStoreDir(dir, { rm: flaky, delayMs: 5, deadlineMs: 5_000 });
+  assert.deepEqual(ok, { ok: true, tries: 3, why: "" });
+  assert.ok(!existsSync(dir));
+  // a writer that never stops: a failure at the deadline, with the error
+  const never = await removeStoreDir(dir, {
+    rm: () => {
+      throw busy("ENOTEMPTY");
+    },
+    delayMs: 5,
+    deadlineMs: 40,
+  });
+  assert.equal(never.ok, false);
+  assert.ok(never.tries > 1);
+  assert.match(never.why, /couldn't be removed .*ENOTEMPTY/);
+  // an error that waiting can't cure isn't tried again
+  const denied = await removeStoreDir(dir, {
+    rm: () => {
+      throw busy("EACCES");
+    },
+    delayMs: 5,
+    deadlineMs: 5_000,
+  });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.tries, 1);
+  // and with nothing in the way, the real removal, once
+  const real = mkdtempSync(join(tmpdir(), "tmk-store-rm-"));
+  writeFileSync(join(real, "f"), "1");
+  assert.deepEqual(await removeStoreDir(real), { ok: true, tries: 1, why: "" });
+  assert.ok(!existsSync(real));
 });
