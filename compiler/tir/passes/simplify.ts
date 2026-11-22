@@ -2,7 +2,7 @@
 // removes identities such as `x + 0`, removes a check whose constant operands prove it can't fire, and replaces a block
 // parameter that's given the same value on every edge by that value. Every fold computes what the backend computes:
 // nothing here folds a float to NaN, or an `ix` operation whose answer could differ between wasm32 and a 64-bit target.
-import { edgesOf, type Func, type Instr, type TirType } from "../ir.ts";
+import { edgesOf, ValMap, type Func, type Instr, type TirType } from "../ir.ts";
 import {
   bitsOf,
   effectOf,
@@ -99,16 +99,20 @@ export function simplifyFunc(f: Func, stats: SimplifyStats, faults: FoldFaults =
 }
 
 function foldOnce(f: Func, stats: SimplifyStats, faults: FoldFaults): boolean {
-  const consts = new Map<number, Const>();
-  const defs = new Map<number, Instr>();
+  // R36: by value number in arrays (ir.ts's ValMap), not Maps
+  const consts = new ValMap<Const>(f.types.length);
+  const defs = new ValMap<Instr>(f.types.length);
   for (const b of f.blocks) {
     for (const ins of b.instrs) {
       for (const r of ins.res) defs.set(r, ins);
       const r = ins.res[0];
       if (r === undefined) continue;
-      if (ins.op.startsWith("iconst."))
+      const op = ins.op;
+      const c0 = op.charCodeAt(0);
+      // (R36: the first letter looked at before the name, as most operations are neither)
+      if (c0 === 105 && op.startsWith("iconst."))
         consts.set(r, { k: "int", t: f.types[r]!, v: intImm(ins, 0) });
-      else if (ins.op.startsWith("fconst.")) {
+      else if (c0 === 102 && op.startsWith("fconst.")) {
         consts.set(r, { k: "float", t: f.types[r] as "f32" | "f64", bits: intImm(ins, 0) });
       }
     }
@@ -147,9 +151,11 @@ function foldOnce(f: Func, stats: SimplifyStats, faults: FoldFaults): boolean {
   // A reference's pointer, once per block: a second `ref.addr` of one reference is the first (D64). Only TSL proper's
   // references have one, so lowered code's TIR doesn't move. It's pure, and the
   // pass manager's rounds see blocks that cfg has merged, so a loop body's reads of one reference share one mask.
-  const mergeMasks = process.env.TMK_TSL_OPT_OFF?.split(",").includes("mask") !== true;
+  const optOff = process.env.TMK_TSL_OPT_OFF?.split(",");
+  const mergeMasks = optOff?.includes("mask") !== true;
   for (const b of f.blocks) {
-    const masked = new Map<string, number>();
+    // (R36: made for a block only once it has a `ref.addr`)
+    let masked: Map<string, number> | null = null;
     for (let k = 0; k < b.instrs.length; k++) {
       const ins = b.instrs[k]!;
       if (ins.res.length !== 1) continue;
@@ -190,6 +196,7 @@ function foldOnce(f: Func, stats: SimplifyStats, faults: FoldFaults): boolean {
       }
       if (mergeMasks && ins.op === "ref.addr" && ins.ops.length === 1 && ins.ops[0]?.t === "v") {
         const key = `${ins.op} ${ins.ops[0].id}`;
+        masked ??= new Map<string, number>();
         const had = masked.get(key);
         if (had !== undefined) {
           alias(ins, had, "identities");
@@ -199,18 +206,27 @@ function foldOnce(f: Func, stats: SimplifyStats, faults: FoldFaults): boolean {
       }
       const eff = effectOf(ins);
       if (eff !== "pure" && eff !== "check") continue;
-      const vals = valueOps(ins);
+      // R36: the value operands looked at in place first, and their list made only for what may fold
+      let nv = 0;
+      let v0 = -1;
+      let v1 = -1;
+      let anyConst = false;
+      for (const o of ins.ops) {
+        if (o.t !== "v") continue;
+        if (nv === 0) v0 = o.id;
+        else if (nv === 1) v1 = o.id;
+        nv++;
+        if (consts.has(o.id)) anyConst = true;
+      }
       // An integer or pointer compared with itself (pipe-h): `x !== x` on an `i32` is false, as JS's own NaN test is
       // printed for a value that's an integer.
-      if (base === "icmp" && p.length === 3 && vals.length === 2 && vals[0] === vals[1]) {
+      if (base === "icmp" && p.length === 3 && nv === 2 && v0 === v1) {
         const c = p[1]!;
         const same = c === "eq" || c.endsWith("le") || c.endsWith("ge");
         toConst(ins, t, same !== (faults.selfCompare === true) ? 1n : 0n);
         continue;
       }
       // Nothing to fold without a constant operand, but for these.
-      let anyConst = false;
-      for (const v of vals) if (consts.has(v)) anyConst = true;
       if (
         !anyConst &&
         base !== "select" &&
@@ -220,13 +236,27 @@ function foldOnce(f: Func, stats: SimplifyStats, faults: FoldFaults): boolean {
         base !== "ref"
       )
         continue;
+      const vals = valueOps(ins);
       const ints = vals.map(intConst);
       const allInt = vals.length > 0 && ints.every((x) => x !== undefined);
       const opT = vals.length > 0 ? f.types[vals[0]!]! : t;
       // --- strength reduction (R1f): a division or remainder by a power of two, a constant shift of a 64-bit integer
       // that needn't guard a count of 64 or more, and a shift left undone by a shift right that loses nothing
       if (!allInt) {
-        const red = reduce(f, b.instrs, k, ins, p, vals, ints, t, defs, consts, faults);
+        const red = reduce(
+          f,
+          b.instrs,
+          k,
+          ins,
+          p,
+          vals,
+          ints,
+          t,
+          defs,
+          consts,
+          faults,
+          optOff ?? [],
+        );
         if (red !== null) {
           stats.identities++;
           changed = true;
@@ -345,7 +375,7 @@ function foldOnce(f: Func, stats: SimplifyStats, faults: FoldFaults): boolean {
 }
 
 /** An `iconst.ix 0` to use as a gep's index: one already defined just before, or a new one placed there. */
-function zeroIx(f: Func, instrs: Instr[], i: number, consts: Map<number, Const>): number {
+function zeroIx(f: Func, instrs: Instr[], i: number, consts: ValMap<Const>): number {
   const prev = instrs[i - 1];
   if (prev !== undefined && prev.op === "iconst.ix" && intImm(prev, 0) === 0n) return prev.res[0]!;
   const z = newValue(f, "ix");
@@ -571,10 +601,16 @@ function cmp(cond: string, a: bigint, b: bigint): boolean | null {
 function foldFloat(
   p: string[],
   vals: number[],
-  consts: Map<number, Const>,
+  consts: ValMap<Const>,
   t: TirType,
 ): { k: "float"; x: number } | { k: "int"; v: bigint } | null {
   const base = p[0]!;
+  // R36: nothing folds unless every operand is a float constant, or it's an integer constant's conversion: said before
+  // anything is made
+  if (vals.length === 0) return null;
+  if (base !== "sitofp" && base !== "uitofp") {
+    for (const v of vals) if (consts.get(v)?.k !== "float") return null;
+  }
   const fl = vals.map((v) => {
     const c = consts.get(v);
     if (c?.k !== "float") return undefined;
@@ -677,7 +713,7 @@ function identity(
   p: string[],
   vals: number[],
   ints: (bigint | undefined)[],
-  defs: Map<number, Instr>,
+  defs: ValMap<Instr>,
 ): number | null {
   const base = p[0]!;
   const t = f.types[ins.res[0]!]!;
@@ -741,8 +777,8 @@ function identity(
 function maxBits(
   v: number,
   f: Func,
-  defs: Map<number, Instr>,
-  consts: Map<number, Const>,
+  defs: ValMap<Instr>,
+  consts: ValMap<Const>,
   depth = 0,
 ): number {
   const t = f.types[v]!;
@@ -791,14 +827,14 @@ function reduce(
   vals: number[],
   ints: (bigint | undefined)[],
   t: TirType,
-  defs: Map<number, Instr>,
-  consts: Map<number, Const>,
+  defs: ValMap<Instr>,
+  consts: ValMap<Const>,
   faults: FoldFaults,
+  off: readonly string[],
 ): number | { at: number } | null {
   const base = p[0]!;
   const cb = ints[1];
-  // `TMK_TSL_OPT_OFF=pow2,bigshift` turns them off, to measure each (M5's R1f record)
-  const off = process.env.TMK_TSL_OPT_OFF?.split(",") ?? [];
+  // `TMK_TSL_OPT_OFF=pow2,bigshift` turns them off, to measure each (M5's R1f record); read once a fold, by foldOnce (R36)
   const constAt = (ty: TirType, v: bigint): number => {
     const r = newValue(f, ty);
     instrs.splice(k, 0, { op: `iconst.${ty}`, ops: [{ t: "i", val: v }], res: [r] });
@@ -853,6 +889,14 @@ function reduce(
 
 /** A block parameter given one value on every edge, or itself, is that value. Copy propagation for block parameters. */
 function simplifyParams(f: Func, stats: SimplifyStats): boolean {
+  // R36: nothing to do, and nothing made, where no block but the entry has a parameter
+  let anyParams = false;
+  for (let i = 1; i < f.blocks.length; i++)
+    if (f.blocks[i]!.params.length > 0) {
+      anyParams = true;
+      break;
+    }
+  if (!anyParams) return false;
   const incoming = new Map<number, number[][]>(); // block id to, per edge, the args
   for (const b of f.blocks) {
     for (const e of edgesOf(b.term)) {

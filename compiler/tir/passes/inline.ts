@@ -678,6 +678,14 @@ function inlineInto(
   const softCap = Math.max(initial * GROWTH_FACTOR, initial + GROWTH_ADD);
   let frame = 0;
   const considered = new WeakSet<Instr>();
+  // R36: a callee's size and frame, measured once for this caller: a callee is another function, in a cycle of calls before
+  // this one's (one in the caller's own is refused before it's measured), so nothing changes it while this runs
+  const sizes = new Map<Func, { cost: number; slots: number }>();
+  const sizeOf = (g: Func): { cost: number; slots: number } => {
+    let z = sizes.get(g);
+    if (z === undefined) sizes.set(g, (z = { cost: costOf(g), slots: allocaBytes(g) }));
+    return z;
+  };
   const keepLoops = !r26Off("inline");
   for (let sweep = 0; sweep < 3; sweep++) {
     const loops =
@@ -730,7 +738,7 @@ function inlineInto(
           no(`the caller is ${lacking} and the callee doesn't say so`);
           continue;
         }
-        const slots = allocaBytes(g);
+        const slots = sizeOf(g).slots;
         if (slots > 0 && facts.cyclic.has(f.name)) {
           no("it has frame slots, and the caller recurses, so every level's frame would grow");
           continue;
@@ -739,7 +747,7 @@ function inlineInto(
           no("the caller's frame would grow past 64 KiB");
           continue;
         }
-        const gc = costOf(g);
+        const gc = sizeOf(g).cost;
         const forced = g.attrs.includes("inline");
         let threshold: number;
         let reason: string;
@@ -795,7 +803,8 @@ function inlineInto(
             );
             continue;
           }
-          const had = keepLoops ? new Set(f.blocks.map((x) => x.id)) : null;
+          // (R36: the blocks before only where they're asked for, a call in a loop's block)
+          const had = keepLoops && loops.has(b.id) ? new Set(f.blocks.map((x) => x.id)) : null;
           // R28's injected bug: a callee only the no-growth rule let in, copied without its first store
           const onlyShrink = !forced && shrinks && grown > softCap;
           if (onlyShrink && ctx.faults.shrinkStore === true)
@@ -825,7 +834,7 @@ function inlineInto(
           if (plan !== null && plan.cost <= threshold) {
             const pgrown = cost + plan.cost - callOverhead(g);
             if (pgrown <= softCap && pgrown <= HARD_CAP) {
-              const had = keepLoops ? new Set(f.blocks.map((x) => x.id)) : null;
+              const had = keepLoops && loops.has(b.id) ? new Set(f.blocks.map((x) => x.id)) : null;
               inlineAt(f, bi, ii, g, ctx, plan);
               if (had !== null && loops.has(b.id))
                 for (const x of f.blocks) if (!had.has(x.id)) loops.add(x.id);

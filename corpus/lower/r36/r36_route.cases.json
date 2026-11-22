@@ -1,0 +1,22 @@
+[
+  { "fn": "cells", "args": [0, 1] },
+  { "fn": "cells", "args": [1, 2] },
+  { "fn": "cells", "args": [10, 3] },
+  { "fn": "cells", "args": [200, 7] },
+  { "fn": "prefix", "args": [0, 1] },
+  { "fn": "prefix", "args": [1, 5] },
+  { "fn": "prefix", "args": [17, -3] },
+  { "fn": "prefix", "args": [300, 11] },
+  { "fn": "texts", "args": [0, "x"] },
+  { "fn": "texts", "args": [3, "ab"] },
+  { "fn": "texts", "args": [40, "héllo"] },
+  { "fn": "texts", "args": [120, "z"] },
+  { "fn": "counts", "args": [0, 1] },
+  { "fn": "counts", "args": [10, 3] },
+  { "fn": "counts", "args": [200, 17] },
+  { "fn": "counts", "args": [500, 40] },
+  { "fn": "pairs", "args": [0] },
+  { "fn": "pairs", "args": [1] },
+  { "fn": "pairs", "args": [9] },
+  { "fn": "pairs", "args": [100] }
+]

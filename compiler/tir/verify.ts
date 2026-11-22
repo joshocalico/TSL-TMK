@@ -73,13 +73,14 @@ function verifyFunc(
   const cfg = buildCfg(f);
   if (cfg.rpo.length !== f.blocks.length) err("unreachable blocks");
   // Where each value is defined: block position and instruction index, -1 for block parameters.
-  const defBlock = new Map<number, number>();
-  const defIndex = new Map<number, number>();
+  // R36: by value number in arrays, not Maps (the verifier runs on every module, after the optimiser too)
+  const defBlock: (number | undefined)[] = Array<number | undefined>(f.types.length); // that many empty slots
+  const defIndex: (number | undefined)[] = Array<number | undefined>(f.types.length);
   const define = (v: number, block: number, index: number): void => {
-    if (defBlock.has(v)) err(`%${v} is defined twice`);
+    if (defBlock[v] !== undefined) err(`%${v} is defined twice`);
     if (f.types[v] === undefined) err(`%${v} has no type`);
-    defBlock.set(v, block);
-    defIndex.set(v, index);
+    defBlock[v] = block;
+    defIndex[v] = index;
   };
   for (const p of f.params) define(p, 0, -2);
   f.blocks.forEach((b, at) => {
@@ -114,12 +115,12 @@ function verifyFunc(
   const dominates = (a: number, b: number): boolean =>
     pre[a]! >= 0 && pre[b]! >= 0 && pre[a]! <= pre[b]! && post[b]! <= post[a]!;
   const useAt = (v: number, at: number, index: number): TirType | null => {
-    const d = defBlock.get(v);
+    const d = defBlock[v];
     if (d === undefined) {
       err(`use of undefined %${v}`);
       return null;
     }
-    const ok = d === at ? defIndex.get(v)! < index : dominates(d, at);
+    const ok = d === at ? defIndex[v]! < index : dominates(d, at);
     if (!ok) err(`%${v} does not dominate its use in bb${f.blocks[at]!.id}`);
     return f.types[v] ?? null;
   };
@@ -159,8 +160,13 @@ function verifyInstr(
   useAt: (v: number, at: number, index: number) => TirType | null,
   err: (s: string) => void,
 ): void {
-  const vals = ins.ops.flatMap((o) => (o.t === "v" ? [o.id] : []));
-  const others = ins.ops.filter((o) => o.t !== "v");
+  // R36: one walk over the operands, not a flatMap and a filter
+  const vals: number[] = [];
+  const others: typeof ins.ops = [];
+  for (const o of ins.ops) {
+    if (o.t === "v") vals.push(o.id);
+    else others.push(o);
+  }
   const check = (wants: (TirType | "any-int" | "any-float" | "any")[], rets: TirType[]): void => {
     if (vals.length !== wants.length) {
       err(`${ins.op}: ${vals.length} operands, expected ${wants.length} (bb${b.id})`);

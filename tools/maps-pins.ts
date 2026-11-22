@@ -29,6 +29,7 @@ import { r32Moved } from "./r32-moved.ts";
 import { r33Moved } from "./r33-moved.ts";
 import { r34Moved } from "./r34-moved.ts";
 import { r35Moved } from "./r35-moved.ts";
+import { r36Moved } from "./r36-moved.ts";
 import { clsidMoved } from "./clsid-moved.ts";
 import { r1dMoved } from "./r1d-moved.ts";
 import { r1fMoved } from "./r1f-moved.ts";
@@ -409,6 +410,7 @@ export const mapsMoved = (k: string): boolean =>
   r33Moved(k) ||
   r34Moved(k) ||
   r35Moved(k) ||
+  r36Moved(k) ||
   r32Moved(k) ||
   r31Moved(k) ||
   r30Moved(k) ||

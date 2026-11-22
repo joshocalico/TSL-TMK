@@ -17,7 +17,7 @@
 // A class id's load (`load.T.inv`, memory.ts) is shared across more: only a plain store at its own base over its bytes changes
 // what it reads, so it stands for a later load of the same object's id across stores elsewhere, calls and intrinsics. It
 // stands only for another invariant load; a plain load of those bytes isn't taken from it.
-import { buildCfg, type Func, type Instr } from "../ir.ts";
+import { buildCfg, ValMap, type Func, type Instr } from "../ir.ts";
 import {
   accessAddr,
   accessBytes,
@@ -43,6 +43,11 @@ export interface GvnStats {
 export interface GvnFaults {
   /** Injected (D73): a plain store is passed over, so loads either side of one that changes their bytes merge. */
   acrossStore?: boolean;
+  /**
+   * Injected (R36): the table of constants' keys kept from one function to the next, not made for each: the module's one
+   * table, which every function's constants go into (made for each module, so a build is the same every time).
+   */
+  sharedConstKeys?: ValMap<string>;
 }
 
 export interface GvnContext {
@@ -74,8 +79,8 @@ export function gvnFunc(f: Func, ctx: GvnContext): boolean {
   let changed = mergeParams(f, ctx.stats);
   const cfg = buildCfg(f);
   const n = f.blocks.length;
-  const defs = new Map<number, Instr>();
-  const constKey = new Map<number, string>();
+  const defs = new ValMap<Instr>(f.types.length);
+  const constKey = ctx.faults?.sharedConstKeys ?? new ValMap<string>(f.types.length);
   for (const b of f.blocks) {
     for (const ins of b.instrs) {
       for (const r of ins.res) defs.set(r, ins);
@@ -246,21 +251,37 @@ function push(avail: Avail[], a: Avail): Avail[] {
 /** The operation, its operands' value numbers (in order, or sorted where the order doesn't matter), and its immediates but a trap. */
 function exprKey(ins: Instr, vkey: (v: number) => string): string {
   const p = opParts(ins.op);
-  const vals: string[] = [];
-  const imms: string[] = [];
+  // R36: the same text as before, `op(values)[immediates]`, made as it goes with no lists in between
+  let vals = "";
+  let imms = "";
+  let nv = 0;
+  let ni = 0;
+  let v0 = "";
+  let v1 = "";
   for (const o of ins.ops) {
-    if (o.t === "v") vals.push(vkey(o.id));
-    else if (o.t === "i") imms.push(String(o.val));
-    else if (o.t === "ixmax") imms.push("ixmax");
-    else if (o.t === "sym" || o.t === "name") imms.push(o.name);
-    else if (o.t === "sig") imms.push(`sig${o.id}`);
+    let k: string;
+    if (o.t === "v") {
+      k = vkey(o.id);
+      if (nv === 0) v0 = k;
+      else if (nv === 1) v1 = k;
+      vals = nv === 0 ? k : `${vals},${k}`;
+      nv++;
+      continue;
+    }
+    if (o.t === "i") k = String(o.val);
+    else if (o.t === "ixmax") k = "ixmax";
+    else if (o.t === "sym" || o.t === "name") k = o.name;
+    else if (o.t === "sig") k = `sig${o.id}`;
+    else continue;
+    imms = ni === 0 ? k : `${imms},${k}`;
+    ni++;
   }
   const b = p[0]!;
   const commutes =
     (COMMUTATIVE.has(b) && (p.length === 2 || p[1] === "chk")) ||
     (b === "icmp" && (p[1] === "eq" || p[1] === "ne"));
-  if (commutes && vals.length === 2 && vals[1]! < vals[0]!) vals.reverse();
-  return `${ins.op}(${vals.join(",")})[${imms.join(",")}]`;
+  if (commutes && nv === 2 && v1 < v0) vals = `${v1},${v0}`;
+  return `${ins.op}(${vals})[${imms}]`;
 }
 
 /** A block parameter given, on every edge, the same value as another parameter of its block, is that parameter. */

@@ -26,7 +26,7 @@
 // another object's or this one's other bytes, as only a construction writes a class id and it writes a new object's. What
 // still changes one is a plain store at the same base over its bytes: a frame slot that a `new` in a loop builds an object in
 // again, say, which the passes see as the same base.
-import { edgesOf, type Func, type Instr, type Module } from "../ir.ts";
+import { edgesOf, ValMap, type Func, type Instr, type Module, type ValLookup } from "../ir.ts";
 import { calleeOf, intImm, opParts, PURE_INTRINSICS, valueOps } from "./util.ts";
 
 export interface Addr {
@@ -67,27 +67,58 @@ function sepOff(): boolean {
 export function sepValues(f: Func): Set<number> {
   const out = new Set<number>();
   if (sepOff()) return out;
-  const defs: Instr[] = [];
-  for (const b of f.blocks) for (const ins of b.instrs) defs.push(ins);
-  const from = (ins: Instr): boolean => {
-    const p = opParts(ins.op);
-    if (p[0] === "load")
-      return (
-        ins.sep === true || (sepFaults.aliasAny === true && p[1] === "i64" && isPlainLoad(ins))
-      );
-    const vs = valueOps(ins);
-    if (ins.op === "gep" || ins.op === "bitcast.ptr" || ins.op === "bitcast.i64")
-      return vs[0] !== undefined && out.has(vs[0]);
-    if (
-      (p[0] === "add" || p[0] === "sub") &&
-      (p[1] === "i64" || p[1] === "ix" || (p[1] === "chk" && (p[3] === "i64" || p[3] === "ix")))
-    ) {
-      const a = vs[0] !== undefined && out.has(vs[0]);
-      const b = vs[1] !== undefined && out.has(vs[1]);
-      return p[0] === "add" ? a !== b : a && !b;
+  // R36: each instruction's rule read once, before going round, not again in every round (it was a tenth of -O1's value
+  // numbering and LICM); the rounds and what they decide are as before. The rule, by kind: 1 a separated field's load
+  // (always one); 2 a `gep` or a cast of its first operand (one if that is); 3 an add (one if exactly one operand is); 4 a
+  // subtract (one if its first is and its second isn't); 0 anything else (never one). An operand that isn't there is -1.
+  const res: number[] = [];
+  const kind: number[] = [];
+  const a0: number[] = [];
+  const a1: number[] = [];
+  for (const b of f.blocks) {
+    for (const ins of b.instrs) {
+      if (ins.res.length !== 1) continue;
+      // (R36: by the first letter, the operations of no kind but 0 go before their name is split)
+      const c0 = ins.op.charCodeAt(0);
+      if (c0 !== 108 && c0 !== 103 && c0 !== 98 && c0 !== 97 && c0 !== 115) continue; // l g b a s
+      const p = opParts(ins.op);
+      let k = 0;
+      let x = -1;
+      let y = -1;
+      if (p[0] === "load") {
+        if (ins.sep === true || (sepFaults.aliasAny === true && p[1] === "i64" && isPlainLoad(ins)))
+          k = 1;
+      } else if (ins.op === "gep" || ins.op === "bitcast.ptr" || ins.op === "bitcast.i64") {
+        k = 2;
+        for (const o of ins.ops)
+          if (o.t === "v") {
+            x = o.id;
+            break;
+          }
+      } else if (
+        (p[0] === "add" || p[0] === "sub") &&
+        (p[1] === "i64" || p[1] === "ix" || (p[1] === "chk" && (p[3] === "i64" || p[3] === "ix")))
+      ) {
+        k = p[0] === "add" ? 3 : 4;
+        let n = 0;
+        for (const o of ins.ops)
+          if (o.t === "v") {
+            if (n === 0) x = o.id;
+            else if (n === 1) y = o.id;
+            n++;
+          }
+      }
+      // an instruction of kind 0 is never one, and was never put in, so going round never changes it: left out
+      if (k === 0) continue;
+      res.push(ins.res[0]!);
+      kind.push(k);
+      a0.push(x);
+      a1.push(y);
     }
-    return false;
-  };
+  }
+  // membership while going round in bytes by value number; the Set given back holds the same values
+  const inn = new Uint8Array(f.types.length);
+  const has = (v: number): boolean => v >= 0 && inn[v] === 1;
   // Block parameters: every incoming value.
   const byId = new Map<number, Func["blocks"][number]>();
   for (const b of f.blocks) byId.set(b.id, b);
@@ -101,41 +132,51 @@ export function sepValues(f: Func): Set<number> {
       });
   const params = [...incoming.keys()];
   // Optimistic: every parameter in, the rest by its definition, then out what isn't, until nothing changes.
-  for (const p of params) out.add(p);
+  for (const p of params) inn[p] = 1;
   for (let round = 0; round < 64; round++) {
     let changed = false;
-    for (const ins of defs) {
-      if (ins.res.length !== 1) continue;
-      const r = ins.res[0]!;
-      const now = from(ins);
-      if (now !== out.has(r)) {
-        if (now) out.add(r);
-        else out.delete(r);
+    for (let i = 0; i < res.length; i++) {
+      const r = res[i]!;
+      const k = kind[i]!;
+      const now =
+        k === 1
+          ? true
+          : k === 2
+            ? has(a0[i]!)
+            : k === 3
+              ? has(a0[i]!) !== has(a1[i]!)
+              : k === 4
+                ? has(a0[i]!) && !has(a1[i]!)
+                : false;
+      if (now !== (inn[r] === 1)) {
+        inn[r] = now ? 1 : 0;
         changed = true;
       }
     }
     for (const p of params) {
-      const now = incoming.get(p)!.every((v) => out.has(v));
-      if (now !== out.has(p)) {
-        if (now) out.add(p);
-        else out.delete(p);
+      const now = incoming.get(p)!.every((v) => inn[v] === 1);
+      if (now !== (inn[p] === 1)) {
+        inn[p] = now ? 1 : 0;
         changed = true;
       }
     }
     if (!changed) break;
   }
+  for (let v = 0; v < inn.length; v++) if (inn[v] === 1) out.add(v);
   return out;
 }
 
 /** The address an access (a plain load or store) uses, with R27's notes: in a block, or an object's field. */
-export function accessAddr(defs: Map<number, Instr>, ins: Instr, sep: ReadonlySet<number>): Addr {
+export function accessAddr(defs: ValLookup<Instr>, ins: Instr, sep: ReadonlySet<number>): Addr {
   const at = valueOps(ins)[0]!;
   const a = addrOf(defs, at);
-  return {
-    ...a,
-    ...(sep.has(at) ? { sep: true } : {}),
-    ...(ins.obj === true ? { obj: true } : {}),
-  };
+  // (R36: made field by field, in the same order, not by spreading)
+  const out: Addr = { base: a.base, off: a.off, ident: a.ident };
+  if (a.sep !== undefined) out.sep = a.sep;
+  if (a.obj !== undefined) out.obj = a.obj;
+  if (sep.has(at)) out.sep = true;
+  if (ins.obj === true) out.obj = true;
+  return out;
 }
 
 const BYTES: Record<string, number> = {
@@ -188,7 +229,7 @@ export function isPlainStore(ins: Instr): boolean {
 }
 
 /** Takes an address apart into a base and an offset. `defs` maps a value to the instruction defining it. */
-export function addrOf(defs: Map<number, Instr>, v: number): Addr {
+export function addrOf(defs: ValLookup<Instr>, v: number): Addr {
   let off = 0;
   let cur = v;
   for (let guard = 0; guard < 16; guard++) {
@@ -215,7 +256,7 @@ export function addrOf(defs: Map<number, Instr>, v: number): Addr {
   return { base: `v${cur}`, off: null, ident: false };
 }
 
-function constInt(defs: Map<number, Instr>, v: number): number | undefined {
+function constInt(defs: ValLookup<Instr>, v: number): number | undefined {
   const d = defs.get(v);
   if (d === undefined || !d.op.startsWith("iconst.")) return undefined;
   const x = intImm(d, 0);
@@ -282,7 +323,7 @@ export function memEffect(
 /** What a write is, for the passes: a plain store's access, any write of separated memory, or anything. */
 export function writeOf(
   ins: Instr,
-  defs: Map<number, Instr>,
+  defs: ValLookup<Instr>,
   readonly: ReadonlySet<string>,
   sepOnly: ReadonlySet<string> | undefined,
   sep: ReadonlySet<number>,
@@ -326,7 +367,7 @@ export function readonlyFunctions(m: Module): Set<string> {
 
 /** The functions f calls, if f's own instructions write nothing outside its frame; null if they do. */
 function ownWrites(f: Func): string[] | null {
-  const defs = new Map<number, Instr>();
+  const defs = new ValMap<Instr>(f.types.length);
   for (const b of f.blocks) for (const ins of b.instrs) for (const r of ins.res) defs.set(r, ins);
   const called: string[] = [];
   for (const b of f.blocks) {
@@ -387,7 +428,7 @@ export function writeSummaries(m: Module): {
 
 /** The functions f calls, if f's own instructions write nothing but its frame and separated fields' blocks; null if not. */
 function ownSepWrites(f: Func): string[] | null {
-  const defs = new Map<number, Instr>();
+  const defs = new ValMap<Instr>(f.types.length);
   for (const b of f.blocks) for (const ins of b.instrs) for (const r of ins.res) defs.set(r, ins);
   const sep = sepValues(f);
   const called: string[] = [];

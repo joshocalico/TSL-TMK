@@ -24,11 +24,25 @@ export function cfgFunc(f: Func, stats: CfgStats): boolean {
   return changed;
 }
 
+/** The constants among the values branches test (R36: only those, and none looked for where no branch tests a value). */
 function constants(f: Func): Map<number, bigint> {
   const m = new Map<number, bigint>();
+  const tested = new Uint8Array(f.types.length);
+  let any = false;
+  for (const b of f.blocks) {
+    const t = b.term;
+    if (t.k === "brif") tested[t.cond] = 1;
+    else if (t.k === "switch") tested[t.val] = 1;
+    else continue;
+    any = true;
+  }
+  if (!any) return m;
   for (const b of f.blocks)
-    for (const ins of b.instrs)
-      if (ins.op.startsWith("iconst.")) m.set(ins.res[0]!, intImm(ins, 0));
+    for (const ins of b.instrs) {
+      const r = ins.res[0];
+      if (r !== undefined && tested[r] === 1 && ins.op.startsWith("iconst."))
+        m.set(r, intImm(ins, 0));
+    }
   return m;
 }
 
@@ -128,6 +142,20 @@ function predCount(f: Func): Map<number, number> {
   return m;
 }
 
+/** R36: whether a terminator has an edge to the block, said with no list of its edges made. */
+function targets(t: Block["term"], id: number): boolean {
+  switch (t.k) {
+    case "br":
+      return t.to.block === id;
+    case "brif":
+      return t.t.block === id || t.f.block === id;
+    case "switch":
+      return t.def.block === id || t.cases.some((c) => c.to.block === id);
+    default:
+      return false;
+  }
+}
+
 /** B ends `br C(args)` and C has no other predecessor: C's parameters are those args, and its body follows B's. */
 function mergeBlocks(f: Func, stats: CfgStats): boolean {
   const entry = f.blocks[0]!.id;
@@ -166,6 +194,9 @@ function forwardEmpty(f: Func, stats: CfgStats): boolean {
   const byId = new Map<number, Block>();
   for (const b of f.blocks) byId.set(b.id, b);
   let changed = false;
+  // R36: nothing to do, and no counting, where no block but the entry is empty and only jumps on
+  if (!f.blocks.some((x) => x.id !== entry && x.instrs.length === 0 && x.term.k === "br"))
+    return false;
   // Counts from before any edge here changes: one gone stale can only make a later block look used more, never less.
   const uses = useCounts(f);
   for (const x of f.blocks) {
@@ -177,7 +208,7 @@ function forwardEmpty(f: Func, stats: CfgStats): boolean {
     const pos = new Map<number, number>();
     x.params.forEach((p, i) => pos.set(p, i));
     for (const p of f.blocks) {
-      if (p === x) continue;
+      if (p === x || !targets(p.term, x.id)) continue;
       const edges = edgesOf(p.term);
       for (const e of edges) {
         if (e.block !== x.id) continue;

@@ -217,6 +217,14 @@ export function r14Off(part: "trust" | "inv" | "nullref"): boolean {
 }
 
 /**
+ * R36: whether a part of R36 is turned off by TMK_R36_OFF, for computing what it moved (tools/r36-pins.ts): `trust`, `auto`
+ * not trusting reshapes in `rc`'s class printing (tslc.ts's TRUSTED_IN), as before R36.
+ */
+export function r36Off(part: "trust"): boolean {
+  return (process.env.TMK_R36_OFF ?? "").split(",").includes(part);
+}
+
+/**
  * R17: whether a part of R17 is turned off by TMK_R17_OFF, for computing what it moved (tools/r17-pins.ts): `pop`, the
  * lowering's pop clearing the slot it drops in an array of references in every mode (before R17, only in `rc`); `jsrt` and
  * `holes`, the printing's JsArray constructor (emit-tsl.ts).

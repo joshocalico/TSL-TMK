@@ -21,6 +21,23 @@ export function dominates(cfg: Cfg, a: number, b: number): boolean {
   return false;
 }
 
+/**
+ * R36: whether the function may have a loop: some edge goes to a block at or before its own place in the list. Where every
+ * edge goes later in the list the graph has no cycle, so no edge goes to a dominator (that would be a cycle: the dominator
+ * reaches the block the edge leaves), and findLoops would find none; the passes that look for loops stop there.
+ */
+export function mayHaveLoop(f: Func): boolean {
+  const index = new Map<number, number>();
+  f.blocks.forEach((b, i) => index.set(b.id, i));
+  for (let i = 0; i < f.blocks.length; i++) {
+    for (const e of edgesOf(f.blocks[i]!.term)) {
+      const to = index.get(e.block);
+      if (to === undefined || to <= i) return true;
+    }
+  }
+  return false;
+}
+
 /** The natural loops, one per header, innermost first, then by header position. A back edge is an edge to a dominator. */
 export function findLoops(f: Func, cfg: Cfg): Loop[] {
   const index = new Map<number, number>();

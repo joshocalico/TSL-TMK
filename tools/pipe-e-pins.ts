@@ -78,6 +78,27 @@ export const PIPE_E_MOVED: Record<string, string> = {
     "@tsl/std's global allocator zeroes a reused run of pages with one memset now, where it was a store a byte (D66, a byte array's fill)",
   "corpus/std/zero_ctor.ts":
     "@tsl/std's global allocator zeroes a reused run of pages with one memset now, where it was a store a byte (D66, a byte array's fill)",
+  // R36: `TRUSTED_IN` rc on, so auto class-prints these in rc.
+  "corpus/lower/pos/relative_import.ts":
+    "since R36 auto class-prints it in rc (TRUSTED_IN trusts rc's class printing, tools/r36-pins.ts); with arrays not printed (TMK_EMIT_VECS=0) the printer can't take it there, so it's on the direct route, as it was before R36",
+  "corpus/lower/memory/map_grow_oom.ts":
+    "since R36 auto class-prints it in rc (TRUSTED_IN trusts rc's class printing, tools/r36-pins.ts), and @tsl/gc's and @tsl/jsrt's growth zeroes new room with a byte array's fill, one memset (TMK_TSL_OPT_OFF=bytefill is a store a byte)",
+  "corpus/lower/strmap/gaps_context.ts":
+    "since R36 auto class-prints it in rc (TRUSTED_IN trusts rc's class printing, tools/r36-pins.ts), and @tsl/gc's and @tsl/jsrt's growth zeroes new room with a byte array's fill, one memset (TMK_TSL_OPT_OFF=bytefill is a store a byte)",
+  "corpus/lower/strmap/smoke.ts":
+    "since R36 auto class-prints it in rc (TRUSTED_IN trusts rc's class printing, tools/r36-pins.ts), and @tsl/gc's and @tsl/jsrt's growth zeroes new room with a byte array's fill, one memset (TMK_TSL_OPT_OFF=bytefill is a store a byte)",
+  "corpus/lower/rc/adv_forof_mutation.ts":
+    "since R36 auto class-prints it in rc (TRUSTED_IN trusts rc's class printing, tools/r36-pins.ts): its growth zeroes new room with a byte array's fill, one memset (TMK_TSL_OPT_OFF=bytefill is a store a byte), and with arrays not printed (TMK_EMIT_VECS=0) the printer can't take it there, so it's on the direct route, as it was before R36",
+  "corpus/lower/rc/adv_self_assign_swap.ts":
+    "since R36 auto class-prints it in rc (TRUSTED_IN trusts rc's class printing, tools/r36-pins.ts): its growth zeroes new room with a byte array's fill, one memset (TMK_TSL_OPT_OFF=bytefill is a store a byte), and with arrays not printed (TMK_EMIT_VECS=0) the printer can't take it there, so it's on the direct route, as it was before R36",
+  "corpus/lower/strmap/case_all.ts":
+    "since R36 auto class-prints it in rc (TRUSTED_IN trusts rc's class printing, tools/r36-pins.ts): its growth zeroes new room with a byte array's fill, one memset (TMK_TSL_OPT_OFF=bytefill is a store a byte), and with arrays not printed (TMK_EMIT_VECS=0) the printer can't take it there, so it's on the direct route, as it was before R36",
+  "corpus/lower/strmap/drop_bound.ts":
+    "since R36 auto class-prints it in rc (TRUSTED_IN trusts rc's class printing, tools/r36-pins.ts): its growth zeroes new room with a byte array's fill, one memset (TMK_TSL_OPT_OFF=bytefill is a store a byte), and with arrays not printed (TMK_EMIT_VECS=0) the printer can't take it there, so it's on the direct route, as it was before R36",
+  "corpus/lower/strmap/frag.ts":
+    "since R36 auto class-prints it in rc (TRUSTED_IN trusts rc's class printing, tools/r36-pins.ts): its growth zeroes new room with a byte array's fill, one memset (TMK_TSL_OPT_OFF=bytefill is a store a byte), and with arrays not printed (TMK_EMIT_VECS=0) the printer can't take it there, so it's on the direct route, as it was before R36",
+  "corpus/lower/strmap/rc_churn.ts":
+    "since R36 auto class-prints it in rc (TRUSTED_IN trusts rc's class printing, tools/r36-pins.ts): its growth zeroes new room with a byte array's fill, one memset (TMK_TSL_OPT_OFF=bytefill is a store a byte), and with arrays not printed (TMK_EMIT_VECS=0) the printer can't take it there, so it's on the direct route, as it was before R36",
 };
 
 /** Lowered programs move only in `leak` and `manual`, where class printing prints them; TSL proper's at the levels listed. */

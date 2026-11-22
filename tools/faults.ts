@@ -319,6 +319,8 @@ export async function registeredFaults(): Promise<RegisteredFault[]> {
     if (f.emit !== undefined) hookOf("r35-tests R35_FAULTS", f, "TMK_TEST_EMIT", f.emit);
     if (f.optFault !== undefined) hookOf("r35-tests R35_FAULTS", f, "TMK_OPT_FAULT", f.optFault);
   }
+  const R36 = await import("./r36-tests.ts");
+  for (const f of R36.R36_FAULTS) hookOf("r36-tests R36_FAULTS", f, "TMK_OPT_FAULT", f.optFault);
   const R28 = await import("./r28-tests.ts");
   for (const f of R28.R28_FAULTS) {
     if (f.patch !== undefined) patchOf("r28-tests R28_FAULTS", f, f.patch);

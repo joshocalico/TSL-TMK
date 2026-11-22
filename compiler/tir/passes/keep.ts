@@ -7,10 +7,12 @@ import { select } from "../../backend-aarch64/regalloc.ts";
 import {
   edgesOf,
   reversePostorder,
+  ValMap,
   type Func,
   type Instr,
   type Module,
   type TirType,
+  type ValLookup,
 } from "../ir.ts";
 import { effectOf, opParts, valueOps } from "./util.ts";
 
@@ -167,7 +169,7 @@ function backendPure(op: string): boolean {
 }
 
 /** An address that can't fault: a global's, or a frame slot's, at a constant or any offset the program was checked into. */
-function safeAddress(defs: Map<number, Instr>, v: number): boolean {
+function safeAddress(defs: ValLookup<Instr>, v: number): boolean {
   let cur = v;
   for (let guard = 0; guard < 16; guard++) {
     const d = defs.get(cur);
@@ -185,7 +187,7 @@ export function keepLoads(m: Module, deadAtO0: WeakSet<Instr>): number {
   for (const f of m.funcs) {
     const dead = deadLoads(f);
     if (dead.length === 0) continue;
-    const defs = new Map<number, Instr>();
+    const defs = new ValMap<Instr>(f.types.length);
     for (const b of f.blocks) for (const ins of b.instrs) for (const r of ins.res) defs.set(r, ins);
     const wanted = new Set(
       dead.filter((ins) => !deadAtO0.has(ins) && !safeAddress(defs, valueOps(ins)[0]!)),

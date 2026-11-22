@@ -24,7 +24,7 @@ import { lowerToTir } from "./lower.ts";
 import { placeRegion } from "./region.ts";
 import { markSeparatedFields } from "./separate.ts";
 import { markLinkedChecks } from "./links.ts";
-import { r13Off, r14Off, r6Off } from "./down-model.ts";
+import { r13Off, r14Off, r36Off, r6Off } from "./down-model.ts";
 import {
   isArchFile,
   isCoreFile,
@@ -1227,13 +1227,24 @@ export const TRUSTED_RESHAPES: readonly string[] = [
  * 1.34x the direct route (`tmk bench memory --classes --reshapes`: a callback's array made each turn as an arena array or
  * a JsArray, M5's R14 record), the classes' cost, not the reshape's; so `auto` prints such a program as phase 1 does
  * where it can. `rc` has no phase 1 printing (R2), so nothing reshaped is taken there.
+ *
+ * R36: class printing in `rc` is trusted. Every program it takes there meets the speed rule at -O1 and -O2 (measured in
+ * R35 and again in R36, M5's records), and -O1's compile time over opt-a box 6's corpus, which then holds 22 programs more
+ * through class printing, is within D46's 1.25 times -O0's (R36's optimiser work). `TMK_R36_OFF=trust` takes it back, for
+ * tools/r36-pins.ts.
  */
 export const TRUSTED_IN: Record<string, { phase1: boolean; classes: boolean }> = {
   strict: { phase1: true, classes: false },
   leak: { phase1: true, classes: false },
   manual: { phase1: true, classes: false },
-  rc: { phase1: false, classes: false },
+  rc: { phase1: false, classes: true },
 };
+
+/** Whether `auto` trusts a printing in a mode: TRUSTED_IN, with R36's `rc` class printing put back off by TMK_R36_OFF=trust. */
+function trustedIn(memory: string, where: "phase1" | "classes"): boolean {
+  if (memory === "rc" && where === "classes" && r36Off("trust")) return false;
+  return TRUSTED_IN[memory]?.[where] === true;
+}
 
 /**
  * The reshape kinds of a printing `auto` doesn't trust: none means `auto` may take it. TMK_TRUST_RESHAPES=0 trusts none (as
@@ -1250,7 +1261,7 @@ export function untrustedReshapes(
   // R15, measurement only: TMK_TRUST_IN, a list of `mode:printing` (`rc:classes`), trusts the kinds there too, so
   // tools/r14-time.ts can time what `auto` would take.
   const extra = (process.env.TMK_TRUST_IN ?? "").split(",").includes(`${memory}:${where}`);
-  if (TRUSTED_IN[memory]?.[where] !== true && !extra)
+  if (!trustedIn(memory, where) && !extra)
     return [
       `a reshape in ${memory}'s ${where === "classes" ? "class printing" : "phase 1 printing"} (TRUSTED_IN)`,
     ];
@@ -1311,6 +1322,7 @@ export function compileTyped(typed: TypedModule, copts: CompileOptions = {}): Co
   const { module: tir, report: opt } = optimizeModule(front, {
     ...optFromEnv(copts.opt),
     prune: true,
+    consume: true, // R36: `front` is this call's own, read by nothing after
   });
   // Classes and closures only reach the native backend so far: Wasm and js-checked come with M3's C work.
   const bytes = typed.nativeOnly === true ? new Uint8Array(0) : emitWasm(tir).bytes;
@@ -2114,7 +2126,11 @@ function lowerFileIn(file: string, opts: LowerOptions): LowerOutput {
   front ??= lowerToTir(r.typed);
   const errors = verifyModule(front);
   if (errors.length > 0) throw new Error(`TIR verifier:\n${errors.join("\n")}`);
-  const { module: tir, report: opt } = optimizeModule(front, optFromEnv(opts.opt));
+  // R36: `front` is this call's own, read after only for being there (`front !== null`)
+  const { module: tir, report: opt } = optimizeModule(front, {
+    ...optFromEnv(opts.opt),
+    consume: true,
+  });
   // A memory mode is native only: there's no page source, and no JS glue, on the other side of Wasm.
   let bytes: Uint8Array | null = null;
   if (memory === "strict") {

@@ -19,9 +19,17 @@
 // past it, so in a turn both see the latest header's value. Where something between the test and the check can write the
 // length (a push), value numbering keeps the check's load apart from the test's, and nothing matches. Nothing moves, and a
 // check that stays is where it was.
-import { buildCfg, edgesOf, type Block, type Func, type Instr } from "../ir.ts";
+import {
+  buildCfg,
+  edgesOf,
+  ValMap,
+  type Block,
+  type Func,
+  type Instr,
+  type ValLookup,
+} from "../ir.ts";
 import { removeUnreachable } from "./cfg.ts";
-import { findLoops, type Loop } from "./loops.ts";
+import { findLoops, mayHaveLoop, type Loop } from "./loops.ts";
 import { opParts, r26Off, valueOps } from "./util.ts";
 
 export interface LoopBoundsStats {
@@ -78,11 +86,11 @@ export function loopBoundsFunc(
     else for (const ins of b.instrs) if (opParts(ins.op)[0] === "bounds") worth = true;
     if (worth) break;
   }
-  if (!worth) return false;
+  if (!worth || !mayHaveLoop(f)) return false;
   const cfg = buildCfg(f);
   const loops = findLoops(f, cfg);
   if (loops.length === 0) return false;
-  const def = new Map<number, Instr>();
+  const def = new ValMap<Instr>(f.types.length);
   for (const b of f.blocks) for (const ins of b.instrs) for (const r of ins.res) def.set(r, ins);
   const index = new Map<number, number>();
   f.blocks.forEach((b, i) => index.set(b.id, i));
@@ -186,7 +194,7 @@ export function loopFact(
   l: Loop,
   preds: number[][],
   index: Map<number, number>,
-  def: Map<number, Instr>,
+  def: ValLookup<Instr>,
   faults: LoopBoundsFaults,
 ): Fact | null {
   const h = f.blocks[l.header]!;
@@ -233,7 +241,7 @@ function neverNegative(
   preds: number[][],
   k: number,
   slot: number,
-  def: Map<number, Instr>,
+  def: ValLookup<Instr>,
 ): boolean {
   const h = f.blocks[l.header]!;
   const signedConst = (v: number): bigint | null => {

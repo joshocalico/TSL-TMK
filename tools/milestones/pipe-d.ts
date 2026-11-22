@@ -3165,6 +3165,44 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
     });
   });
 
+  // 91. R36: the optimiser's compile time cut, its output as before: what R36 added reached, and `consume` the same module.
+  M.unit("91", async () => {
+    const R36 = timedModule("r36", await import("../r36-tests.ts"));
+    const failures: string[] = [];
+    const sh = await R36.r36Shapes();
+    failures.push(...sh.failures);
+    const n = await R36.r36Native(accel, jobs);
+    failures.push(...n.failures);
+    if (n.cases === 0) failures.push("no case of corpus/r36 ran");
+    const d = await R36.r36Dual([accel], jobs);
+    failures.push(...d.failures);
+    if (d.cases === 0) failures.push("no case of corpus/lower/r36 ran");
+    report({
+      box: "91. R36 (4.3, D44, D46): the optimiser's compile time cut, its -O1 and -O2 output byte for byte as before (every pin): LICM makes a function's graph and loops again only after a loop has had something moved out of it; value numbering's and the other passes' tables by value number are arrays made for each function; tslc gives the optimiser its module to optimise where it is (`consume`): r36_passes.ts at -O1 has something moved out of a loop and something shared by value numbering; the module optimised with `consume` is the module without it, byte for byte, at -O1 and -O2 (r36_passes.ts, and r36_route.ts through the TSL route in rc), and without it the module given is left as it was; corpus/r36 natively at -O0, -O1 and -O2 against V8 and JSC; corpus/lower/r36 through the dual route with class printing forced in rc and leak at -O0, -O1 and -O2 (tools/r36-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${sh.rows.join("; ")}; native ${n.agreed}/${n.cases}; dual ${d.agreed}/${d.cases}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 92. R36's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("92", async () => {
+    const R36 = timedModule("r36", await import("../r36-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R36.R36_FAULTS) {
+      const x = await R36.r36Fault(f, accel, jobs);
+      rows.push(`${f.name}: ${caughtText(x)} (${f.by})`);
+      if (x.caught === 0) failures.push(`${f.name} wasn't caught: ${x.first}`);
+    }
+    report({
+      box: `92. R36: each of ${R36.R36_FAULTS.length} bugs is caught, with how many cases caught it: LICM keeping the graph and loops after a loop had something moved out (refused by the optimiser's verifier: what it moves uses a preheader's values it can't reach); value numbering's constant table kept from one function to the next (wrong answers); every module optimised where it is, given up or not (the shapes: the module given is changed); over corpus/r36 natively and corpus/lower/r36 through the dual route in rc at -O1 and -O2, against V8 (tools/r36-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
   M.vms(
     "8",
     "8. No QEMU process of this run is left, and the owner's UTM and QEMU processes were only observed",

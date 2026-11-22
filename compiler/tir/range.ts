@@ -16,7 +16,7 @@
 // only below 2^32, where wasm32 traps. One fact comes from the language rather than the TIR: a `usize` is never above
 // 2^53 - 1 (D23), which is the 64-bit target's limit for checked `ix` arithmetic, and wasm32's `ix` can't pass its own.
 // So `i + k` checked, where `i + k <= n` for an `ix` value `n` read unsigned, can't fire on either.
-import { buildCfg, edgesOf, type Cfg, type Func, type Instr, type TirType } from "./ir.ts";
+import { buildCfg, edgesOf, ValMap, type Cfg, type Func, type Instr, type TirType } from "./ir.ts";
 import { intImm, opParts, r26Off, r32Off, valueOps } from "./passes/util.ts";
 
 export interface Iv {
@@ -129,12 +129,13 @@ interface BlockFacts {
 export class Ranges {
   readonly f: Func;
   readonly cfg: Cfg;
-  private readonly val = new Map<number, Rng>();
+  // R36: tables by value number are arrays (ir.ts's ValMap), made in the constructor at the function's size
+  private readonly val: ValMap<Rng>;
   private readonly facts: (BlockFacts | null)[];
-  private readonly defs = new Map<number, Instr>();
-  private readonly defBlock = new Map<number, number>();
+  private readonly defs: ValMap<Instr>;
+  private readonly defBlock: ValMap<number>;
   /** `x -> v` facts that hold only where v is defined: v is x renamed, or x checked. */
-  private readonly rev = new Map<number, { to: number; c: bigint }[]>();
+  private readonly rev: ValMap<{ to: number; c: bigint }[]>;
   /** Float values that are integers, with their interval. */
   private readonly fint = new Map<number, Iv>();
   /** A float that's exactly a signed integer's conversion, and that integer: `sitofp`, then rounding that changes nothing. */
@@ -156,8 +157,18 @@ export class Ranges {
    */
   private readonly oneRound: boolean;
 
+  /** R36: the measurement switches this analysis reads, read once when it's made, not at every value it looks at. */
+  private readonly off26Range = r26Off("range");
+  private readonly off32Range = r32Off("range");
+
   constructor(f: Func, cfg?: Cfg, opts: { oneRound?: boolean } = {}) {
     this.f = f;
+    this.val = new ValMap<Rng>(f.types.length);
+    this.defs = new ValMap<Instr>(f.types.length);
+    this.defBlock = new ValMap<number>(f.types.length);
+    this.rev = new ValMap<{ to: number; c: bigint }[]>(f.types.length);
+    // the defined values in the order they're defined, as the Map of them was gone through
+    const defOrder: number[] = [];
     this.cfg = cfg ?? buildCfg(f);
     this.oneRound = opts.oneRound === true;
     this.facts = f.blocks.map(() => null);
@@ -189,6 +200,7 @@ export class Ranges {
       for (const ins of b.instrs) {
         for (const r of ins.res) {
           this.defs.set(r, ins);
+          defOrder.push(r);
           this.defBlock.set(r, i);
         }
       }
@@ -196,7 +208,8 @@ export class Ranges {
     for (const p of f.params) this.defBlock.set(p, this.cfg.rpo[0]!);
     this.solve();
     this.solving = false;
-    for (const [v, ins] of this.defs) {
+    for (const v of defOrder) {
+      const ins = this.defs.get(v)!;
       for (const e of this.defEdges(v, ins, true)) {
         let l = this.rev.get(e.from);
         if (l === undefined) this.rev.set(e.from, (l = []));
@@ -607,7 +620,7 @@ export class Ranges {
     x: number,
     at: number,
   ): { lo: bigint; hi: bigint; below: { n: number; c: bigint } | null } | null {
-    if (r32Off("range") || this.type(x) !== "f64") return null;
+    if (this.off32Range || this.type(x) !== "f64") return null;
     type Bound = { c: number | null; n: number | null; strict: boolean; nan: boolean };
     const los: Bound[] = [];
     const his: Bound[] = [];
@@ -734,7 +747,7 @@ export class Ranges {
       const x = this.fsrc.get(ops[0]!);
       const y = this.fsrc.get(ops[1]!);
       if (x === undefined || y === undefined) return null;
-      if (r26Off("range")) {
+      if (this.off26Range) {
         if (a.lo < 0n || b.lo < 0n) return null;
         return this.relCompare(p[1]!, x, y, at);
       }
@@ -877,7 +890,7 @@ export class Ranges {
    * the integers alike signed and unsigned only where neither is negative, can use the fact `toint32(x) <= n - 1`.
    */
   private floatEdge(cond: number, at: number, own: Map<number, Rng>): void {
-    if (r32Off("range")) return;
+    if (this.off32Range) return;
     let c = cond;
     for (let k = 0; k < 4; k++) {
       const d = this.defs.get(c);
@@ -922,7 +935,7 @@ export class Ranges {
       // puts `b` at or above `a`, so not negative either, and two values that aren't negative compare alike either way.
       const small = pred === "slt" || pred === "sle" ? x : y;
       // the injected `r26-rel-any` bug: neither side's sign asked
-      const ok = r26Off("range")
+      const ok = this.off26Range
         ? x.s.lo >= 0n && y.s.lo >= 0n
         : small.s.lo >= 0n || rangeFaults.relAny === true;
       if (!ok) return [];
@@ -1064,7 +1077,7 @@ export class Ranges {
   /** `b`, and the values it's the same number as by its own definition, read unsigned: a `zext` or `range` check's operand. */
   private sameAs(b: number): Set<number> {
     const out = new Set<number>([b]);
-    if (r26Off("range")) return out;
+    if (this.off26Range) return out;
     let v = b;
     for (let d = 0; d < 4; d++) {
       const ins = this.defs.get(v);

@@ -121,6 +121,43 @@ export function isTirType(s: string): s is TirType {
   return s === "ptr" || INT_TYPES.includes(s as TirType) || FLOAT_TYPES.includes(s as TirType);
 }
 
+// --- value-numbered tables
+
+/** What a table keyed by value number is read through: a `Map<number, T>` or a `ValMap<T>`. */
+export interface ValLookup<T> {
+  get(v: number): T | undefined;
+  has(v: number): boolean;
+}
+
+/**
+ * R36: a table keyed by a function's value numbers, kept in an array: the passes make one for every function they look at,
+ * and a Map's hashing was a third of the time of the folds and dead code removal (opt-a box 6, -O1's compile time). Read and
+ * written as a Map is, with `undefined` never stored; it's never iterated, as its order would be by value number, not by
+ * insertion as a Map's.
+ */
+export class ValMap<T> implements ValLookup<T> {
+  private readonly a: (T | undefined)[];
+  constructor(size = 0) {
+    // `size` slots made at once, empty: the table is filled in no order, so an array grown as written could turn sparse
+    this.a = size > 0 ? Array<T | undefined>(size) : [];
+  }
+  get(v: number): T | undefined {
+    return this.a[v];
+  }
+  has(v: number): boolean {
+    return this.a[v] !== undefined;
+  }
+  set(v: number, x: T): this {
+    this.a[v] = x;
+    return this;
+  }
+  delete(v: number): boolean {
+    const had = this.a[v] !== undefined;
+    this.a[v] = undefined;
+    return had;
+  }
+}
+
 // --- CFG helpers, shared by the verifier and the backends
 
 export function edgesOf(term: Term): Edge[] {
@@ -138,23 +175,44 @@ export function edgesOf(term: Term): Edge[] {
 
 /** Reverse postorder of the blocks reachable from the entry, as positions into f.blocks. */
 export function reversePostorder(f: Func): number[] {
-  const index = new Map<number, number>();
-  f.blocks.forEach((b, i) => index.set(b.id, i));
-  const seen = new Set<number>();
+  // R36: block id to position, and what's been seen, in arrays, not a Map and a Set
+  const index: number[] = [];
+  f.blocks.forEach((b, i) => {
+    index[b.id] = i;
+  });
+  const seen = new Uint8Array(f.blocks.length);
   const post: number[] = [];
   // An explicit stack: generated functions can nest deeper than the JS stack allows.
-  const stack: { at: number; next: number; succ: number[] }[] = [];
+  // (R36: a block's successors read off its terminator in edgesOf's order, with no list made of them)
+  const stack: { at: number; next: number; n: number }[] = [];
   const enter = (at: number): void => {
-    seen.add(at);
-    const succ = edgesOf(f.blocks[at]!.term).map((e) => index.get(e.block) ?? -1);
-    stack.push({ at, next: 0, succ });
+    seen[at] = 1;
+    const t = f.blocks[at]!.term;
+    const n = t.k === "br" ? 1 : t.k === "brif" ? 2 : t.k === "switch" ? t.cases.length + 1 : 0;
+    stack.push({ at, next: 0, n });
+  };
+  const succ = (at: number, i: number): number => {
+    const t = f.blocks[at]!.term;
+    const e =
+      t.k === "br"
+        ? t.to
+        : t.k === "brif"
+          ? i === 0
+            ? t.t
+            : t.f
+          : t.k === "switch"
+            ? i < t.cases.length
+              ? t.cases[i]!.to
+              : t.def
+            : undefined;
+    return e === undefined ? -1 : (index[e.block] ?? -1);
   };
   enter(0);
   while (stack.length > 0) {
     const top = stack[stack.length - 1]!;
-    if (top.next < top.succ.length) {
-      const s = top.succ[top.next++]!;
-      if (s >= 0 && !seen.has(s)) enter(s);
+    if (top.next < top.n) {
+      const s = succ(top.at, top.next++);
+      if (s >= 0 && seen[s] !== 1) enter(s);
     } else {
       post.push(top.at);
       stack.pop();
@@ -172,26 +230,37 @@ export interface Cfg {
 
 /** Cooper, Harvey and Kennedy's iterative dominators. Reducible graphs settle in a few rounds. */
 export function buildCfg(f: Func): Cfg {
-  const index = new Map<number, number>();
-  f.blocks.forEach((b, i) => index.set(b.id, i));
+  // R36: worked out in arrays by position; the Maps given back are made at the end, in the order the Maps were filled
+  // before (rpoIndex in reverse postorder, idom in the order each block first got a dominator)
+  const n = f.blocks.length;
+  const index: number[] = [];
+  f.blocks.forEach((b, i) => {
+    index[b.id] = i;
+  });
   const rpo = reversePostorder(f);
   const rpoIndex = new Map<number, number>();
-  rpo.forEach((b, i) => rpoIndex.set(b, i));
+  const rpoAt = new Int32Array(n);
+  rpo.forEach((b, i) => {
+    rpoIndex.set(b, i);
+    rpoAt[b] = i;
+  });
   const preds: number[][] = f.blocks.map(() => []);
   for (const at of rpo) {
     for (const e of edgesOf(f.blocks[at]!.term)) {
-      const to = index.get(e.block);
+      const to = index[e.block];
       if (to !== undefined) preds[to]!.push(at);
     }
   }
-  const idom = new Map<number, number>();
-  idom.set(rpo[0]!, rpo[0]!);
+  const dom = new Int32Array(n).fill(-1);
+  const order: number[] = [];
+  dom[rpo[0]!] = rpo[0]!;
+  order.push(rpo[0]!);
   const intersect = (a0: number, b0: number): number => {
     let a = a0;
     let b = b0;
     while (a !== b) {
-      while (rpoIndex.get(a)! > rpoIndex.get(b)!) a = idom.get(a)!;
-      while (rpoIndex.get(b)! > rpoIndex.get(a)!) b = idom.get(b)!;
+      while (rpoAt[a]! > rpoAt[b]!) a = dom[a]!;
+      while (rpoAt[b]! > rpoAt[a]!) b = dom[b]!;
     }
     return a;
   };
@@ -202,15 +271,18 @@ export function buildCfg(f: Func): Cfg {
       const b = rpo[i]!;
       let best = -1;
       for (const p of preds[b]!) {
-        if (!idom.has(p)) continue;
+        if (dom[p]! < 0) continue;
         best = best < 0 ? p : intersect(p, best);
       }
-      if (best >= 0 && idom.get(b) !== best) {
-        idom.set(b, best);
+      if (best >= 0 && dom[b] !== best) {
+        if (dom[b]! < 0) order.push(b);
+        dom[b] = best;
         changed = true;
       }
     }
   }
+  const idom = new Map<number, number>();
+  for (const b of order) idom.set(b, dom[b]!);
   return { rpo, rpoIndex, preds, idom };
 }
 
@@ -408,13 +480,16 @@ export function canonicalize(m: Module): Module {
   const out: Func[] = [];
   for (const f of funcs) {
     const rpo = reversePostorder(f);
-    const blockMap = new Map<number, number>();
-    rpo.forEach((at, i) => blockMap.set(f.blocks[at]!.id, i));
-    const valMap = new Map<number, number>();
+    // R36: by number in arrays, not Maps
+    const blockMap: number[] = [];
+    rpo.forEach((at, i) => {
+      blockMap[f.blocks[at]!.id] = i;
+    });
+    const valMap: (number | undefined)[] = Array<number | undefined>(f.types.length); // that many empty slots
     const types: TirType[] = [];
     const def = (v: number): number => {
       const n = types.length;
-      valMap.set(v, n);
+      valMap[v] = n;
       types.push(f.types[v]!);
       return n;
     };
@@ -425,28 +500,32 @@ export function canonicalize(m: Module): Module {
       for (const ins of b.instrs) ins.res.forEach(def);
     }
     const val = (v: number): number => {
-      const n = valMap.get(v);
+      const n = valMap[v];
       if (n === undefined) throw new Error(`@${f.name}: use of undefined value %${v}`);
       return n;
     };
-    const edge = (e: Edge): Edge => ({ block: blockMap.get(e.block)!, args: e.args.map(val) });
+    const edge = (e: Edge): Edge => ({ block: blockMap[e.block]!, args: e.args.map(val) });
     const blocks: Block[] = rpo.map((at, i) => {
       const b = f.blocks[at]!;
-      const instrs = b.instrs.map((ins): Instr => ({
-        op: ins.op,
-        res: ins.res.map(val),
-        ops: ins.ops.map((o): Operand => {
-          if (o.t === "v") return { t: "v", id: val(o.id) };
-          if (o.t === "trap") return { t: "trap", id: useTrap(o.id) };
-          if (o.t === "sig") return { t: "sig", id: useSig(o.id) };
-          return o;
-        }),
-        ...(ins.inv === true ? { inv: true as const } : {}),
-        ...(ins.sep === true ? { sep: true as const } : {}),
-        ...(ins.obj === true ? { obj: true as const } : {}),
-        ...(ins.inb === true ? { inb: true as const } : {}),
-        ...(ins.chk !== undefined ? { chk: ins.chk } : {}),
-      }));
+      const instrs = b.instrs.map((ins): Instr => {
+        const c: Instr = {
+          op: ins.op,
+          res: ins.res.map(val),
+          ops: ins.ops.map((o): Operand => {
+            if (o.t === "v") return { t: "v", id: val(o.id) };
+            if (o.t === "trap") return { t: "trap", id: useTrap(o.id) };
+            if (o.t === "sig") return { t: "sig", id: useSig(o.id) };
+            return o;
+          }),
+        };
+        // (R36: the notes added in the same order, not spread from objects made for each)
+        if (ins.inv === true) c.inv = true;
+        if (ins.sep === true) c.sep = true;
+        if (ins.obj === true) c.obj = true;
+        if (ins.inb === true) c.inb = true;
+        if (ins.chk !== undefined) c.chk = ins.chk;
+        return c;
+      });
       const tm = b.term;
       let term: Term;
       switch (tm.k) {

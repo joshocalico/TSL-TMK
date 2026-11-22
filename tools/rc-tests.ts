@@ -581,7 +581,9 @@ export async function latency(
     return out;
   }
   const file = join(ROOT, "corpus/lower/rc/adv_large_drop.ts");
-  const o = lowerFile(file, { memory: "rc" });
+  // the direct route's runtime (`__rc_new`, `__rc_release`), which this measures: since R36 `auto` takes the program through
+  // the TSL route
+  const o = lowerFile(file, { memory: "rc", route: "direct" });
   const m = o.tir as Module;
   const drv = new Driver(m);
   drv.globals.push({ name: "__lat", size: samples * 8, align: 8, section: "data" });

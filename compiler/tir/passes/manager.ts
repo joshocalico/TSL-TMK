@@ -4,7 +4,7 @@
 // by cost, partial inlining of fast paths, calls through a known pointer, and the cleanup rounds after them. The verifier
 // runs on the input and the output always, and after every pass in a test build. Any pass can be switched off by name.
 import { appendFileSync } from "node:fs";
-import { canonicalize, type Cfg, type Func, type Instr, type Module } from "../ir.ts";
+import { canonicalize, ValMap, type Cfg, type Func, type Instr, type Module } from "../ir.ts";
 import { printFunc } from "../text.ts";
 import { verifyFuncIn, verifyModule } from "../verify.ts";
 import { Ranges, setRangeFaults } from "../range.ts";
@@ -124,6 +124,9 @@ export const OPT_FAULTS = [
   "r32-sat-any", // check elimination makes every js.toint32 the saturating conversion, proved in range or not (R32)
   "r35-round-header", // -O1's one round takes a loop header's parameter from its edges before the loop alone (R35)
   "r35-save-block-only", // a value split around a cold call is saved only where its block reads it after the call (R35)
+  "r36-licm-stale", // LICM keeps the graph and loops after a loop had something moved out, so later loops are misread (R36)
+  "r36-constkeys-shared", // value numbering's constant table kept from one function to the next (R36)
+  "r36-consume-always", // every module optimised where it is, given up by its caller or not (R36)
 ] as const;
 
 export interface OptOptions {
@@ -138,6 +141,12 @@ export interface OptOptions {
    * `__`), so at -O1 and -O2 what nothing reaches from them is removed (unreached.ts, R1d). tslc's modules do.
    */
   prune?: boolean;
+  /**
+   * R36: the caller gives the module up, and reads nothing of it afterwards (tslc's `compileTyped` and `lowerFile`, whose
+   * module is made for this call alone): at -O1 and -O2 it's optimised where it is, not copied first. The result is the
+   * same module either way (the copy was a deep one), and -O0 returns the input as always.
+   */
+  consume?: boolean;
 }
 
 export interface PassRun {
@@ -311,7 +320,8 @@ export function optimizeModule(
     dropLive: faults.has("dce-drop-live"),
   };
   // The input was verified by whoever lowered it (tslc's compileTyped and lowerFile), as the start of the pipeline (SPEC 4.3).
-  const m = cloneModule(input);
+  // R36: the module given up by its caller optimised where it is (the injected `r36-consume-always`: every module)
+  const m = o.consume === true || faults.has("r36-consume-always") ? input : cloneModule(input);
   // A class id's load, as lowering noted it (`Instr.inv`), is an invariant load from here on (D73): `load.T.inv`, which
   // value numbering, LICM and peeling may share across what can't change a class id (memory.ts). The first thing done, so
   // every copy inlining makes is one too.
@@ -414,10 +424,14 @@ export function optimizeModule(
   ) {
     // R27 (D77): what each call may write: nothing outside its frame, or only separated fields' blocks too
     const { readonly, sepOnly } = writeSummaries(m);
-    const gvnFaults = { acrossStore: faults.has("gvn-across-store") };
+    const gvnFaults = {
+      acrossStore: faults.has("gvn-across-store"),
+      ...(faults.has("r36-constkeys-shared") ? { sharedConstKeys: new ValMap<string>() } : {}),
+    };
     const licmFaults = {
       ignoreStores: faults.has("licm-hoist-written"),
       pastGuard: faults.has("licm-above-guard"),
+      staleLoops: faults.has("r36-licm-stale"),
     };
     const gvn = (f: Func): boolean => {
       if (off.has("gvn")) return false;

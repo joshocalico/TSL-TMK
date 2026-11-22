@@ -357,7 +357,11 @@ export async function defineNativeD(M: MilestoneDef): Promise<void> {
 
   M.unit("11", async () => {
     // 11. Release builds have none of it.
-    const release = lowerFile(join(ROOT, "corpus/lower/memory/class_list.ts"), { memory: "rc" });
+    // The direct route's runtime (D36, D41), which this box is of: since R36 `auto` takes class_list.ts through the TSL route
+    const release = lowerFile(join(ROOT, "corpus/lower/memory/class_list.ts"), {
+      memory: "rc",
+      route: "direct",
+    });
     const known =
       /^(__arena_|__alloc|__vec_|__trap_args|__page_source_use|__pages_get|__leak_|__heap_|__init|__rc_)/;
     const strange = release

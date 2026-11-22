@@ -55,8 +55,10 @@ export async function defineNativeE(M: MilestoneDef): Promise<void> {
       /^__rc_(cc_|touch|cand|steps|dry|rest)/.test(f.name),
     );
     if (noCollector.length > 0) failures1.push(`with it off: ${noCollector[0]!.name}`);
-    const acyclicOn = lowerFile(acyclicFile, { memory: "rc", cycles: true });
-    const acyclicOff = lowerFile(acyclicFile, { memory: "rc", cycles: false });
+    // The direct route's collector setting, which this box is of: since R36 `auto` takes acyclic_lowered.ts through the TSL
+    // route, whose collector is @tsl/gc's
+    const acyclicOn = lowerFile(acyclicFile, { memory: "rc", cycles: true, route: "direct" });
+    const acyclicOff = lowerFile(acyclicFile, { memory: "rc", cycles: false, route: "direct" });
     if (acyclicOn.tirHash !== acyclicOff.tirHash || acyclicOn.cycleCollector !== false)
       failures1.push("an acyclic program with the collector on isn't the same module");
     const pkg = lowerFile(join(ROOT, "corpus/rc-package-off/rc_off.ts"));

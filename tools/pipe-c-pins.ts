@@ -57,6 +57,27 @@ export const PIPE_C_MOVED: Record<string, string> = {
     "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction)",
   "corpus/mem/alloc_vec.ts":
     "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction)",
+  // R36: `TRUSTED_IN` rc on, so auto class-prints these in rc, where zeroed construction applies.
+  "corpus/lower/pos/relative_import.ts":
+    "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction); in rc, where auto class-prints it since R36 trusts rc's class printing (TRUSTED_IN, tools/r36-pins.ts)",
+  "corpus/lower/memory/map_grow_oom.ts":
+    "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction); in rc, where auto class-prints it since R36 trusts rc's class printing (TRUSTED_IN, tools/r36-pins.ts)",
+  "corpus/lower/rc/adv_forof_mutation.ts":
+    "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction); in rc, where auto class-prints it since R36 trusts rc's class printing (TRUSTED_IN, tools/r36-pins.ts)",
+  "corpus/lower/rc/adv_self_assign_swap.ts":
+    "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction); in rc, where auto class-prints it since R36 trusts rc's class printing (TRUSTED_IN, tools/r36-pins.ts)",
+  "corpus/lower/strmap/case_all.ts":
+    "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction); in rc, where auto class-prints it since R36 trusts rc's class printing (TRUSTED_IN, tools/r36-pins.ts)",
+  "corpus/lower/strmap/drop_bound.ts":
+    "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction); in rc, where auto class-prints it since R36 trusts rc's class printing (TRUSTED_IN, tools/r36-pins.ts)",
+  "corpus/lower/strmap/frag.ts":
+    "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction); in rc, where auto class-prints it since R36 trusts rc's class printing (TRUSTED_IN, tools/r36-pins.ts)",
+  "corpus/lower/strmap/gaps_context.ts":
+    "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction); in rc, where auto class-prints it since R36 trusts rc's class printing (TRUSTED_IN, tools/r36-pins.ts)",
+  "corpus/lower/strmap/rc_churn.ts":
+    "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction); in rc, where auto class-prints it since R36 trusts rc's class printing (TRUSTED_IN, tools/r36-pins.ts)",
+  "corpus/lower/strmap/smoke.ts":
+    "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction); in rc, where auto class-prints it since R36 trusts rc's class printing (TRUSTED_IN, tools/r36-pins.ts)",
   // pipe-dispatch's page sources as objects (D70): new programs, each with a `calls: usize = 0` field.
   "corpus/mem/pagesrc_one.ts":
     "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction)",

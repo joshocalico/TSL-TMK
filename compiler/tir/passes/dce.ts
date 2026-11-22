@@ -1,7 +1,7 @@
 // Dead code removal (SPEC 4.3, D46): a pure operation whose result nothing needs goes, and so does a block parameter whose
 // value nothing needs, with what each edge passes it. Loads, checks and effects stay: a load can fault and a check can trap,
 // which is the program's behaviour, and the backend drops a plain load nothing uses at every level, as it always has.
-import { edgesOf, type Func } from "../ir.ts";
+import { edgesOf, ValMap, type Func, type Instr } from "../ir.ts";
 import { effectOf } from "./util.ts";
 
 export interface DceStats {
@@ -17,11 +17,10 @@ export function dceFunc(
 ): boolean {
   const n = f.types.length;
   const live = new Uint8Array(n);
-  const defInstr = new Map<number, { ops: number[] }>();
+  // R36: by value number in arrays (ir.ts's ValMap), not Maps, and a pure instruction's operands read from it when needed
+  const defInstr = new ValMap<Instr>(n);
   // Block parameter to the values each edge passes it.
   const paramIn = new Map<number, number[]>();
-  const blockOfParam = new Map<number, number>();
-  for (const b of f.blocks) b.params.forEach((p) => blockOfParam.set(p, b.id));
   const byId = new Map<number, (typeof f.blocks)[number]>();
   for (const b of f.blocks) byId.set(b.id, b);
   const stack: number[] = [];
@@ -32,15 +31,13 @@ export function dceFunc(
   };
   for (const b of f.blocks) {
     for (const ins of b.instrs) {
-      const vals: number[] = [];
-      for (const o of ins.ops) if (o.t === "v") vals.push(o.id);
       const eff = effectOf(ins);
       if (eff === "pure" && ins.res.length > 0) {
-        for (const r of ins.res) defInstr.set(r, { ops: vals });
+        for (const r of ins.res) defInstr.set(r, ins);
       } else {
         // Kept whatever its results' fate: its operands are needed.
         for (const r of ins.res) live[r] = 1;
-        for (const v of vals) need(v);
+        for (const o of ins.ops) if (o.t === "v") need(o.id);
       }
     }
     const t = b.term;
@@ -62,7 +59,7 @@ export function dceFunc(
   while (stack.length > 0) {
     const v = stack.pop()!;
     const d = defInstr.get(v);
-    if (d !== undefined) for (const x of d.ops) need(x);
+    if (d !== undefined) for (const o of d.ops) if (o.t === "v") need(o.id);
     const ins = paramIn.get(v);
     if (ins !== undefined) for (const x of ins) need(x);
   }
@@ -95,7 +92,7 @@ export function dceFunc(
   }
   for (const b of f.blocks) {
     const before = b.instrs.length;
-    b.instrs = b.instrs.filter((ins) => {
+    const kept = (ins: Instr): boolean => {
       const eff = effectOf(ins);
       if (eff === "pure" && ins.res.length > 0 && ins.res.every((r) => live[r] !== 1)) return false;
       if (ins.res.length === 1 && live[ins.res[0]!] === 2) return false;
@@ -105,7 +102,9 @@ export function dceFunc(
         if (v?.t === "v" && f.types[v.id] === "i32" && constantDef(f, v.id)) return false;
       }
       return true;
-    });
+    };
+    // R36: a block's list made again only where something in it goes
+    if (!b.instrs.every(kept)) b.instrs = b.instrs.filter(kept);
     stats.instrs += before - b.instrs.length;
     if (b.instrs.length !== before) changed = true;
     const d = dropAt.get(b.id);

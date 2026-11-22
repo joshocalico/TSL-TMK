@@ -15,7 +15,7 @@
 // That is the lowering's check of an array read dominating `get`'s own check of the same read (R13's double check), and a
 // null test made twice in one turn of a loop (the JPEG decoder's class printing, R15). Nothing moves: a test is removed
 // where the answer is already known, or stays as it is. Floats aren't touched (NaN answers every ordered compare false).
-import { buildCfg, type Func, type Instr } from "../ir.ts";
+import { buildCfg, ValMap, type Func, type Instr } from "../ir.ts";
 import { removeUnreachable } from "./cfg.ts";
 import { opParts, r28Off, substitute, valueOps } from "./util.ts";
 
@@ -87,7 +87,7 @@ export function condsFunc(f: Func, stats: CondsStats, faults: CondsFaults = {}):
   }
   if (tests < 2) return false;
   const cfg = buildCfg(f);
-  const def = new Map<number, Instr>();
+  const def = new ValMap<Instr>(f.types.length);
   for (const b of f.blocks) for (const ins of b.instrs) for (const r of ins.res) def.set(r, ins);
   // The dominator tree's children, in reverse postorder.
   const kids: number[][] = f.blocks.map(() => []);
@@ -118,9 +118,10 @@ export function condsFunc(f: Func, stats: CondsStats, faults: CondsFaults = {}):
   };
   // R28: two operands are the same if they're one value, or two integer constants of one type and value (a test above
   // and `get`'s own of `i < len` for a constant i each make their own constant, and -O1's value numbering leaves them be)
+  const constsOff = r28Off("consts"); // R36: read once a pass, not at every pair
   const same = (x: number, y: number): boolean => {
     if (x === y) return true;
-    if (r28Off("consts")) return false;
+    if (constsOff) return false;
     const dx = def.get(x);
     const dy = def.get(y);
     if (dx === undefined || dy === undefined || dx.op !== dy.op || !dx.op.startsWith("iconst."))

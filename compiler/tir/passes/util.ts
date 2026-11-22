@@ -388,5 +388,6 @@ export function r35Off(part: string): boolean {
 
 /** R28's parts turned off, a measurement only (`TMK_R28_OFF=grow`, say). */
 export function r28Off(part: string): boolean {
-  return (process.env.TMK_R28_OFF ?? "").split(",").includes(part);
+  // R36: split once for each value the variable has, as offList does for the others (conds asks for each pair it compares)
+  return offList("TMK_R28_OFF").includes(part);
 }

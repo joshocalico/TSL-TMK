@@ -16,8 +16,17 @@
 //   first thing that could happen, as at -O0, and where it passes once, with the same operands it passes every turn.
 // The path every first turn takes goes on from a block through an unconditional jump, and through a branch whose way the
 // caller proves from what holds on entering (`entry`), never past one it can't.
-import { buildCfg, type Block, type Cfg, type Func, type Instr, type Term } from "../ir.ts";
-import { ensurePreheader, findLoops, type Loop } from "./loops.ts";
+import {
+  buildCfg,
+  ValMap,
+  type Block,
+  type Cfg,
+  type Func,
+  type Instr,
+  type Term,
+  type ValLookup,
+} from "../ir.ts";
+import { ensurePreheader, findLoops, mayHaveLoop, type Loop } from "./loops.ts";
 import {
   accessAddr,
   addrOf,
@@ -44,6 +53,8 @@ export interface LicmFaults {
   ignoreStores?: boolean;
   /** Injected (D73): the first-turn path goes on past the header's test, so a load that can fault moves above the guard. */
   pastGuard?: boolean;
+  /** Injected (R36): the graph and loops kept after a loop had something moved out (a preheader put in moves blocks along). */
+  staleLoops?: boolean;
 }
 
 export interface LicmContext {
@@ -66,19 +77,27 @@ const MAX_PATH = 32;
 
 export function licmFunc(f: Func, ctx: LicmContext): boolean {
   let changed = false;
+  if (!mayHaveLoop(f)) return false;
+  // R36: the graph and its loops made again only after a loop has had something moved out of it; a loop that hasn't leaves
+  // the function as it was (hoistLoop changes nothing unless it returns true), so they're still what they'd be made as.
+  let cfg = buildCfg(f);
+  let loops = findLoops(f, cfg);
   for (let li = 0; li < MAX_LOOPS; li++) {
-    const cfg = buildCfg(f);
-    const loops = findLoops(f, cfg);
     const l = loops[li];
     if (l === undefined) break;
-    if (hoistLoop(f, l, ctx)) changed = true;
+    if (hoistLoop(f, l, ctx, cfg)) {
+      changed = true;
+      if (ctx.faults?.staleLoops === true) continue;
+      cfg = buildCfg(f);
+      loops = findLoops(f, cfg);
+    }
   }
   return changed;
 }
 
-function hoistLoop(f: Func, l0: Loop, ctx: LicmContext): boolean {
+function hoistLoop(f: Func, l0: Loop, ctx: LicmContext, cfg: Cfg): boolean {
   // Is there anything to move? Nothing is made unless there is.
-  const defs = new Map<number, Instr>();
+  const defs = new ValMap<Instr>(f.types.length);
   for (const b of f.blocks) for (const ins of b.instrs) for (const r of ins.res) defs.set(r, ins);
   const inLoop = new Set<number>();
   let all = false;
@@ -117,7 +136,6 @@ function hoistLoop(f: Func, l0: Loop, ctx: LicmContext): boolean {
   };
 
   // The first turn's path, from the header, while only pure operations and loads have run on it.
-  const cfg = buildCfg(f);
   const l = l0;
   const index = new Map<number, number>();
   f.blocks.forEach((b, i) => index.set(b.id, i));
@@ -246,7 +264,7 @@ function worthPast(
  * A pure operation the backend does in one instruction or none: a constant, a rename, an address at a constant offset, a
  * compare, or arithmetic with a constant. Loads, checks, and other arithmetic aren't.
  */
-function cheap(ins: Instr, defs: Map<number, Instr>): boolean {
+function cheap(ins: Instr, defs: ValLookup<Instr>): boolean {
   if (effectOf(ins) !== "pure") return false;
   const b = opParts(ins.op)[0]!;
   if (

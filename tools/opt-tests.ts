@@ -382,6 +382,20 @@ async function faultSteps(
   const engines = defaultEngines();
   return [
     {
+      // R36: LICM's graph made again only after a change, value numbering's tables made for each function, and the module
+      // tslc gives up optimised where it is: R36's TSL programs natively at -O1 and -O2 against V8, and its shapes (the
+      // module optimised where it is the same as its copy's, the one given left as it was) (seconds, so first: R36's bugs
+      // are caught here, and so may an earlier bug be, which changes only which step names it).
+      name: "R36's programs natively at -O1 and -O2, and its shapes (corpus/r36, tools/r36-tests.ts)",
+      run: async () => {
+        const R36 = await import("./r36-tests.ts");
+        const sh = await R36.r36Shapes();
+        if (sh.failures.length > 0) return false;
+        const n = await R36.r36Native(accel, jobs, [1, 2]);
+        return n.failures.length === 0 && n.cases > 0;
+      },
+    },
+    {
       // R35: -O1's check elimination in one round (range.ts) and the backend's saves around cold calls (regalloc.ts), on
       // R35's TSL programs natively at -O1 and -O2, against V8 (seconds, so first: R35's bugs are caught here, and so may an
       // earlier bug be, which changes only which step names it).
