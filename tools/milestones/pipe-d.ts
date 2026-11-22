@@ -3215,7 +3215,7 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
       failures.push(`${d.cases - d.agreed} of ${d.cases} cases differ through the two routes`);
     if (d.generated < 63) failures.push(`${d.generated} generated programs taken, not 63`);
     report({
-      box: "93. R37 (4.5, D49, D62): auto takes a program with exceptions printed reshaped only by the kinds it trusts in the modes tslc.ts's TRUSTED_EXC_IN names, leak and manual, through phase 1's printing of down-exc.ts's flag and its checks (81 programs in each), and none in rc or strict; each such build at -O1 and -O2 gives the direct route's machine code byte for byte (the speed rule, as a fact), and with the switch off (TMK_R37_OFF=exc) none is taken; every such program of corpus/lower/exc, its 63 generated ones with every way out through finally included, agrees with the direct route through auto's own build in leak and manual at -O0 and -O2, natively and as printed on V8 and JSC with the source (tools/r37-tests.ts)",
+      box: "93. R37 (4.5, D49, D62): auto takes a program with exceptions printed reshaped only by the kinds it trusts in the modes tslc.ts's TRUSTED_EXC_IN names, leak and manual, through phase 1's printing of down-exc.ts's flag and its checks (81 programs in each), and none in strict (one taken in rc is class printing's, R38's, box 95); each such build at -O1 and -O2 gives the direct route's machine code byte for byte (the speed rule, as a fact), and with the switch off (TMK_R37_OFF=exc) none is taken; every such program of corpus/lower/exc, its 63 generated ones with every way out through finally included, agrees with the direct route through auto's own build in leak and manual at -O0 and -O2, natively and as printed on V8 and JSC with the source (tools/r37-tests.ts)",
       ok: failures.length === 0 && hvf.ok,
       detail: `${sh.rows.join("; ")}; natively ${d.agreed}/${d.cases} cases, ${d.taken.length} programs by mode (${d.generated} generated); the third route ${d.printedSame}/${d.printedCases} (3.10's allowed divergences, named: ${JSON.stringify(d.divergences)})${skipNote}`,
       failures: failures.slice(0, 40),
@@ -3237,6 +3237,71 @@ export async function definePipeD(M: MilestoneDef): Promise<void> {
       ok: failures.length === 0 && hvf.ok,
       detail: `${rows.join("; ")}${skipNote}`,
       failures,
+    });
+  });
+
+  // 95. R38: auto takes, in rc, programs with exceptions and the two loop kinds; the coldness rule; timing images.
+  M.unit("95", async () => {
+    const R38 = timedModule("r38", await import("../r38-tests.ts"));
+    const failures: string[] = [];
+    const sh = await R38.r38Shapes();
+    failures.push(...sh.failures);
+    const t = await R38.r38Timing(accel);
+    failures.push(...t.failures);
+    report({
+      box: "95. R38 (4.4, 4.5, D49, D62): auto takes in rc a program with exceptions printed reshaped only by the kinds it trusts (tslc.ts's TRUSTED_EXC_IN rc), and one reshaped by a loop whose step or condition has statements (TRUSTED_RESHAPES_IN, rc's class printing), and with the switches off (TMK_R38_OFF=exc,kinds) neither; the backend takes a call on every turn of its loop that doesn't throw as hot (gen_finally_catch_finally_breakOuter's calls past the printed strConcat's inlined throw, as the direct route's), as before with TMK_R38_OFF=cold, and a function with no throw is untouched; adv_exc_drop's direct route timing image runs its 8 passes without filling the RAM channel (a timing image dumps memory after its first pass alone); boxes 97 and 98 run the differential (tools/r38-tests.ts)",
+      ok: failures.length === 0 && hvf.ok && !t.skipped,
+      detail: `${sh.rows.join("; ")}; ${t.row}${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 96. R38's bugs, each caught (SPEC 8.3's fault rule: a bug not in the build is a harness failure, never caught).
+  M.unit("96", async () => {
+    const R38 = timedModule("r38", await import("../r38-tests.ts"));
+    const failures: string[] = [];
+    const rows: string[] = [];
+    for (const f of R38.R38_FAULTS) {
+      const x = await R38.r38Fault(f, accel, jobs);
+      rows.push(`${f.name}: ${caughtText(x)}`);
+      if (x.caught === 0) failures.push(`${f.name} wasn't caught: ${x.first}`);
+    }
+    report({
+      box: `96. R38: each of ${R38.R38_FAULTS.length} bugs put into rc's class printing is caught by the differential on auto's own builds of R14's directories in rc at -O2, with how many cases caught it: a for loop's step run before its body, a while loop's condition's statements run once before the loop, a do-while loop's condition's statements run before its body (the loop kinds rc trusts), and JsStr.compare's one-unit answer reversed (tools/r38-tests.ts)`,
+      ok: failures.length === 0 && hvf.ok,
+      detail: `${rows.join("; ")}${skipNote}`,
+      failures,
+    });
+  });
+
+  // 97. R38: every program auto takes with exceptions in rc agrees, the generated ones included.
+  M.unit("97", async () => {
+    const R38 = timedModule("r38", await import("../r38-tests.ts"));
+    const d = await R38.r38DualExc(accel, jobs);
+    const failures = [...d.failures];
+    if (d.cases === 0 || d.agreed !== d.cases)
+      failures.push(`${d.cases - d.agreed} of ${d.cases} cases differ through the two routes`);
+    if (d.generated < 63) failures.push(`${d.generated} generated programs taken, not 63`);
+    report({
+      box: "97. R38 (D49, D62): every program of corpus/lower/exc auto takes in rc, its 63 generated ones with every way out through finally included, agrees with the direct route through auto's own build in rc at -O0 and -O2, natively and as printed on V8 and JSC with the source (tools/r38-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `natively ${d.agreed}/${d.cases} cases, ${d.taken.length} programs (${d.generated} generated); the third route ${d.printedSame}/${d.printedCases} (3.10's allowed divergences, named: ${JSON.stringify(d.divergences)})${skipNote}`,
+      failures: failures.slice(0, 40),
+    });
+  });
+
+  // 98. R38: every program auto takes reshaped in rc agrees, the loop kinds' included.
+  M.unit("98", async () => {
+    const R38 = timedModule("r38", await import("../r38-tests.ts"));
+    const d = await R38.r38DualKinds(accel, jobs);
+    const failures = [...d.failures];
+    if (d.cases === 0 || d.agreed !== d.cases)
+      failures.push(`${d.cases - d.agreed} of ${d.cases} cases differ through the two routes`);
+    report({
+      box: "98. R38 (D62): every program of R14's directories auto takes reshaped in rc, those with a loop whose step or condition has statements included, agrees with the direct route through auto's own build in rc at -O0 and -O2, natively and as printed on V8 and JSC with the source (tools/r38-tests.ts)",
+      ok: failures.length === 0 && hvf.ok,
+      detail: `natively ${d.agreed}/${d.cases} cases, ${d.taken.length} programs; the third route ${d.printedSame}/${d.printedCases} (3.10's allowed divergences, named: ${JSON.stringify(d.divergences)})${skipNote}`,
+      failures: failures.slice(0, 40),
     });
   });
 

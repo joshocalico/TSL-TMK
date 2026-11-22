@@ -4443,9 +4443,13 @@ class Emitter {
       // Its condition has statements of its own: they run again on every turn, a `continue` included.
       this.hoisted++;
       this.reshape("a loop condition with statements");
+      // R38's injected bug `r38-cond-once` (TMK_TEST_EMIT): the condition's statements run once, before the loop, not on
+      // every turn where JS evaluates the condition
+      const once = this.fault === "r38-cond-once";
+      if (once) for (const p of c.pre) this.line(p);
       this.line(`${lp}while (true) {`);
       this.ind++;
-      for (const p of c.pre) this.line(p);
+      if (!once) for (const p of c.pre) this.line(p);
       this.line(
         `if (${c.text}) {} else break; // the loop's condition: its statements run on every turn`,
       );
@@ -4474,11 +4478,15 @@ class Emitter {
     this.loops.push({ label, cont });
     this.line(`${lp}do {`);
     this.ind++;
+    // R38's injected bug `r38-do-cond-first` (TMK_TEST_EMIT): the condition's statements run at the start of each turn,
+    // before the body, where JS evaluates the condition after it
+    const first = this.fault === "r38-do-cond-first";
+    if (first) for (const p of c.pre) this.line(p);
     this.line(`${cont}: {`);
     this.block(s.body);
     this.line("}");
     this.loops.pop();
-    for (const p of c.pre) this.line(p);
+    if (!first) for (const p of c.pre) this.line(p);
     this.ind--;
     this.line(`} while (${c.text});`);
   }
@@ -4560,14 +4568,21 @@ class Emitter {
       this.line(
         `if (${c.text}) {} else break; // the loop's condition: its statements run on every turn`,
       );
+    // R38's injected bug `r38-step-first` (TMK_TEST_EMIT): the step runs before the body on each turn, where JS runs it
+    // after the body (and after a `continue`)
+    const printStep = (): void => {
+      for (const st of steps) {
+        for (const p of st.pre) this.line(p);
+        if (st.text !== "") this.line(`${this.rcStmt(st.text)};`);
+      }
+    };
+    const stepFirst = this.fault === "r38-step-first";
+    if (stepFirst) printStep();
     this.line(`${cont}: {`);
     this.block(s.body);
     this.line("}");
     this.loops.pop();
-    for (const st of steps) {
-      for (const p of st.pre) this.line(p);
-      if (st.text !== "") this.line(`${this.rcStmt(st.text)};`);
-    }
+    if (!stepFirst) printStep();
     this.ind--;
     this.line("}");
     this.ind--;

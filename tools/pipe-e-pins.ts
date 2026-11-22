@@ -99,6 +99,15 @@ export const PIPE_E_MOVED: Record<string, string> = {
     "since R36 auto class-prints it in rc (TRUSTED_IN trusts rc's class printing, tools/r36-pins.ts): its growth zeroes new room with a byte array's fill, one memset (TMK_TSL_OPT_OFF=bytefill is a store a byte), and with arrays not printed (TMK_EMIT_VECS=0) the printer can't take it there, so it's on the direct route, as it was before R36",
   "corpus/lower/strmap/rc_churn.ts":
     "since R36 auto class-prints it in rc (TRUSTED_IN trusts rc's class printing, tools/r36-pins.ts): its growth zeroes new room with a byte array's fill, one memset (TMK_TSL_OPT_OFF=bytefill is a store a byte), and with arrays not printed (TMK_EMIT_VECS=0) the printer can't take it there, so it's on the direct route, as it was before R36",
+  // R38: `TRUSTED_EXC_IN` rc and `TRUSTED_RESHAPES_IN` rc on, so auto class-prints these in rc.
+  "corpus/lower/fallback/js_throw_through.ts":
+    "since R38 auto class-prints it in rc (TRUSTED_EXC_IN trusts exceptions in rc's class printing, tools/r38-pins.ts), where the byte fill (TMK_TSL_OPT_OFF=bytefill is a store a byte) or arrays in auto (TMK_EMIT_VECS=0, the printer can't take it, so it's on the direct route, as it was before R38) move it, as R36's",
+  "corpus/lower/fallback/throw_value.ts":
+    "since R38 auto class-prints it in rc (TRUSTED_EXC_IN trusts exceptions in rc's class printing, tools/r38-pins.ts), where the byte fill (TMK_TSL_OPT_OFF=bytefill is a store a byte) or arrays in auto (TMK_EMIT_VECS=0, the printer can't take it, so it's on the direct route, as it was before R38) move it, as R36's",
+  "corpus/lower/fallback/try_catch.ts":
+    "since R38 auto class-prints it in rc (TRUSTED_EXC_IN trusts exceptions in rc's class printing, tools/r38-pins.ts), where the byte fill (TMK_TSL_OPT_OFF=bytefill is a store a byte) or arrays in auto (TMK_EMIT_VECS=0, the printer can't take it, so it's on the direct route, as it was before R38) move it, as R36's",
+  "corpus/lower/rc/adv_shared_capture.ts":
+    "since R38 auto class-prints it in rc (TRUSTED_RESHAPES_IN trusts a for step with statements in rc's class printing, tools/r38-pins.ts), where the byte fill (TMK_TSL_OPT_OFF=bytefill is a store a byte) or arrays in auto (TMK_EMIT_VECS=0, the printer can't take it, so it's on the direct route, as it was before R38) move it, as R36's",
 };
 
 /** Lowered programs move only in `leak` and `manual`, where class printing prints them; TSL proper's at the levels listed. */

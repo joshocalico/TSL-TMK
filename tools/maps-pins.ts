@@ -31,6 +31,7 @@ import { r34Moved } from "./r34-moved.ts";
 import { r35Moved } from "./r35-moved.ts";
 import { r36Moved } from "./r36-moved.ts";
 import { r37Moved } from "./r37-moved.ts";
+import { r38Moved } from "./r38-moved.ts";
 import { clsidMoved } from "./clsid-moved.ts";
 import { r1dMoved } from "./r1d-moved.ts";
 import { r1fMoved } from "./r1f-moved.ts";
@@ -406,7 +407,8 @@ export const INT_MOVED: Record<string, string> = {
  * R25's (tools/r25-moved.ts, written by tools/r25-pins.ts); and R26's, R27's, R29's, R30's, R31's, R32's and R33's
  * (tools/r26-moved.ts, r27-moved.ts, r29-moved.ts, r30-moved.ts, r31-moved.ts, r32-moved.ts and r33-moved.ts, written by
  * their pins tools); and R34's and R35's (tools/r34-moved.ts and r35-moved.ts); and R36's and R37's (tools/r36-moved.ts
- * and r37-moved.ts, the latter written by tools/r37-pins.ts, each a route switch's).
+ * and r37-moved.ts, the latter written by tools/r37-pins.ts, each a route switch's); and R38's (tools/r38-moved.ts, written
+ * by tools/r38-pins.ts).
  */
 export const mapsMoved = (k: string): boolean =>
   r33Moved(k) ||
@@ -414,6 +416,7 @@ export const mapsMoved = (k: string): boolean =>
   r35Moved(k) ||
   r36Moved(k) ||
   r37Moved(k) ||
+  r38Moved(k) ||
   r32Moved(k) ||
   r31Moved(k) ||
   r30Moved(k) ||

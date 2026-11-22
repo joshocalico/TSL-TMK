@@ -61,7 +61,8 @@ export async function autoReshapedDual(
 }
 
 /**
- * What `auto` takes reshaped, and by which kinds, compiled only, at -O1 and -O2: none of a kind it doesn't trust, none with
+ * What `auto` takes reshaped, and by which kinds, compiled only, at -O1 and -O2: none of a kind it doesn't trust there (R38:
+ * TRUSTED_RESHAPES, and TRUSTED_RESHAPES_IN's for the mode's printing), none with
  * exceptions in a mode TRUSTED_EXC_IN doesn't trust (R14_TRUST_EXC; R37 trusts `leak` and `manual`), none in a printing
  * TRUSTED_IN doesn't trust (class printing in `leak` and `rc`), and every one phase 1 printed without exceptions gives the
  * direct route's TIR byte for byte, so its machine code too (the speed rule, as a fact). R37: one with exceptions, which
@@ -78,7 +79,7 @@ export async function autoReshapedKinds(
   classes: number;
   exc: number;
 }> {
-  const { lowerFile, TRUSTED_RESHAPES, TRUSTED_IN, TRUSTED_EXC_IN } =
+  const { lowerFile, trustedKinds, TRUSTED_IN, TRUSTED_EXC_IN } =
     await import("../compiler/host/tslc.ts");
   const { PIPE_DIRS } = await import("./pipe-tests.ts");
   const files = R14_DIRS(PIPE_DIRS)
@@ -103,9 +104,11 @@ export async function autoReshapedKinds(
         const rel = relative(ROOT, f);
         const at = `${rel} ${mode} -O${opt}`;
         if (opt === 2) taken[mode] = (taken[mode] ?? 0) + 1;
+        // R38: the kinds trusted in this mode's printing (TRUSTED_RESHAPES, and TRUSTED_RESHAPES_IN's for it)
+        const trusted = trustedKinds(mode, a.tsl.stats.classes === true ? "classes" : "phase1");
         for (const k of Object.keys(a.tsl.stats.reshapedWhy ?? {})) {
           if (opt === 2) kinds[k] = (kinds[k] ?? 0) + 1;
-          if (!TRUSTED_RESHAPES.includes(k)) failures.push(`${at}: taken reshaped by "${k}"`);
+          if (!trusted.includes(k)) failures.push(`${at}: taken reshaped by "${k}"`);
         }
         const withExc =
           a.tsl.stats.rcExc === true || (a.meta as { exc?: unknown }).exc !== undefined;

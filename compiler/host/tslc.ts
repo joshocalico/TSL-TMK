@@ -24,7 +24,7 @@ import { lowerToTir } from "./lower.ts";
 import { placeRegion } from "./region.ts";
 import { markSeparatedFields } from "./separate.ts";
 import { markLinkedChecks } from "./links.ts";
-import { r13Off, r14Off, r36Off, r37Off, r6Off } from "./down-model.ts";
+import { r13Off, r14Off, r36Off, r37Off, r38Off, r6Off } from "./down-model.ts";
 import {
   isArchFile,
   isCoreFile,
@@ -1220,16 +1220,20 @@ export const R14_TRUST_EXC = false;
  * which `auto` doesn't print in those modes), which prints down-exc.ts's flag and its checks as the direct route compiles
  * them; each of the 81 programs it newly takes gives the direct route's machine code byte for byte at -O1 and -O2 in both
  * modes (its TIR at -O1 differs only in where a constant is made, which the backend makes at its use; pipe-d box 93
- * checks every one). Not `rc`: there class printing takes them, and two are over 1.00 at -O2 (exc_exhaust at equal work,
- * 1.009, the freeing of a thrown `Dyn` and its message through @tsl/gc's steps; gen_finally_catch_finally_breakOuter,
- * 1.0002, stores and loads around concatenation calls the allocator takes as cold), and adv_exc_drop isn't measured (the
- * direct route's timing image fills its bulk channel), M5's R37 record.
+ * checks every one).
+ *
+ * R38, `rc`: there class printing takes them. R37 left it off (exc_exhaust 1.009 and gen_finally_catch_finally_breakOuter
+ * 1.0002 at -O2, adv_exc_drop not measured); with R38's coldness (a throw is a way out of the turn, regalloc.ts), rc's
+ * one-unit string answers (emit-rcstr.ts) and the timing image's dumps in its first pass alone, every one of the 76 it
+ * newly takes (app_interp and app_parser by R38's loop kinds too) is no slower at -O1 and -O2, the closest runtime_errors
+ * 0.999 / 0.999 and exc_exhaust 0.950 / 0.999 at equal work (M5's R38 record). `TMK_R38_OFF=exc` takes it back, for
+ * tools/r38-pins.ts; pipe-d box 95 checks it.
  */
 export const TRUSTED_EXC_IN: Record<string, boolean> = {
   strict: false,
   leak: true,
   manual: true,
-  rc: false,
+  rc: true,
 };
 
 /**
@@ -1239,6 +1243,8 @@ export const TRUSTED_EXC_IN: Record<string, boolean> = {
 function excTrusted(memory: string): boolean {
   if ((process.env.TMK_TRUST_IN ?? "").split(",").includes(`${memory}:exc`)) return true;
   if (R14_TRUST_EXC) return true;
+  // R38's `rc` (class printing), with its own switch; R37's `leak` and `manual` (phase 1's printing), with R37's
+  if (memory === "rc") return TRUSTED_EXC_IN.rc === true && !r38Off("exc");
   return TRUSTED_EXC_IN[memory] === true && !r37Off("exc");
 }
 export const TRUSTED_RESHAPES: readonly string[] = [
@@ -1247,6 +1253,33 @@ export const TRUSTED_RESHAPES: readonly string[] = [
   "a conditional's arm with statements",
   "a logical operator's right side with statements",
 ];
+
+/**
+ * R38: kinds trusted in one mode's printing only, besides TRUSTED_RESHAPES: in `rc`'s class printing, a loop whose step or
+ * condition has statements of its own, printed as a loop that runs them on every turn where JS evaluates the step or the
+ * condition (SPEC D62's R38 argument; an injected bug in each caught by the differential, tools/r38-tests.ts). Every
+ * program they newly take there is no slower than the direct route at -O1 and -O2 (M5's R38 record). `TMK_R38_OFF=kinds`
+ * takes them back, for tools/r38-pins.ts.
+ */
+export const TRUSTED_RESHAPES_IN: Record<
+  string,
+  { phase1: readonly string[]; classes: readonly string[] }
+> = {
+  rc: {
+    phase1: [],
+    classes: [
+      "a for step with statements",
+      "a loop condition with statements",
+      "a loop condition with statements (do-while)",
+    ],
+  },
+};
+
+/** The kinds `auto` trusts in a mode's printing: TRUSTED_RESHAPES, and R38's for that printing (TRUSTED_RESHAPES_IN). */
+export function trustedKinds(memory: string, where: "phase1" | "classes"): readonly string[] {
+  const more = r38Off("kinds") ? [] : (TRUSTED_RESHAPES_IN[memory]?.[where] ?? []);
+  return more.length === 0 ? TRUSTED_RESHAPES : [...TRUSTED_RESHAPES, ...more];
+}
 
 /**
  * R14: the printings, by mode, in which `auto` trusts TRUSTED_RESHAPES: where every program and benchmark they touch met the
@@ -1305,7 +1338,11 @@ export function untrustedReshapes(
     return ["exceptions, which auto doesn't take reshaped (R14_TRUST_EXC, TRUSTED_EXC_IN)"];
   const env = process.env.TMK_TRUST_RESHAPES;
   const off = !R14_TRUST || r14Off("trust") || env === "0";
-  const trusted = off ? [] : env !== undefined && env !== "" ? env.split("|") : TRUSTED_RESHAPES;
+  const trusted = off
+    ? []
+    : env !== undefined && env !== ""
+      ? env.split("|")
+      : trustedKinds(memory, where);
   return kinds.filter((k) => !trusted.includes(k));
 }
 

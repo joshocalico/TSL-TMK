@@ -19,6 +19,9 @@ import type { Func, Global, Module, TirType } from "../compiler/tir/ir.ts";
 
 export type Leaf = number | bigint;
 
+/** R38: a timing image's global, 0 through its first pass and 1 after it: a case's dumps are that pass's alone. */
+export const TIMING_QUIET = "__tp_quiet";
+
 export class Driver {
   m: Module;
   funcs: Func[] = [];
@@ -112,6 +115,8 @@ export class Driver {
       // the counter, each pass's sum printed `TMK:TP <ticks>`, and the counter's frequency `TMK:F <hz>`. A timing image
       // only: its results are the first pass's, and a later pass runs on the module state the one before it left.
       this.globals.push({ name: "__tp_sum", size: 8, align: 8, section: "data" });
+      // R38: 1 from the end of the first pass, so each case's `after` dumps memory in that pass alone (native-exec.ts)
+      this.globals.push({ name: TIMING_QUIET, size: 4, align: 4, section: "data" });
       const sum = b.global("__tp_sum");
       this.puts(b, "TMK:F ");
       b.call("__rt_dec", [b.intrinsic("native.frequency", [], ["i64"])[0]!]);
@@ -134,6 +139,7 @@ export class Driver {
         this.puts(b, "TMK:TP ");
         b.call("__rt_dec", [b.load("i64", sum)]);
         b.call("__rt_nl", []);
+        if (p === 0) b.store("i32", b.global(TIMING_QUIET), b.i32(1));
       }
     }
     b.ret();

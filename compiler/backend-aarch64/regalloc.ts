@@ -693,13 +693,41 @@ export function coldCalls(f: Func): Set<Instr> {
     cfg.preds[i]!.length > 0 &&
     cfg.preds[i]!.every((p) => f.blocks[p]!.term.k === "brif");
   const rets = all.some((i) => !quick(i)) ? all.filter((i) => !quick(i)) : all;
+  // R38: a throw is a way out of the turn. A block that sets the lowering's exception flag (`__exc_on`, set to 1) goes on
+  // only to a handler or out of the function, so the ways on from it are left out of "every turn" and "every way out":
+  // a call is hot where it's on every way that doesn't throw. Without this, a throw inlined into a loop (the printed
+  // `strConcat`'s RangeError) met the caller's flag test, whose untaken side reached the loop's back edge, so every
+  // call after it was cold (gen_finally_catch_finally_breakOuter, R37). Nothing changes in a function with no such block.
+  const thrown = r38Off("cold") ? null : throwBlocks(f);
+  const kept = thrown !== null && thrown.size > 0 ? keptDominators(f, index, thrown) : null;
+  const keptDominates = (x: number, y0: number): boolean => {
+    let y = y0;
+    for (let guard = 0; guard <= nb; guard++) {
+      if (y === x) return true;
+      const up = kept![y]!;
+      if (up < 0 || up === y) return false;
+      y = up;
+    }
+    return false;
+  };
+  const reached = (i: number): boolean => kept !== null && kept[i]! >= 0;
   f.blocks.forEach((b, i) => {
     if (!cfg.idom.has(i)) return;
     let inner: { body: Set<number>; latches: number[] } | null = null;
     for (const l of loops.values())
       if (l.body.has(i) && (inner === null || l.body.size < inner.body.size)) inner = l;
     const every = inner !== null ? inner.latches : rets;
-    const onEvery = every.every((x) => dominates(i, x));
+    let onEvery: boolean;
+    if (kept === null) onEvery = every.every((x) => dominates(i, x));
+    else {
+      // R38: reached only by way of a throw, it's on no way that doesn't throw: cold
+      const ways = every.filter(reached);
+      onEvery = !reached(i)
+        ? false
+        : ways.length > 0
+          ? ways.every((x) => keptDominates(i, x))
+          : every.every((x) => dominates(i, x));
+    }
     for (const ins of b.instrs) {
       if (!isCallOp(ins)) continue;
       const n = ins.ops[0];
@@ -708,6 +736,95 @@ export function coldCalls(f: Func): Set<Instr> {
     }
   });
   return out;
+}
+
+/** R38: the blocks that set the lowering's exception flag: a store of 1 to `__exc_on`, both made in the block. */
+function throwBlocks(f: Func): Set<number> {
+  const out = new Set<number>();
+  f.blocks.forEach((b, i) => {
+    const flag = new Set<number>();
+    const one = new Set<number>();
+    for (const ins of b.instrs) {
+      const o = ins.ops[0];
+      if (ins.op === "globaladdr" && o?.t === "sym" && o.name === "__exc_on") flag.add(ins.res[0]!);
+      else if (ins.op.startsWith("iconst.") && o?.t === "i" && o.val === 1n) one.add(ins.res[0]!);
+      else if (ins.op.startsWith("store.")) {
+        const [a, v] = ins.ops;
+        if (a?.t === "v" && v?.t === "v" && flag.has(a.id) && one.has(v.id)) out.add(i);
+      }
+    }
+  });
+  return out;
+}
+
+/**
+ * R38: each block's immediate dominator, by position, in the function's graph without the edges out of `cut` (-1 where
+ * that graph doesn't reach it): Cooper, Harvey and Kennedy's iteration in reverse postorder, as buildCfg's.
+ */
+function keptDominators(f: Func, index: Map<number, number>, cut: Set<number>): Int32Array {
+  const n = f.blocks.length;
+  const succ = f.blocks.map((b, i) =>
+    cut.has(i) ? [] : edgesOf(b.term).map((e) => index.get(e.block)!),
+  );
+  const seen = new Uint8Array(n);
+  const post: number[] = [];
+  const stack: { b: number; k: number }[] = [{ b: 0, k: 0 }];
+  seen[0] = 1;
+  while (stack.length > 0) {
+    const top = stack[stack.length - 1]!;
+    const s = succ[top.b]!;
+    if (top.k < s.length) {
+      const to = s[top.k++]!;
+      if (seen[to] === 0) {
+        seen[to] = 1;
+        stack.push({ b: to, k: 0 });
+      }
+    } else {
+      post.push(top.b);
+      stack.pop();
+    }
+  }
+  const rpo = post.reverse();
+  const at = new Int32Array(n).fill(-1);
+  rpo.forEach((b, i) => (at[b] = i));
+  const preds: number[][] = f.blocks.map(() => []);
+  for (const b of rpo) for (const to of succ[b]!) preds[to]!.push(b);
+  const dom = new Int32Array(n).fill(-1);
+  dom[0] = 0;
+  const meet = (a0: number, b0: number): number => {
+    let a = a0;
+    let b = b0;
+    while (a !== b) {
+      while (at[a]! > at[b]!) a = dom[a]!;
+      while (at[b]! > at[a]!) b = dom[b]!;
+    }
+    return a;
+  };
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let i = 1; i < rpo.length; i++) {
+      const b = rpo[i]!;
+      let best = -1;
+      for (const p of preds[b]!) {
+        if (dom[p]! < 0) continue;
+        best = best < 0 ? p : meet(p, best);
+      }
+      if (best >= 0 && dom[b] !== best) {
+        dom[b] = best;
+        changed = true;
+      }
+    }
+  }
+  return dom;
+}
+
+/**
+ * R38's coldness put back as R37 had it, for tools/r38-pins.ts' timing (`TMK_R38_OFF=cold`): the ways on from a throw count
+ * as turns of the loop and ways out of the function. Machine code only.
+ */
+export function r38Off(part: string): boolean {
+  return (globalThis.process?.env?.TMK_R38_OFF ?? "").split(",").includes(part);
 }
 
 /**

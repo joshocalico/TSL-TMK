@@ -233,6 +233,15 @@ export function r37Off(part: "exc"): boolean {
 }
 
 /**
+ * R38: whether a part of R38 is turned off by TMK_R38_OFF, for computing what it moved (tools/r38-pins.ts): `exc`, `auto`
+ * not taking a program with exceptions in `rc` (TRUSTED_EXC_IN, tslc.ts), as before R38; `kinds`, `rc`'s class printing
+ * trusting no kind but TRUSTED_RESHAPES, as before R38. (`cold`, the backend's, is read by regalloc.ts itself.)
+ */
+export function r38Off(part: string): boolean {
+  return (process.env.TMK_R38_OFF ?? "").split(",").includes(part);
+}
+
+/**
  * R17: whether a part of R17 is turned off by TMK_R17_OFF, for computing what it moved (tools/r17-pins.ts): `pop`, the
  * lowering's pop clearing the slot it drops in an array of references in every mode (before R17, only in `rc`); `jsrt` and
  * `holes`, the printing's JsArray constructor (emit-tsl.ts).

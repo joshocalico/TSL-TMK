@@ -165,6 +165,15 @@ export const PIPE_C_MOVED: Record<string, string> = {
     "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction)",
   "corpus/std/word_count.ts":
     "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction)",
+  // R38: `TRUSTED_EXC_IN` rc and `TRUSTED_RESHAPES_IN` rc on, so auto class-prints these in rc, where zeroed construction applies.
+  "corpus/lower/fallback/js_throw_through.ts":
+    "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction); in rc, where auto class-prints it since exceptions trusted in rc's class printing since R38 (TRUSTED_EXC_IN, tools/r38-pins.ts)",
+  "corpus/lower/fallback/throw_value.ts":
+    "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction); in rc, where auto class-prints it since exceptions trusted in rc's class printing since R38 (TRUSTED_EXC_IN, tools/r38-pins.ts)",
+  "corpus/lower/fallback/try_catch.ts":
+    "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction); in rc, where auto class-prints it since exceptions trusted in rc's class printing since R38 (TRUSTED_EXC_IN, tools/r38-pins.ts)",
+  "corpus/lower/rc/adv_shared_capture.ts":
+    "a field initialiser of zero is not stored by a constructor all of whose objects start zeroed, and a constructor left empty is neither called nor emitted (SPEC 3.5, zeroed construction); in rc, where auto class-prints it since a for step with statements trusted in rc's class printing since R38 (TRUSTED_RESHAPES_IN, tools/r38-pins.ts)",
 };
 
 /** A lowered program's pin moves only where class printing takes it, `leak` and `manual`; a TSL program's at any level. */

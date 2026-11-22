@@ -259,6 +259,10 @@ export async function defineLangA(M: MilestoneDef): Promise<void> {
     for (const f of faults) {
       const was = process.env.TMK_TEST_EXC;
       process.env.TMK_TEST_EXC = f.env;
+      // R38: these bugs are down.ts's and down-exc.ts's, which in rc only the direct route compiles now that auto takes
+      // a program with exceptions through class printing there (TRUSTED_EXC_IN rc): the corpus is built through it by name
+      const wasRoute = process.env.TMK_ROUTE;
+      if (f.how === "corpus") process.env.TMK_ROUTE = "direct";
       let caught = false;
       let by = "";
       try {
@@ -274,6 +278,8 @@ export async function defineLangA(M: MilestoneDef): Promise<void> {
       } finally {
         if (was === undefined) delete process.env.TMK_TEST_EXC;
         else process.env.TMK_TEST_EXC = was;
+        if (wasRoute === undefined) delete process.env.TMK_ROUTE;
+        else process.env.TMK_ROUTE = wasRoute;
       }
       rows.push(`${f.name}: ${caught ? "caught" : "MISSED"} (${by})`);
       if (!caught) failures.push(`missed: ${f.name}`);

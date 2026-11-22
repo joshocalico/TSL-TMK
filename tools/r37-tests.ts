@@ -84,15 +84,19 @@ export async function r37Shapes(): Promise<{
   let sameCode = 0;
   for (const m of R37_MODES)
     if (TRUSTED_EXC_IN[m] !== true) failures.push(`TRUSTED_EXC_IN doesn't trust ${m}`);
-  for (const m of ["rc", "strict"])
-    if (TRUSTED_EXC_IN[m] === true) failures.push(`TRUSTED_EXC_IN trusts ${m}, which R37 didn't`);
+  // R38 trusts `rc` (class printing, pipe-d box 95's, tools/r38-tests.ts); `strict` stays untrusted
+  if (TRUSTED_EXC_IN.strict === true)
+    failures.push("TRUSTED_EXC_IN trusts strict, which R37 didn't");
   const files = await r37Files();
   const hash = (b: Uint8Array): string => createHash("sha256").update(b).digest("hex");
   const hasExc = (a: ReturnType<typeof lowerFile>): boolean =>
     a.tsl?.stats.rcExc === true || (a.meta as { exc?: unknown } | null)?.exc !== undefined;
   const isTaken = (a: ReturnType<typeof lowerFile>): boolean =>
     a.tsl !== undefined && a.tsl.file !== "" && a.tsl.stats.restructured > 0;
-  for (const mode of ["leak", "manual", "rc"] as PipeMode[])
+  // R38: with TRUSTED_EXC_IN's rc on, what's taken in rc is class printing's, box 95's (its builds there are slow ones)
+  const modes: PipeMode[] =
+    TRUSTED_EXC_IN.rc === true ? ["leak", "manual"] : ["leak", "manual", "rc"];
+  for (const mode of modes)
     for (const f of files)
       for (const opt of [1, 2] as const) {
         let a: ReturnType<typeof lowerFile>;

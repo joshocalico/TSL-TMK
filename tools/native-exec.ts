@@ -13,7 +13,7 @@ export type ImageLinker = (inp: ImageInput) => ImageOutput;
 import type { BulkFault } from "../compiler/backend-aarch64/rt-tir.ts";
 import { arrayDigest, canon, checkPin, decodeArg, isTypedArray, type Json } from "./canon.ts";
 import type { CaseResult } from "./corpus-exec.ts";
-import { Driver, type Leaf } from "./native-driver.ts";
+import { Driver, TIMING_QUIET, type Leaf } from "./native-driver.ts";
 import {
   ERROR_NAMES,
   strictCanon,
@@ -1101,6 +1101,18 @@ function buildDownImage0(
     run.ret();
     const after = new FuncBuilder(`__after_${i}`, [], []);
     const quiet = rcHarness.noDump === true && ![...desc.params, desc.ret].some(touchesMemory);
+    // R38: a timing image (R14) dumps memory after its first pass alone, whose results are the ones it gives: a later pass's
+    // dumps were the same arena over again, which nothing reads, and they filled the RAM channel (adv_exc_drop's frameDrop,
+    // whose string result dumps the direct route's whole arena, a million nodes in it, 88 MB a pass). Outside the timed
+    // region either way; an image that isn't a timing image is as it was.
+    let dumped: ReturnType<typeof after.block> | null = null;
+    if ((rcHarness.timePasses ?? 0) > 0) {
+      const loud = after.block();
+      dumped = after.block();
+      const later = after.load("i32", after.global(TIMING_QUIET));
+      after.brif(after.op("icmp.eq.i32", [later, after.i32(0)], "i32"), loud, dumped);
+      after.at(loud);
+    }
     const baseVal = after.load("ptr", after.global("__arena_base"));
     const topVal = after.load("ptr", after.global("__arena_top"));
     if (!quiet) after.call("__rt_dump", [baseVal, topVal]);
@@ -1114,6 +1126,10 @@ function buildDownImage0(
       if (g.size === 0) continue;
       const a = after.global(g.name);
       after.call("__rt_dump", [a, after.at0(a, g.size)]);
+    }
+    if (dumped !== null) {
+      after.br(dumped);
+      after.at(dumped);
     }
     if (isRc) {
       // The caller lets go of its result and of what it placed. A trapped case has no result (SPEC 4.5, D36).

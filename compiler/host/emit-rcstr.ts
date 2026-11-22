@@ -153,6 +153,14 @@ function r35Off(part: string): boolean {
   return (process.env.TMK_R35_OFF ?? "").split(",").includes(part);
 }
 
+/**
+ * R38's one-unit answers (`compare` and `jsStrEq` between two strings of one unit each: a character against a one-character
+ * literal, say, which the direct route answers in line): `TMK_R38_OFF=units` puts them back, for tools/r38-pins.ts.
+ */
+function r38Off(part: string): boolean {
+  return (process.env.TMK_R38_OFF ?? "").split(",").includes(part);
+}
+
 /** The string runtime's text: the two classes and the functions the printing calls in place of JsString's statics. */
 export function rcStrRuntime(key: [string, string] | null, join3 = false): string[] {
   const off = r21UnitsOff();
@@ -340,6 +348,15 @@ function jsStrGrown(a: JsStr, b: JsStr, n: i32): JsStr {
     }
   }
 `;
+  // R38: two strings of one unit each (a character read from a string against a one-character literal) answered in line,
+  // by their units, where jsStrSame's call was most of the cost (app_parser's lexer, 638 calls a run)
+  const eqOne = r38Off("units")
+    ? ""
+    : "  if (a.n === 1) return a.unit(0) === b.unit(0); // R38: one unit each\n";
+  // R38: the same for `compare`: one unit each, their difference, with no runs made (`r38-compare-one` swaps them)
+  const compareOne = r38Off("units")
+    ? ""
+    : `    if (this.n === 1 && b.n === 1) return ${fault() === "r38-compare-one" ? "b.unit(0) - this.unit(0)" : "this.unit(0) - b.unit(0)"}; // R38: one unit each\n`;
   // R25: equality's quick answers (the same string, one missing, the lengths differ) inlined where it's asked, the units
   // compared out of line
   const eqText = r25
@@ -349,7 +366,7 @@ function jsStrEq(a: JsStr | null, b: JsStr | null): bool {
   if (a === b) return true;
   if (a === null || b === null) return false;
   if (a.n !== b.n) return false;
-  return jsStrSame(a, b);
+${eqOne}  return jsStrSame(a, b);
 }
 
 /** Whether two strings of the same length have the same units. */
@@ -511,7 +528,7 @@ ${subBody}
 
 ${indexFromText}  /** By code unit, as JS orders strings: negative, zero or positive. */
   compare(b: JsStr): i32 {
-    const ua = this.all();
+${compareOne}    const ua = this.all();
     const ub = b.all();
     const la = this.n;
     const lb = b.n;
